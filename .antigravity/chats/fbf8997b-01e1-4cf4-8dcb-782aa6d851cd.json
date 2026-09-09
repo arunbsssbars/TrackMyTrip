@@ -1,0 +1,33 @@
+{
+  "sessionId": "fbf8997b-01e1-4cf4-8dcb-782aa6d851cd",
+  "name": "TripTrackerAgent",
+  "createdAt": "2026-08-28T18:31:15.841Z",
+  "filename": "fbf8997b-01e1-4cf4-8dcb-782aa6d851cd.json",
+  "geminiStarted": true,
+  "messages": [
+    {
+      "id": "39e5923f-c89c-48c1-87dd-89c5f89d9442",
+      "role": "user",
+      "content": "Fix the floating button at lower right, it text is coming out",
+      "status": "pending",
+      "model": "gemini-2.5-flash",
+      "client_type": "gemini-bridge",
+      "parent_message_id": null,
+      "created_at": "2026-08-28T18:33:16.761+00:00",
+      "sender": "ios",
+      "is_cancelled": false
+    },
+    {
+      "id": "37fc4ac6-0bfe-4460-9600-8cc967a4f372",
+      "role": "agent",
+      "content": "node:internal/modules/cjs/loader:1423\r\n  throw err;\r\n  ^\r\n\r\nError: Cannot find module 'D:\\Program\\Antigravity\\TripTrackerApp\\node_modules\\npm\\bin\\npm-prefix.js'\r\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1420:15)\r\n    at defaultResolveImpl (node:internal/modules/cjs/loader:1058:19)\r\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1063:22)\r\n    at Module._load (node:internal/modules/cjs/loader:1226:37)\r\n    at TracingChannel.traceSync (node:diagnostics_channel:328:14)\r\n    at wrapModuleLoad (node:internal/modules/cjs/loader:244:24)\r\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\r\n    at node:internal/main/run_main_module:33:47 {\r\n  code: 'MODULE_NOT_FOUND',\r\n  requireStack: []\r\n}\r\n\r\nNode.js v24.10.0\r\nnode:internal/modules/cjs/loader:1423\r\n  throw err;\r\n  ^\r\n\r\nError: Cannot find module 'D:\\Program\\Antigravity\\TripTrackerApp\\node_modules\\npm\\bin\\npx-cli.js'\r\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1420:15)\r\n    at defaultResolveImpl (node:internal/modules/cjs/loader:1058:19)\r\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1063:22)\r\n    at Module._load (node:internal/modules/cjs/loader:1226:37)\r\n    at TracingChannel.traceSync (node:diagnostics_channel:328:14)\r\n    at wrapModuleLoad (node:internal/modules/cjs/loader:244:24)\r\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\r\n    at node:internal/main/run_main_module:33:47 {\r\n  code: 'MODULE_NOT_FOUND',\r\n  requireStack: []\r\n}\r\n\r\nNode.js v24.10.0",
+      "status": "error",
+      "model": "gemini-2.5-flash",
+      "client_type": "gemini-bridge",
+      "parent_message_id": "39e5923f-c89c-48c1-87dd-89c5f89d9442",
+      "created_at": "2026-08-28T18:33:15.652Z",
+      "sender": "macOS",
+      "is_cancelled": false
+    }
+  ]
+}

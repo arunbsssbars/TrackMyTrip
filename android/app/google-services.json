@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1098964421425",
+    "project_id": "triptracker-app-2026",
+    "storage_bucket": "triptracker-app-2026.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1098964421425:android:15105aa6eaf3cbccaa3e10",
+        "android_client_info": {
+          "package_name": "com.triptracker.trip_tracker_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDPQPC3vumqHZjum0dTx12m6IJWjWffhxQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
