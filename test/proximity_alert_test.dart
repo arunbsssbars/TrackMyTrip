@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:trip_tracker_app/core/database/app_database.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trip_tracker_app/core/services/local_storage_service.dart';
 import 'package:trip_tracker_app/core/services/proximity_alert_service.dart';
@@ -44,10 +46,23 @@ void main() {
   });
 
   group('Phase 7: LocalStorageService Alert Persistence Tests', () {
+    late SharedPreferences prefs;
+    late AppDatabase appDb;
+
+    setUp(() async {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      appDb = await AppDatabase.open(customPath: inMemoryDatabasePath);
+    });
+
+    tearDown(() async {
+      await appDb.database.close();
+    });
+
     test('Alerts can be saved, retrieved, marked as read, and cleared', () async {
       SharedPreferences.setMockInitialValues({});
-      final prefs = await SharedPreferences.getInstance();
-      final storage = LocalStorageService(prefs);
+      prefs = await SharedPreferences.getInstance();
+      final storage = await LocalStorageService.init(prefs: prefs, database: appDb);
 
       expect(storage.getAllAlerts(), isEmpty);
 
@@ -98,7 +113,7 @@ void main() {
     test('Detects companion straying beyond 1.5 km threshold', () async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
-      final storage = LocalStorageService(prefs);
+      final storage = await LocalStorageService.init(prefs: prefs, database: await AppDatabase.open(customPath: inMemoryDatabasePath));
       final container = ProviderContainer(
         overrides: [
           localStorageServiceProvider.overrideWithValue(storage),
@@ -144,7 +159,7 @@ void main() {
     test('Detects pitstop arrival within 350m geofence radius', () async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
-      final storage = LocalStorageService(prefs);
+      final storage = await LocalStorageService.init(prefs: prefs, database: await AppDatabase.open(customPath: inMemoryDatabasePath));
       final container = ProviderContainer(
         overrides: [
           localStorageServiceProvider.overrideWithValue(storage),
@@ -198,7 +213,7 @@ void main() {
     test('Emergency SOS alert broadcasts with critical urgency', () async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
-      final storage = LocalStorageService(prefs);
+      final storage = await LocalStorageService.init(prefs: prefs, database: await AppDatabase.open(customPath: inMemoryDatabasePath));
       final container = ProviderContainer(
         overrides: [
           localStorageServiceProvider.overrideWithValue(storage),

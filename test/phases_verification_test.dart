@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:trip_tracker_app/core/database/app_database.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trip_tracker_app/core/services/local_storage_service.dart';
 import 'package:trip_tracker_app/core/services/user_service.dart';
@@ -93,7 +95,9 @@ void main() {
     test('Mutations can be enqueued, retrieved, and removed in LocalStorageService', () async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
-      final storage = LocalStorageService(prefs);
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      final storage = await LocalStorageService.init(prefs: prefs, database: await AppDatabase.open(customPath: inMemoryDatabasePath));
 
       expect(storage.getPendingMutations(), isEmpty);
 

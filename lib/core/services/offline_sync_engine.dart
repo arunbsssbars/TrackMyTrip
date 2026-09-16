@@ -1,27 +1,20 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/sync_mutation.dart';
 import '../../providers/trip_provider.dart';
 import 'local_storage_service.dart';
+import 'trip_share_service.dart';
+import 'cloud_trip_sync_service.dart';
 
 class OfflineSyncEngine extends ChangeNotifier {
   final LocalStorageService _storage;
   bool _isSyncing = false;
   DateTime? _lastSyncedTime;
-  String _serverHost = '172.20.10.11:8086'; // Host Wi-Fi IP default
   String? _lastSyncError;
-
-  // Candidate hosts to try if device is connected to local Wi-Fi, Tailscale, or emulator
-  static const List<String> defaultCandidates = [
-    '172.20.10.11:8086',
-    '100.98.130.99:8086',
-    '10.0.2.2:8086',
-    '127.0.0.1:8086',
-  ];
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   OfflineSyncEngine(this._storage) {
     _initAutoSync();
@@ -30,16 +23,10 @@ class OfflineSyncEngine extends ChangeNotifier {
   bool get isSyncing => _isSyncing;
   DateTime? get lastSyncedTime => _lastSyncedTime;
   String? get lastSyncError => _lastSyncError;
-  String get serverHost => _serverHost;
   int get pendingCount => _storage.getPendingMutations().where((m) => m.status == SyncStatus.pending).length;
   List<SyncMutation> get pendingMutations => _storage.getPendingMutations();
 
   Timer? _autoSyncTimer;
-
-  void updateServerHost(String host) {
-    _serverHost = host;
-    notifyListeners();
-  }
 
   void _initAutoSync() {
     // Periodically check if there are pending offline mutations to flush
@@ -105,7 +92,7 @@ class OfflineSyncEngine extends ChangeNotifier {
     await resolveAllLocally();
   }
 
-  /// Manually or automatically flushes all pending mutations to the sync server
+  /// Manually or automatically flushes all pending mutations to the sync server (Firebase)
   Future<bool> syncPendingMutationsNow() async {
     if (_isSyncing) return false;
 
@@ -119,64 +106,46 @@ class OfflineSyncEngine extends ChangeNotifier {
     _lastSyncError = null;
     notifyListeners();
 
-    // Determine working host among candidates
-    String activeHost = _serverHost;
-    final candidates = [
-      _serverHost,
-      ...defaultCandidates.where((c) => c != _serverHost),
-    ];
-
-    for (final host in candidates) {
-      try {
-        final probeUri = Uri.parse('http://$host/api/health');
-        final probeRes = await http.get(probeUri).timeout(const Duration(milliseconds: 1500));
-        if (probeRes.statusCode < 500) {
-          activeHost = host;
-          _serverHost = host;
-          break;
-        }
-      } catch (_) {
-        // Probe next candidate host
-      }
-    }
-
     bool allSuccess = true;
+    final tripIdsToSync = pending.map((m) => m.tripId).toSet();
 
-    for (final mutation in pending) {
+    for (final tripId in tripIdsToSync) {
       try {
-        final url = Uri.parse('http://$activeHost/api/rooms/${mutation.tripId}');
-        final res = await http.post(
-          url,
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'mutationId': mutation.id,
-            'action': mutation.action.name,
-            'entityType': mutation.entityType,
-            'entityId': mutation.entityId,
-            'payload': mutation.payload,
-            'timestamp': mutation.createdAt.toIso8601String(),
-          }),
-        ).timeout(const Duration(seconds: 3));
-
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          await _storage.removeMutation(mutation.id);
-        } else {
-          allSuccess = false;
+        final trips = await _storage.db.getTrips();
+        final tripIndex = trips.indexWhere((t) => t.id == tripId);
+        if (tripIndex != -1) {
+          final trip = trips[tripIndex];
+          final package = TripPackage(
+            trip: trip,
+            stoppages: _storage.getAllStoppages().where((s) => s.tripId == tripId).toList(),
+            expenses: _storage.getAllExpenses().where((e) => e.tripId == tripId).toList(),
+            memories: _storage.getAllMemories().where((m) => m.tripId == tripId).toList(),
+            settlements: _storage.getAllSettlements().where((s) => s.tripId == tripId).toList(),
+          );
+          final success = await CloudTripSyncService.publishTrip(package);
+          if (!success) {
+            allSuccess = false;
+          }
         }
-      } catch (_) {
-        // Network unavailable or server offline (offline mode)
+      } catch (e) {
         allSuccess = false;
-        break;
+        if (kDebugMode) {
+          print('Failed to sync trip $tripId: $e');
+        }
       }
     }
 
-    _isSyncing = false;
     if (allSuccess) {
+      for (final mutation in pending) {
+        await _storage.removeMutation(mutation.id);
+      }
       _lastSyncedTime = DateTime.now();
       _lastSyncError = null;
     } else {
-      _lastSyncError = 'Sync server unreachable ($activeHost). All records remain 100% saved on this device.';
+      _lastSyncError = 'Firebase unreachable. All records remain 100% saved on this device.';
     }
+    
+    _isSyncing = false;
     notifyListeners();
     return allSuccess;
   }
@@ -191,4 +160,3 @@ final pendingMutationsCountProvider = Provider<int>((ref) {
   final engine = ref.watch(offlineSyncEngineProvider);
   return engine.pendingCount;
 });
-

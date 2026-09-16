@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../database/app_database.dart';
@@ -17,22 +17,10 @@ import '../../models/trip_invitation.dart';
 import 'trip_share_service.dart';
 
 class LocalStorageService {
-  static const String _tripsKey = 'trips_data_v1';
-  static const String _stoppagesKey = 'stoppages_data_v1';
-  static const String _expensesKey = 'expenses_data_v1';
-  static const String _memoriesKey = 'memories_data_v1';
-  static const String _settlementsKey = 'settlements_data_v1';
-  static const String _auditLogsKey = 'audit_logs_data_v1';
-  static const String _mutationsKey = 'sync_mutations_v1';
-  static const String _alertsKey = 'proximity_alerts_v1';
-  static const String _authSessionKey = 'auth_session_v1';
-  static const String _registeredUsersKey = 'registered_users_v1';
-  static const String _invitationsKey = 'trip_invitations_v1';
   static const String _initializedKey = 'app_seeded_v1';
-  static const String _migratedToSqliteKey = 'sqlite_migrated_v1';
 
   final SharedPreferences _prefs;
-  final AppDatabase? _db;
+  final AppDatabase _db;
 
   // In-memory caches to keep synchronous provider getters 100% responsive and synchronous
   List<Trip> _cachedTrips = [];
@@ -47,191 +35,35 @@ class LocalStorageService {
   List<Map<String, dynamic>> _cachedRegisteredUsers = [];
   AuthUser? _cachedAuthUser;
 
-  LocalStorageService(this._prefs, [this._db]) {
-    _loadSyncFromMemoryOrPrefs();
-  }
+  LocalStorageService(this._prefs, this._db);
 
-  AppDatabase? get db => _db;
-
-  void _loadSyncFromMemoryOrPrefs() {
-    // 1. Trips
-    final tripsStr = _prefs.getString(_tripsKey);
-    if (tripsStr != null) {
-      try {
-        final List<dynamic> list = jsonDecode(tripsStr);
-        _cachedTrips = list.map((e) => Trip.fromJson(e as Map<String, dynamic>)).toList();
-      } catch (_) {}
-    }
-
-    // 2. Stoppages
-    final stopStr = _prefs.getString(_stoppagesKey);
-    if (stopStr != null) {
-      try {
-        final List<dynamic> list = jsonDecode(stopStr);
-        _cachedStoppages = list.map((e) => Stoppage.fromJson(e as Map<String, dynamic>)).toList();
-      } catch (_) {}
-    }
-
-    // 3. Expenses
-    final expStr = _prefs.getString(_expensesKey);
-    if (expStr != null) {
-      try {
-        final List<dynamic> list = jsonDecode(expStr);
-        _cachedExpenses = list.map((e) => Expense.fromJson(e as Map<String, dynamic>)).toList();
-      } catch (_) {}
-    }
-
-    // 4. Memories
-    final memStr = _prefs.getString(_memoriesKey);
-    if (memStr != null) {
-      try {
-        final List<dynamic> list = jsonDecode(memStr);
-        _cachedMemories = list.map((e) => Memory.fromJson(e as Map<String, dynamic>)).toList();
-      } catch (_) {}
-    }
-
-    // 5. Settlements
-    final setStr = _prefs.getString(_settlementsKey);
-    if (setStr != null) {
-      try {
-        final List<dynamic> list = jsonDecode(setStr);
-        _cachedSettlements = list.map((e) => Settlement.fromJson(e as Map<String, dynamic>)).toList();
-      } catch (_) {}
-    }
-
-    // 6. Audit Logs
-    final auditStr = _prefs.getString(_auditLogsKey);
-    if (auditStr != null) {
-      try {
-        final List<dynamic> list = jsonDecode(auditStr);
-        _cachedAuditLogs = list.map((e) => TripAuditLog.fromJson(e as Map<String, dynamic>)).toList();
-      } catch (_) {}
-    }
-
-    // 7. Mutations
-    final mutStr = _prefs.getString(_mutationsKey);
-    if (mutStr != null) {
-      try {
-        final List<dynamic> list = jsonDecode(mutStr);
-        _cachedMutations = list.map((e) => SyncMutation.fromJson(e as Map<String, dynamic>)).toList();
-      } catch (_) {}
-    }
-
-    // 8. Alerts
-    final alertStr = _prefs.getString(_alertsKey);
-    if (alertStr != null) {
-      try {
-        final List<dynamic> list = jsonDecode(alertStr);
-        _cachedAlerts = list.map((e) => ProximityAlert.fromJson(e as Map<String, dynamic>)).toList();
-      } catch (_) {}
-    }
-
-    // 9. Auth Session
-    final authStr = _prefs.getString(_authSessionKey);
-    if (authStr != null) {
-      try {
-        _cachedAuthUser = AuthUser.fromJson(jsonDecode(authStr) as Map<String, dynamic>);
-      } catch (_) {}
-    }
-
-    // 10. Registered Users
-    final regStr = _prefs.getString(_registeredUsersKey);
-    if (regStr != null) {
-      try {
-        final List<dynamic> list = jsonDecode(regStr);
-        _cachedRegisteredUsers = list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-      } catch (_) {}
-    }
-
-    // 11. Invitations
-    final invStr = _prefs.getString(_invitationsKey);
-    if (invStr != null) {
-      try {
-        final List<dynamic> list = jsonDecode(invStr);
-        _cachedInvitations = list.map((e) => TripInvitation.fromJson(e as Map<String, dynamic>)).toList();
-      } catch (_) {}
-    }
-  }
+  AppDatabase get db => _db;
 
   static Future<LocalStorageService> init({AppDatabase? database, SharedPreferences? prefs}) async {
     final effectivePrefs = prefs ?? await SharedPreferences.getInstance();
-    AppDatabase? effectiveDb = database;
-
-    if (effectiveDb == null) {
-      try {
-        effectiveDb = await AppDatabase.open();
-      } catch (_) {
-        // Fallback for non-sqlite or test environments without sqflite initialized
-      }
-    }
+    AppDatabase effectiveDb = database ?? await AppDatabase.open();
 
     final service = LocalStorageService(effectivePrefs, effectiveDb);
-    await service._initDatabaseAndMigrate();
+    await service._initDatabase();
     return service;
   }
 
-  Future<void> _initDatabaseAndMigrate() async {
-    if (_db != null) {
-      final isMigrated = _prefs.getBool(_migratedToSqliteKey) ?? false;
-      if (!isMigrated) {
-        await _migrateLegacyPreferencesToSqlite();
-        await _prefs.setBool(_migratedToSqliteKey, true);
-      }
-
-      // Populate memory cache from SQLite
-      _cachedTrips = await _db.getTrips();
-      _cachedStoppages = await _db.getAllStoppages();
-      _cachedExpenses = await _db.getAllExpenses();
-      _cachedMemories = await _db.getAllMemories();
-      _cachedSettlements = await _db.getAllSettlements();
-      _cachedAuditLogs = await _db.getAllAuditLogs();
-      _cachedMutations = await _db.getPendingMutations();
-      _cachedAlerts = await _db.getAllAlerts();
-      _cachedAuthUser = await _db.getAuthSession();
-      _cachedRegisteredUsers = await _db.getRegisteredUsers();
-      _cachedInvitations = await _db.getAllInvitations();
-    }
+  Future<void> _initDatabase() async {
+    // Populate memory cache from SQLite
+    _cachedTrips = await _db.getTrips();
+    _cachedStoppages = await _db.getAllStoppages();
+    _cachedExpenses = await _db.getAllExpenses();
+    _cachedMemories = await _db.getAllMemories();
+    _cachedSettlements = await _db.getAllSettlements();
+    _cachedAuditLogs = await _db.getAllAuditLogs();
+    _cachedMutations = await _db.getPendingMutations();
+    _cachedAlerts = await _db.getAllAlerts();
+    _cachedAuthUser = await _db.getAuthSession();
+    _cachedRegisteredUsers = await _db.getRegisteredUsers();
+    _cachedInvitations = await _db.getAllInvitations();
 
     if (_cachedTrips.isEmpty && _prefs.getBool(_initializedKey) != true) {
       await _seedInitialDataIfEmpty();
-    }
-  }
-
-  Future<void> _migrateLegacyPreferencesToSqlite() async {
-    if (_db == null) return;
-
-    if (_cachedTrips.isNotEmpty) {
-      await _db.saveTrips(_cachedTrips);
-    }
-    if (_cachedStoppages.isNotEmpty) {
-      await _db.saveAllStoppages(_cachedStoppages);
-    }
-    if (_cachedExpenses.isNotEmpty) {
-      await _db.saveAllExpenses(_cachedExpenses);
-    }
-    if (_cachedMemories.isNotEmpty) {
-      await _db.saveAllMemories(_cachedMemories);
-    }
-    if (_cachedSettlements.isNotEmpty) {
-      await _db.saveAllSettlements(_cachedSettlements);
-    }
-    if (_cachedAuditLogs.isNotEmpty) {
-      await _db.saveAllAuditLogs(_cachedAuditLogs);
-    }
-    if (_cachedMutations.isNotEmpty) {
-      await _db.saveAllMutations(_cachedMutations);
-    }
-    if (_cachedAlerts.isNotEmpty) {
-      await _db.saveAllAlerts(_cachedAlerts);
-    }
-    if (_cachedAuthUser != null) {
-      await _db.saveAuthSession(_cachedAuthUser!);
-    }
-    for (final reg in _cachedRegisteredUsers) {
-      await _db.saveRegisteredUser(reg);
-    }
-    for (final inv in _cachedInvitations) {
-      await _db.saveInvitation(inv);
     }
   }
 
@@ -239,19 +71,13 @@ class LocalStorageService {
   List<Trip> getTrips() => List.from(_cachedTrips);
 
   Future<List<Trip>> getTripsAsync() async {
-    if (_db != null) {
       _cachedTrips = await _db.getTrips();
-    }
     return getTrips();
   }
 
   Future<void> saveTrips(List<Trip> trips) async {
     _cachedTrips = List.from(trips);
-    final jsonString = jsonEncode(trips.map((e) => e.toJson()).toList());
-    await _prefs.setString(_tripsKey, jsonString);
-    if (_db != null) {
       await _db.saveTrips(trips);
-    }
   }
 
   Future<void> saveTrip(Trip trip) async {
@@ -264,11 +90,7 @@ class LocalStorageService {
     }
     _cachedTrips = list;
 
-    final jsonString = jsonEncode(list.map((e) => e.toJson()).toList());
-    await _prefs.setString(_tripsKey, jsonString);
-    if (_db != null) {
       await _db.saveTrip(trip);
-    }
   }
 
   Future<void> deleteTrip(String tripId) async {
@@ -286,9 +108,7 @@ class LocalStorageService {
     await saveAllSettlements(_cachedSettlements);
     await saveAllAuditLogs(_cachedAuditLogs);
 
-    if (_db != null) {
       await _db.deleteTrip(tripId);
-    }
   }
 
   Future<Trip> importTripPackage(TripPackage package, {String? activeMemberId}) async {
@@ -378,19 +198,12 @@ class LocalStorageService {
   }
 
   Future<List<Stoppage>> getStoppagesAsync(String tripId) async {
-    if (_db != null) {
-      return await _db.getStoppages(tripId);
-    }
-    return getStoppages(tripId);
+    return await _db.getStoppages(tripId);
   }
 
   Future<void> saveAllStoppages(List<Stoppage> stoppages) async {
     _cachedStoppages = List.from(stoppages);
-    final jsonString = jsonEncode(stoppages.map((e) => e.toJson()).toList());
-    await _prefs.setString(_stoppagesKey, jsonString);
-    if (_db != null) {
       await _db.saveAllStoppages(stoppages);
-    }
   }
 
   Future<void> saveStoppage(Stoppage stoppage) async {
@@ -402,18 +215,12 @@ class LocalStorageService {
       list.add(stoppage);
     }
     _cachedStoppages = list;
-    await _prefs.setString(_stoppagesKey, jsonEncode(list.map((e) => e.toJson()).toList()));
-    if (_db != null) {
       await _db.saveStoppage(stoppage);
-    }
   }
 
   Future<void> deleteStoppage(String stoppageId) async {
     _cachedStoppages.removeWhere((s) => s.id == stoppageId);
-    await _prefs.setString(_stoppagesKey, jsonEncode(_cachedStoppages.map((e) => e.toJson()).toList()));
-    if (_db != null) {
       await _db.deleteStoppage(stoppageId);
-    }
   }
 
   List<Stoppage> getAllStoppages() => List.from(_cachedStoppages);
@@ -424,19 +231,12 @@ class LocalStorageService {
   }
 
   Future<List<Expense>> getExpensesAsync(String tripId) async {
-    if (_db != null) {
-      return await _db.getExpenses(tripId);
-    }
-    return getExpenses(tripId);
+    return await _db.getExpenses(tripId);
   }
 
   Future<void> saveAllExpenses(List<Expense> expenses) async {
     _cachedExpenses = List.from(expenses);
-    final jsonString = jsonEncode(expenses.map((e) => e.toJson()).toList());
-    await _prefs.setString(_expensesKey, jsonString);
-    if (_db != null) {
       await _db.saveAllExpenses(expenses);
-    }
   }
 
   Future<void> saveExpense(Expense expense) async {
@@ -448,18 +248,12 @@ class LocalStorageService {
       list.add(expense);
     }
     _cachedExpenses = list;
-    await _prefs.setString(_expensesKey, jsonEncode(list.map((e) => e.toJson()).toList()));
-    if (_db != null) {
       await _db.saveExpense(expense);
-    }
   }
 
   Future<void> deleteExpense(String expenseId) async {
     _cachedExpenses.removeWhere((e) => e.id == expenseId);
-    await _prefs.setString(_expensesKey, jsonEncode(_cachedExpenses.map((e) => e.toJson()).toList()));
-    if (_db != null) {
       await _db.deleteExpense(expenseId);
-    }
   }
 
   List<Expense> getAllExpenses() => List.from(_cachedExpenses);
@@ -470,19 +264,12 @@ class LocalStorageService {
   }
 
   Future<List<Memory>> getMemoriesAsync(String tripId) async {
-    if (_db != null) {
-      return await _db.getMemories(tripId);
-    }
-    return getMemories(tripId);
+    return await _db.getMemories(tripId);
   }
 
   Future<void> saveAllMemories(List<Memory> memories) async {
     _cachedMemories = List.from(memories);
-    final jsonString = jsonEncode(memories.map((e) => e.toJson()).toList());
-    await _prefs.setString(_memoriesKey, jsonString);
-    if (_db != null) {
       await _db.saveAllMemories(memories);
-    }
   }
 
   Future<void> saveMemory(Memory memory) async {
@@ -494,18 +281,12 @@ class LocalStorageService {
       list.add(memory);
     }
     _cachedMemories = list;
-    await _prefs.setString(_memoriesKey, jsonEncode(list.map((e) => e.toJson()).toList()));
-    if (_db != null) {
       await _db.saveMemory(memory);
-    }
   }
 
   Future<void> deleteMemory(String memoryId) async {
     _cachedMemories.removeWhere((m) => m.id == memoryId);
-    await _prefs.setString(_memoriesKey, jsonEncode(_cachedMemories.map((e) => e.toJson()).toList()));
-    if (_db != null) {
       await _db.deleteMemory(memoryId);
-    }
   }
 
   List<Memory> getAllMemories() => List.from(_cachedMemories);
@@ -516,19 +297,12 @@ class LocalStorageService {
   }
 
   Future<List<Settlement>> getSettlementsAsync(String tripId) async {
-    if (_db != null) {
-      return await _db.getSettlements(tripId);
-    }
-    return getSettlements(tripId);
+    return await _db.getSettlements(tripId);
   }
 
   Future<void> saveAllSettlements(List<Settlement> settlements) async {
     _cachedSettlements = List.from(settlements);
-    final jsonString = jsonEncode(settlements.map((e) => e.toJson()).toList());
-    await _prefs.setString(_settlementsKey, jsonString);
-    if (_db != null) {
       await _db.saveAllSettlements(settlements);
-    }
   }
 
   Future<void> saveSettlement(Settlement settlement) async {
@@ -540,18 +314,12 @@ class LocalStorageService {
       list.add(settlement);
     }
     _cachedSettlements = list;
-    await _prefs.setString(_settlementsKey, jsonEncode(list.map((e) => e.toJson()).toList()));
-    if (_db != null) {
       await _db.saveSettlement(settlement);
-    }
   }
 
   Future<void> deleteSettlement(String settlementId) async {
     _cachedSettlements.removeWhere((s) => s.id == settlementId);
-    await _prefs.setString(_settlementsKey, jsonEncode(_cachedSettlements.map((e) => e.toJson()).toList()));
-    if (_db != null) {
       await _db.deleteSettlement(settlementId);
-    }
   }
 
   List<Settlement> getAllSettlements() => List.from(_cachedSettlements);
@@ -564,19 +332,12 @@ class LocalStorageService {
   }
 
   Future<List<TripAuditLog>> getAuditLogsAsync(String tripId) async {
-    if (_db != null) {
-      return await _db.getAuditLogs(tripId);
-    }
-    return getAuditLogs(tripId);
+    return await _db.getAuditLogs(tripId);
   }
 
   Future<void> saveAllAuditLogs(List<TripAuditLog> logs) async {
     _cachedAuditLogs = List.from(logs);
-    final jsonString = jsonEncode(logs.map((e) => e.toJson()).toList());
-    await _prefs.setString(_auditLogsKey, jsonString);
-    if (_db != null) {
       await _db.saveAllAuditLogs(logs);
-    }
   }
 
   Future<void> saveAuditLog(TripAuditLog log) async {
@@ -584,10 +345,7 @@ class LocalStorageService {
     list.insert(0, log);
     if (list.length > 500) list.removeLast();
     _cachedAuditLogs = list;
-    await _prefs.setString(_auditLogsKey, jsonEncode(list.map((e) => e.toJson()).toList()));
-    if (_db != null) {
       await _db.saveAuditLog(log);
-    }
   }
 
   List<TripAuditLog> getAllAuditLogs() => List.from(_cachedAuditLogs);
@@ -596,19 +354,13 @@ class LocalStorageService {
   List<SyncMutation> getPendingMutations() => List.from(_cachedMutations);
 
   Future<List<SyncMutation>> getPendingMutationsAsync() async {
-    if (_db != null) {
       _cachedMutations = await _db.getPendingMutations();
-    }
     return getPendingMutations();
   }
 
   Future<void> saveAllMutations(List<SyncMutation> mutations) async {
     _cachedMutations = List.from(mutations);
-    final jsonString = jsonEncode(mutations.map((e) => e.toJson()).toList());
-    await _prefs.setString(_mutationsKey, jsonString);
-    if (_db != null) {
       await _db.saveAllMutations(mutations);
-    }
   }
 
   Future<void> enqueueMutation(SyncMutation mutation) async {
@@ -636,19 +388,13 @@ class LocalStorageService {
   List<ProximityAlert> getAllAlerts() => List.from(_cachedAlerts);
 
   Future<List<ProximityAlert>> getAllAlertsAsync() async {
-    if (_db != null) {
       _cachedAlerts = await _db.getAllAlerts();
-    }
     return getAllAlerts();
   }
 
   Future<void> saveAllAlerts(List<ProximityAlert> alerts) async {
     _cachedAlerts = List.from(alerts);
-    final jsonString = jsonEncode(alerts.map((e) => e.toJson()).toList());
-    await _prefs.setString(_alertsKey, jsonString);
-    if (_db != null) {
       await _db.saveAllAlerts(alerts);
-    }
   }
 
   Future<void> addAlert(ProximityAlert alert) async {
@@ -671,45 +417,31 @@ class LocalStorageService {
 
   Future<void> clearAllAlerts() async {
     _cachedAlerts = [];
-    await _prefs.remove(_alertsKey);
-    if (_db != null) {
       await _db.clearAllAlerts();
-    }
   }
 
   // --- AUTH SESSION & REGISTERED ACCOUNTS ---
   AuthUser? getAuthSession() => _cachedAuthUser;
 
   Future<AuthUser?> getAuthSessionAsync() async {
-    if (_db != null) {
       _cachedAuthUser = await _db.getAuthSession();
-    }
     return getAuthSession();
   }
 
   Future<void> saveAuthSession(AuthUser user) async {
     _cachedAuthUser = user;
-    final jsonString = jsonEncode(user.toJson());
-    await _prefs.setString(_authSessionKey, jsonString);
-    if (_db != null) {
       await _db.saveAuthSession(user);
-    }
   }
 
   Future<void> clearAuthSession() async {
     _cachedAuthUser = null;
-    await _prefs.remove(_authSessionKey);
-    if (_db != null) {
       await _db.clearAuthSession();
-    }
   }
 
   List<Map<String, dynamic>> getRegisteredUsers() => List.from(_cachedRegisteredUsers);
 
   Future<List<Map<String, dynamic>>> getRegisteredUsersAsync() async {
-    if (_db != null) {
       _cachedRegisteredUsers = await _db.getRegisteredUsers();
-    }
     return getRegisteredUsers();
   }
 
@@ -718,10 +450,7 @@ class LocalStorageService {
     list.removeWhere((u) => u['email'] == userRecord['email'] || u['username'] == userRecord['username']);
     list.add(userRecord);
     _cachedRegisteredUsers = list;
-    await _prefs.setString(_registeredUsersKey, jsonEncode(list));
-    if (_db != null) {
       await _db.saveRegisteredUser(userRecord);
-    }
   }
 
   Future<bool> updateRegisteredUserPassword(String email, String newPassword) async {
@@ -730,10 +459,7 @@ class LocalStorageService {
     if (idx != -1) {
       list[idx]['password'] = newPassword;
       _cachedRegisteredUsers = list;
-      await _prefs.setString(_registeredUsersKey, jsonEncode(list));
-      if (_db != null) {
-        await _db.updateRegisteredUserPassword(email, newPassword);
-      }
+          await _db.updateRegisteredUserPassword(email, newPassword);
       return true;
     }
     return false;
@@ -743,9 +469,7 @@ class LocalStorageService {
   List<TripInvitation> getAllInvitations() => List.from(_cachedInvitations);
 
   Future<List<TripInvitation>> getAllInvitationsAsync() async {
-    if (_db != null) {
       _cachedInvitations = await _db.getAllInvitations();
-    }
     return getAllInvitations();
   }
 
@@ -758,11 +482,7 @@ class LocalStorageService {
     list.removeWhere((i) => i.id == invitation.id);
     list.insert(0, invitation);
     _cachedInvitations = list;
-    final jsonString = jsonEncode(list.map((e) => e.toJson()).toList());
-    await _prefs.setString(_invitationsKey, jsonString);
-    if (_db != null) {
       await _db.saveInvitation(invitation);
-    }
   }
 
   Future<void> updateInvitationStatus(String invitationId, InvitationStatus status) async {
@@ -771,11 +491,7 @@ class LocalStorageService {
     if (idx != -1) {
       list[idx] = list[idx].copyWith(status: status);
       _cachedInvitations = list;
-      final jsonString = jsonEncode(list.map((e) => e.toJson()).toList());
-      await _prefs.setString(_invitationsKey, jsonString);
-      if (_db != null) {
-        await _db.updateInvitationStatus(invitationId, status);
-      }
+      await _db.updateInvitationStatus(invitationId, status);
     }
   }
 
@@ -783,11 +499,7 @@ class LocalStorageService {
     final list = List<TripInvitation>.from(_cachedInvitations);
     list.removeWhere((i) => i.id == invitationId);
     _cachedInvitations = list;
-    final jsonString = jsonEncode(list.map((e) => e.toJson()).toList());
-    await _prefs.setString(_invitationsKey, jsonString);
-    if (_db != null) {
       await _db.deleteInvitation(invitationId);
-    }
   }
 
   // --- SEED SAMPLE ROAD TRIP ---

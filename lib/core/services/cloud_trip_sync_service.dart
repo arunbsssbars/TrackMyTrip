@@ -1,26 +1,18 @@
 import 'dart:async';
-import 'dart:convert';
+
 import 'dart:math';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/trip.dart';
 import 'trip_share_service.dart';
 
 class CloudTripSyncService {
-  static const List<String> _candidateBases = [
-    'http://172.20.10.11:8086/api/rooms',
-    'http://10.0.2.2:8086/api/rooms',
-    'http://127.0.0.1:8086/api/rooms',
-    'http://localhost:8086/api/rooms',
-  ];
-
-  static String? _preferredBase;
-
-  // Active sync polling timers per trip
-  static final Map<String, Timer> _activeTimers = {};
+  // Active sync stream subscriptions per trip
+  static final Map<String, StreamSubscription> _activeSubscriptions = {};
   static final Map<String, String> _tripRoomCodes = {};
   static final Map<String, DateTime> _lastSyncedTimes = {};
-  static Timer? _globalTimer;
+  
+  static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   /// Generates a clean, memorable 6-character room join code (e.g. "TRIP-7482" or "TRIP-9K2M")
   static String generateRoomCode(String tripId) {
@@ -60,38 +52,23 @@ class CloudTripSyncService {
         generateRoomCode(package.trip.id);
     registerRoomCode(package.trip.id, code);
 
-    final payload = {
-      'code': code,
-      'updatedAt': DateTime.now().toIso8601String(),
-      'package': package.toJson(),
-    };
-    final jsonBody = jsonEncode(payload);
-
-    final endpoints = _preferredBase != null
-        ? [_preferredBase!, ..._candidateBases.where((e) => e != _preferredBase)]
-        : _candidateBases;
-
-    for (final base in endpoints) {
-      try {
-        final url = Uri.parse('$base/$code');
-        final response = await http.post(
-          url,
-          body: jsonBody,
-          headers: {'Content-Type': 'application/json'},
-        ).timeout(const Duration(seconds: 3));
-
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          _preferredBase = base;
-          _lastSyncedTimes[package.trip.id] = package.exportedAt;
-          if (kDebugMode) {
-            print('Successfully published live trip room $code to $base (Expenses: ${package.expenses.length})');
-          }
-          return true;
-        }
-      } catch (_) {}
+    try {
+      await _firestore.collection('rooms').doc(code).set({
+        'code': code,
+        'updatedAt': FieldValue.serverTimestamp(),
+        'package': package.toJson(),
+      });
+      _lastSyncedTimes[package.trip.id] = package.exportedAt;
+      if (kDebugMode) {
+        print('Successfully published live trip room $code to Firestore (Expenses: ${package.expenses.length})');
+      }
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        print('Failed to publish trip to Firestore: $e');
+      }
+      return false;
     }
-
-    return false;
   }
 
   /// Fetches a live trip package from the cloud by room code
@@ -101,28 +78,22 @@ class CloudTripSyncService {
       cleanCode = 'TRIP-$cleanCode';
     }
 
-    final endpoints = _preferredBase != null
-        ? [_preferredBase!, ..._candidateBases.where((e) => e != _preferredBase)]
-        : _candidateBases;
-
-    for (final base in endpoints) {
-      try {
-        final url = Uri.parse('$base/$cleanCode');
-        final response = await http.get(url).timeout(const Duration(seconds: 3));
-
-        if (response.statusCode == 200 && response.body.isNotEmpty) {
-          final data = jsonDecode(response.body) as Map<String, dynamic>;
-          if (data.containsKey('package')) {
-            final pkgMap = data['package'] as Map<String, dynamic>;
-            final pkg = TripPackage.fromJson(pkgMap);
-            _preferredBase = base;
-            registerRoomCode(pkg.trip.id, cleanCode);
-            return pkg;
-          }
+    try {
+      final docSnapshot = await _firestore.collection('rooms').doc(cleanCode).get();
+      if (docSnapshot.exists) {
+        final data = docSnapshot.data()!;
+        if (data.containsKey('package')) {
+          final pkgMap = data['package'] as Map<String, dynamic>;
+          final pkg = TripPackage.fromJson(pkgMap);
+          registerRoomCode(pkg.trip.id, cleanCode);
+          return pkg;
         }
-      } catch (_) {}
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Failed to fetch trip from Firestore: $e');
+      }
     }
-
     return null;
   }
 
@@ -131,23 +102,31 @@ class CloudTripSyncService {
     required String tripId,
     required String roomCode,
     required Function(TripPackage) onRemoteUpdateReceived,
-    Duration interval = const Duration(seconds: 3),
+    Duration interval = const Duration(seconds: 3), // kept for backwards compat with args
   }) {
     stopLiveSync(tripId);
     registerRoomCode(tripId, roomCode);
 
-    _activeTimers[tripId] = Timer.periodic(interval, (timer) async {
-      try {
-        final remotePkg = await fetchTripByCode(roomCode);
-        if (remotePkg != null) {
+    _activeSubscriptions[tripId] = _firestore
+        .collection('rooms')
+        .doc(roomCode)
+        .snapshots()
+        .listen((docSnapshot) {
+      if (docSnapshot.exists) {
+        final data = docSnapshot.data()!;
+        if (data.containsKey('package')) {
+          final pkgMap = data['package'] as Map<String, dynamic>;
+          final remotePkg = TripPackage.fromJson(pkgMap);
+          
           final lastLocalSync = _lastSyncedTimes[tripId];
           final isNewer = lastLocalSync == null || remotePkg.exportedAt.isAfter(lastLocalSync);
+          
           if (isNewer) {
             _lastSyncedTimes[tripId] = remotePkg.exportedAt;
             onRemoteUpdateReceived(remotePkg);
           }
         }
-      } catch (_) {}
+      }
     });
   }
 
@@ -155,44 +134,39 @@ class CloudTripSyncService {
   static void startGlobalSync({
     required List<Trip> trips,
     required Function(TripPackage) onUpdateReceived,
-    Duration interval = const Duration(seconds: 4),
+    Duration interval = const Duration(seconds: 4), // kept for backwards compat
   }) {
-    _globalTimer?.cancel();
-    if (trips.isEmpty) return;
-
-    _globalTimer = Timer.periodic(interval, (_) async {
-      for (final trip in trips) {
-        try {
-          final code = getRoomCode(trip.id, trip: trip);
-          final remotePkg = await fetchTripByCode(code);
-          if (remotePkg != null) {
-            final lastLocalSync = _lastSyncedTimes[trip.id];
-            final isNewer = lastLocalSync == null || remotePkg.exportedAt.isAfter(lastLocalSync);
-            if (isNewer) {
-              _lastSyncedTimes[trip.id] = remotePkg.exportedAt;
-              onUpdateReceived(remotePkg);
-            }
-          }
-        } catch (_) {}
+    // With Firestore, we can just start individual live syncs for all trips
+    // using snapshots, rather than manually polling.
+    for (final trip in trips) {
+      final code = getRoomCode(trip.id, trip: trip);
+      if (!isLiveSyncActive(trip.id)) {
+        startLiveSync(
+          tripId: trip.id,
+          roomCode: code,
+          onRemoteUpdateReceived: onUpdateReceived,
+        );
       }
-    });
+    }
   }
 
   /// Stops global synchronization
   static void stopGlobalSync() {
-    _globalTimer?.cancel();
-    _globalTimer = null;
+    for (final sub in _activeSubscriptions.values) {
+      sub.cancel();
+    }
+    _activeSubscriptions.clear();
   }
 
   /// Stops live synchronization for a trip
   static void stopLiveSync(String tripId) {
-    _activeTimers[tripId]?.cancel();
-    _activeTimers.remove(tripId);
+    _activeSubscriptions[tripId]?.cancel();
+    _activeSubscriptions.remove(tripId);
   }
 
   /// Checks if live sync is actively running for a trip
   static bool isLiveSyncActive(String tripId) {
-    return _activeTimers.containsKey(tripId);
+    return _activeSubscriptions.containsKey(tripId);
   }
 
   /// Last synced timestamp

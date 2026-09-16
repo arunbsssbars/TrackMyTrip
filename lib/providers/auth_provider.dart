@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../core/services/push_notification_service.dart';
 import '../core/services/auth_service.dart';
 import '../core/services/user_service.dart';
 import '../models/auth_user.dart';
@@ -108,7 +109,8 @@ class AuthNotifier extends StateNotifier<AsyncValue<AuthUser?>> {
 
 final authServiceProvider = Provider<AuthService>((ref) {
   final storage = ref.watch(localStorageServiceProvider);
-  return AuthService(storage);
+  final pushService = ref.watch(pushNotificationServiceProvider);
+  return AuthService(storage, pushService);
 });
 
 final authNotifierProvider = StateNotifierProvider<AuthNotifier, AsyncValue<AuthUser?>>((ref) {

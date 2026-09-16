@@ -18,7 +18,7 @@ import 'create_trip_sheet.dart';
 import 'join_trip_sheet.dart';
 import 'qr_scanner_screen.dart';
 import '../common/sync_status_badge.dart';
-import '../profile/user_profile_sheet.dart';
+
 import '../../core/services/proximity_alert_service.dart';
 import '../notifications/notification_center_sheet.dart';
 import '../notifications/in_app_notification_banner.dart';
@@ -289,13 +289,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   );
                 },
               ),
-              IconButton(
-                padding: EdgeInsets.zero,
-                iconSize: 22,
-                icon: const Icon(Icons.account_circle_rounded),
-                tooltip: 'Your Profile & Account',
-                onPressed: () => UserProfileSheet.show(context),
-              ),
+
               const SizedBox(width: 4),
             ],
           ),

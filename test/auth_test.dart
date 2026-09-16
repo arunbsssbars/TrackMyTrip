@@ -1,4 +1,17 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:trip_tracker_app/core/database/app_database.dart';
+import 'package:firebase_core_platform_interface/firebase_core_platform_interface.dart';
+import 'package:trip_tracker_app/core/services/push_notification_service.dart';
+
+class MockPushNotificationService extends PushNotificationService {
+  @override
+  Future<String?> getToken() async => 'mock_token';
+  
+  @override
+  Future<void> init() async {}
+}
+
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trip_tracker_app/core/services/auth_service.dart';
 import 'package:trip_tracker_app/core/services/local_storage_service.dart';
@@ -39,8 +52,9 @@ void main() {
     setUp(() async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
-      storage = LocalStorageService(prefs);
-      authService = AuthService(storage);
+      storage = await LocalStorageService.init(prefs: prefs, database: await AppDatabase.open(customPath: inMemoryDatabasePath));
+      final mockPushService = MockPushNotificationService();
+      authService = AuthService(storage, mockPushService);
     });
 
     test('Sign up with valid email & password registers user and saves session', () async {
@@ -173,8 +187,10 @@ void main() {
     setUp(() async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
-      storage = LocalStorageService(prefs);
-      authService = AuthService(storage);
+      storage = await LocalStorageService.init(prefs: prefs, database: await AppDatabase.open(customPath: inMemoryDatabasePath));
+      
+      final mockPushService = MockPushNotificationService();
+      authService = AuthService(storage, mockPushService);
     });
 
     test('Sign in with Google creates Google account session', () async {

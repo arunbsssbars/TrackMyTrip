@@ -21,12 +21,18 @@ class AddExpenseScreen extends ConsumerStatefulWidget {
   final String tripId;
   final String? initialStoppageId;
   final Expense? initialExpense;
+  final String? prefillTitle;
+  final double? prefillAmount;
+  final String? prefillImagePath;
 
   const AddExpenseScreen({
     super.key,
     required this.tripId,
     this.initialStoppageId,
     this.initialExpense,
+    this.prefillTitle,
+    this.prefillAmount,
+    this.prefillImagePath,
   });
 
   @override
@@ -78,6 +84,15 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
       }
     } else {
       _selectedStoppageId = widget.initialStoppageId;
+      if (widget.prefillTitle != null) {
+        _titleController.text = widget.prefillTitle!;
+      }
+      if (widget.prefillAmount != null) {
+        _amountController.text = widget.prefillAmount!.toStringAsFixed(2);
+      }
+      if (widget.prefillImagePath != null) {
+        _receiptImagePath = widget.prefillImagePath;
+      }
     }
   }
 

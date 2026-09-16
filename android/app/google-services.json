@@ -1,26 +1,51 @@
 {
   "project_info": {
-    "project_number": "1098964421425",
-    "project_id": "triptracker-app-2026",
-    "storage_bucket": "triptracker-app-2026.firebasestorage.app"
+    "project_number": "731719697818",
+    "project_id": "trackmytrip-sync-2026",
+    "storage_bucket": "trackmytrip-sync-2026.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:1098964421425:android:15105aa6eaf3cbccaa3e10",
+        "mobilesdk_app_id": "1:731719697818:android:fbf3b3bfba7fa282bce623",
         "android_client_info": {
           "package_name": "com.triptracker.trip_tracker_app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "731719697818-2rnmdr802j6ikntqmld9id0q6udcu2p6.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.triptracker.trip_tracker_app",
+            "certificate_hash": "908ee37291ac67802c557bd7f4cf836f3c3fba5e"
+          }
+        },
+        {
+          "client_id": "731719697818-ljfrslc4gbqucih5n6qfnt01v5ct3nsj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
-          "current_key": "AIzaSyDPQPC3vumqHZjum0dTx12m6IJWjWffhxQ"
+          "current_key": "AIzaSyD3xg07jKRC-jDcfKCXBLC5-EMCzz4VRgc"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "731719697818-ljfrslc4gbqucih5n6qfnt01v5ct3nsj.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "731719697818-g985psnmkv32n4bb14q477capf1s316u.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.triptracker.tripTrackerApp"
+              }
+            }
+          ]
         }
       }
     }
