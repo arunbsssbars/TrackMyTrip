@@ -1,5 +1,5 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/cloud_trip_sync_service.dart';
 import '../../core/services/location_service.dart';
@@ -12,18 +12,16 @@ import '../../providers/memory_provider.dart';
 import '../../providers/settlement_provider.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
-import '../trip_detail/companions_detail_sheet.dart';
 import '../trip_detail/trip_detail_screen.dart';
 import 'create_trip_sheet.dart';
 import 'join_trip_sheet.dart';
 import 'qr_scanner_screen.dart';
 import '../common/sync_status_badge.dart';
-
-import '../../core/services/proximity_alert_service.dart';
 import '../notifications/notification_center_sheet.dart';
-import '../notifications/in_app_notification_banner.dart';
 import '../../providers/invitation_provider.dart';
 import 'widgets/trip_invitation_card.dart';
+import '../main_scaffold.dart';
+import '../../providers/auth_provider.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -40,27 +38,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _displayedCount = 10;
   final ScrollController _scrollController = ScrollController();
   int _totalFilteredCount = 0;
-  StreamSubscription? _bannerSubscription;
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    LocationService.currencyNotifier.addListener(_onCurrencyChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initGlobalSync();
-      LocationService.requestPermission();
+      LocationService.requestPermission().then((granted) {
+        if (granted) {
+          LocationService.detectLocalCurrency();
+        }
+      });
     });
+  }
 
-    _bannerSubscription = ref.read(proximityAlertServiceProvider).bannerStream.listen((alert) {
-      if (mounted) {
-        InAppNotificationBanner.show(context, alert);
-      }
-    });
+  void _onCurrencyChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    _bannerSubscription?.cancel();
+    LocationService.currencyNotifier.removeListener(_onCurrencyChanged);
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _searchController.dispose();
@@ -121,6 +121,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _navigateToTripDetail(Trip trip, {int initialTabIndex = 0}) {
+    final localTrip = ref.read(localStorageServiceProvider).getTrip(trip.id);
+    if (localTrip == null || localTrip.isDeleted) {
+      ref.read(tripListProvider.notifier).deleteTripLocally(trip.id);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This trip is no longer active or was deleted.'),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     ref.read(selectedTripIdProvider.notifier).state = trip.id;
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -135,6 +148,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final trips = ref.watch(tripListProvider);
+    final isSyncingTrips = ref.watch(isSyncingTripsProvider);
     final allStoppages = ref.watch(allStoppagesProvider);
     final allExpenses = ref.watch(allExpensesProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -184,12 +198,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // Paginate visible trips (Page size: 10)
     final visibleTrips = filteredTrips.take(_displayedCount).toList();
 
+    final userTripIds = trips.map((t) => t.id).toSet();
+    final userExpenses = allExpenses.where((e) => userTripIds.contains(e.tripId)).toList();
+    final userStoppages = allStoppages.where((s) => userTripIds.contains(s.tripId)).toList();
+
     final groupCount = trips.where((t) => !t.isSolo && !t.isFamily).length;
     final familyCount = trips.where((t) => t.isFamily).length;
     final soloCount = trips.where((t) => t.isSolo).length;
 
-    final grandTotalSpent = allExpenses.fold<double>(0.0, (sum, e) => sum + e.totalAmount);
-    final defaultCurr = trips.isNotEmpty ? trips.first.defaultCurrency : 'USD';
+    final grandTotalSpent = userExpenses.fold<double>(0.0, (sum, e) => sum + e.totalAmount);
+    final detectedCurr = ref.watch(currencyNotifierProvider).value;
+    final defaultCurr = detectedCurr.isNotEmpty
+        ? detectedCurr
+        : (trips.isNotEmpty ? trips.first.defaultCurrency : LocationService.currentDetectedCurrency);
 
     return Scaffold(
       body: CustomScrollView(
@@ -218,7 +239,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 const SizedBox(width: 7),
                 Flexible(
                   child: Text(
-                    'Trip Tracker',
+                    'Track My Trip',
                     style: TextStyle(
                       color: isDark ? Colors.white : AppTheme.textMainLight,
                       fontSize: 15.5,
@@ -236,31 +257,41 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 padding: EdgeInsets.symmetric(vertical: 14),
                 child: SyncStatusBadge(),
               ),
+              IconButton(
+                padding: EdgeInsets.zero,
+                iconSize: 22,
+                icon: const Icon(Icons.add_location_alt_rounded, color: AppTheme.primary),
+                tooltip: 'Join Journey (Code or QR)',
+                onPressed: () => _openJoinTripSheet(context),
+              ),
+              Consumer(
+                builder: (context, ref, _) {
+                  return IconButton(
+                    padding: EdgeInsets.zero,
+                    iconSize: 21,
+                    icon: const Icon(Icons.sos_rounded, color: Colors.red),
+                    tooltip: 'Emergency SOS & Safety',
+                    onPressed: () => NotificationCenterSheet.show(context),
+                  );
+                },
+              ),
               PopupMenuButton<String>(
                 padding: EdgeInsets.zero,
                 iconSize: 21,
-                icon: const Icon(Icons.group_add_rounded),
-                tooltip: 'Join or Scan Trip',
+                icon: const Icon(Icons.more_vert_rounded),
+                tooltip: 'App Options',
                 position: PopupMenuPosition.under,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                onSelected: (val) {
+                onSelected: (val) async {
                   if (val == 'qr') {
                     _openQRScanner(context);
                   } else if (val == 'code') {
                     _openJoinTripSheet(context);
+                  } else if (val == 'signout') {
+                    await ref.read(authNotifierProvider.notifier).logout();
                   }
                 },
                 itemBuilder: (ctx) => [
-                  const PopupMenuItem(
-                    value: 'qr',
-                    child: Row(
-                      children: [
-                        Icon(Icons.qr_code_scanner_rounded, size: 20, color: AppTheme.primary),
-                        SizedBox(width: 10),
-                        Text('Scan Trip QR Code', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                  ),
                   const PopupMenuItem(
                     value: 'code',
                     child: Row(
@@ -271,25 +302,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ],
                     ),
                   ),
+                  const PopupMenuItem(
+                    value: 'qr',
+                    child: Row(
+                      children: [
+                        Icon(Icons.qr_code_scanner_rounded, size: 20, color: AppTheme.primary),
+                        SizedBox(width: 10),
+                        Text('Scan Trip QR Code', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(height: 8),
+                  const PopupMenuItem(
+                    value: 'signout',
+                    child: Row(
+                      children: [
+                        Icon(Icons.logout_rounded, size: 20, color: Colors.red),
+                        SizedBox(width: 10),
+                        Text('Sign Out', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.red)),
+                      ],
+                    ),
+                  ),
                 ],
               ),
-              Consumer(
-                builder: (context, ref, _) {
-                  final unread = ref.watch(proximityAlertServiceProvider).unreadCount;
-                  return IconButton(
-                    padding: EdgeInsets.zero,
-                    iconSize: 21,
-                    icon: Badge(
-                      isLabelVisible: unread > 0,
-                      label: Text('$unread', style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
-                      child: const Icon(Icons.notifications_outlined),
-                    ),
-                    tooltip: 'Notifications & Safety',
-                    onPressed: () => NotificationCenterSheet.show(context),
-                  );
-                },
-              ),
-
               const SizedBox(width: 4),
             ],
           ),
@@ -375,14 +410,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         Container(height: 28, width: 1, color: Colors.white24),
                         _buildHeroStat(
                           icon: Icons.place_rounded,
-                          value: '${allStoppages.length}',
+                          value: '${userStoppages.length}',
                           label: 'Stoppages',
+                          onTap: trips.isNotEmpty
+                              ? () {
+                                  HapticFeedback.lightImpact();
+                                  ref.read(activeMainTabProvider.notifier).state = 1;
+                                }
+                              : null,
                         ),
                         Container(height: 28, width: 1, color: Colors.white24),
                         _buildHeroStat(
                           icon: Icons.account_balance_wallet_rounded,
                           value: CurrencyFormatter.format(grandTotalSpent, currency: defaultCurr),
                           label: 'Total Spent',
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            ref.read(activeMainTabProvider.notifier).state = 3;
+                          },
                         ),
                       ],
                     ),
@@ -392,8 +437,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
 
-          // 2. Search & Filter Bar (Placed BELOW Travel Overview Card)
-          SliverToBoxAdapter(
+          // 2. Search & Filter Bar (Only if user has trips)
+          if (trips.isNotEmpty)
+            SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
               child: Row(
@@ -529,8 +575,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
 
-          // 3. Filter Chips
-          SliverToBoxAdapter(
+          // 3. Filter Chips (Only if user has trips)
+          if (trips.isNotEmpty)
+            SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 2, 16, 6),
               child: SingleChildScrollView(
@@ -566,85 +613,153 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             },
           ),
 
-          // 4. Section Title with Count
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    _searchQuery.isNotEmpty
-                        ? 'Search Results (${filteredTrips.length})'
-                        : _activeFilter == 'all'
-                            ? 'Recent Expeditions (${filteredTrips.length})'
-                            : '${_activeFilter[0].toUpperCase()}${_activeFilter.substring(1)} Journeys (${filteredTrips.length})',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 15,
-                      letterSpacing: -0.3,
-                      color: isDark ? Colors.white : AppTheme.textMainLight,
-                    ),
-                  ),
-                  if (filteredTrips.isNotEmpty)
+          // 4. Section Title with Count (Only if user has trips)
+          if (trips.isNotEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
                     Text(
-                      'Showing ${visibleTrips.length} of ${filteredTrips.length}',
+                      _searchQuery.isNotEmpty
+                          ? 'Search Results (${filteredTrips.length})'
+                          : _activeFilter == 'all'
+                              ? 'Recent Expeditions (${filteredTrips.length})'
+                              : '${_activeFilter[0].toUpperCase()}${_activeFilter.substring(1)} Journeys (${filteredTrips.length})',
                       style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        letterSpacing: -0.3,
+                        color: isDark ? Colors.white : AppTheme.textMainLight,
                       ),
                     ),
-                ],
+                    if (filteredTrips.isNotEmpty)
+                      Text(
+                        'Showing ${visibleTrips.length} of ${filteredTrips.length}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
-          ),
 
-          // Empty State or Trip Cards
-          if (filteredTrips.isEmpty)
+          // Empty State, Sync Loader, or Trip Cards
+          if (isSyncingTrips && trips.isEmpty)
+            SliverToBoxAdapter(
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Loading your trips...',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Syncing your latest journeys and companions from the cloud...',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: isDark ? Colors.grey[400] : AppTheme.textMutedLight,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else if (trips.isEmpty)
+            SliverToBoxAdapter(
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(28, 24, 28, 36),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withAlpha(20),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.travel_explore_rounded, size: 54, color: AppTheme.primary),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'No Trips Yet',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Start tracking your journey, stoppages, routes, and shared bills with your companions.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 13, color: isDark ? Colors.grey[400] : AppTheme.textMutedLight),
+                    ),
+                    const SizedBox(height: 20),
+                    ElevatedButton.icon(
+                      onPressed: () => _openCreateTripSheet(context),
+                      icon: const Icon(Icons.add_location_alt_rounded, size: 18),
+                      label: const Text('Create Your First Trip'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else if (filteredTrips.isEmpty)
             SliverFillRemaining(
               hasScrollBody: false,
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withAlpha(20),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.travel_explore_rounded, size: 54, color: AppTheme.primary),
+              child: Container(
+                alignment: const Alignment(0, -0.28),
+                padding: const EdgeInsets.fromLTRB(32, 16, 32, 40),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withAlpha(20),
+                        shape: BoxShape.circle,
                       ),
-                      const SizedBox(height: 16),
-                      Text(
-                        _searchQuery.isNotEmpty
-                            ? 'No Journeys Found for "$_searchQuery"'
-                            : _activeFilter == 'all'
-                                ? 'No Trips Yet'
-                                : 'No ${_activeFilter.toUpperCase()} Trips Found',
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        _searchQuery.isNotEmpty
-                            ? 'Try searching by a different name, destination, or companion.'
-                            : 'Start tracking your journey, stoppages, routes, and shared bills with your companions.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 13, color: isDark ? Colors.grey[400] : AppTheme.textMutedLight),
-                      ),
-                      const SizedBox(height: 20),
-                      if (_searchQuery.isEmpty)
-                        ElevatedButton.icon(
-                          onPressed: () => _openCreateTripSheet(context),
-                          icon: const Icon(Icons.add_location_alt_rounded, size: 18),
-                          label: const Text('Create Your First Trip'),
-                        ),
-                    ],
-                  ),
+                      child: const Icon(Icons.search_off_rounded, size: 48, color: AppTheme.primary),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      _searchQuery.isNotEmpty
+                          ? 'No Journeys Found for "$_searchQuery"'
+                          : 'No ${_activeFilter.toUpperCase()} Trips Found',
+                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _searchQuery.isNotEmpty
+                          ? 'Try searching by a different name, destination, or companion.'
+                          : 'Switch categories above to see trips in other categories.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 13, color: isDark ? Colors.grey[400] : AppTheme.textMutedLight),
+                    ),
+                  ],
                 ),
               ),
             )
@@ -679,28 +794,35 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   final totalSpent = expenses.fold<double>(0.0, (sum, e) => sum + e.totalAmount);
                   final distanceKm = LocationService.calculateStoppagesDistanceKm(stoppages);
 
-                  // Tab mapping:
-                  // 0: Timeline & Stoppages
-                  // 1: Bills & Splits
-                  // 2 (group) or none (solo): Settle Balances
-                  // 3 (group) or 2 (solo): Map Route
-                  // 4 (group) or 3 (solo): Memories
-                  const timelineTabIndex = 0;
-                  const billsTabIndex = 1;
-                  final routeTabIndex = trip.isSolo ? 2 : 3;
 
-                  return _TripCard(
-                    trip: trip,
-                    stoppagesCount: stoppages.length,
-                    expensesCount: expenses.length,
-                    totalSpent: totalSpent,
-                    distanceKm: distanceKm,
-                    onTap: () => _navigateToTripDetail(trip, initialTabIndex: 0),
-                    onBillsTap: () => _navigateToTripDetail(trip, initialTabIndex: billsTabIndex),
-                    onStopsTap: () => _navigateToTripDetail(trip, initialTabIndex: timelineTabIndex),
-                    onRouteTap: () => _navigateToTripDetail(trip, initialTabIndex: routeTabIndex),
-                    onSettleTap: trip.isSolo ? null : () => _navigateToTripDetail(trip, initialTabIndex: 2),
-                    onMembersTap: () => CompanionsDetailSheet.show(context, trip),
+                  return TweenAnimationBuilder<double>(
+                    key: ValueKey('trip_anim_${trip.id}'),
+                    tween: Tween<double>(begin: 0.0, end: 1.0),
+                    duration: Duration(milliseconds: 250 + (index * 40).clamp(0, 300)),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, animValue, child) {
+                      return Transform.translate(
+                        offset: Offset(0, (1 - animValue) * 8),
+                        child: Opacity(
+                          opacity: animValue,
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: _TripCard(
+                      trip: trip,
+                      stoppagesCount: stoppages.length,
+                      expensesCount: expenses.length,
+                      totalSpent: totalSpent,
+                      distanceKm: distanceKm,
+                      onTap: () => _navigateToTripDetail(trip, initialTabIndex: 0),
+                      onStopsTap: () => _navigateToTripDetail(trip, initialTabIndex: 0),
+                      onRouteTap: () => _navigateToTripDetail(trip, initialTabIndex: 1),
+                      onMembersTap: () => _navigateToTripDetail(trip, initialTabIndex: 2),
+                      onBillsTap: () => _navigateToTripDetail(trip, initialTabIndex: 3),
+                      onSettleTap: trip.isSolo ? null : () => _navigateToTripDetail(trip, initialTabIndex: 4),
+
+                    ),
                   );
                 },
                 childCount: visibleTrips.length + (visibleTrips.length < filteredTrips.length ? 1 : 0),
@@ -759,31 +881,70 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Widget _buildHeroStat({required IconData icon, required String value, required String label}) {
-    return Column(
+  Widget _buildHeroStat({required IconData icon, required String value, required String label, VoidCallback? onTap}) {
+    final content = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, color: Colors.white, size: 16),
         const SizedBox(height: 2),
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w900,
-            letterSpacing: -0.3,
-          ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.3,
+              ),
+            ),
+            if (onTap != null) ...[
+              const SizedBox(width: 3),
+              const Icon(
+                Icons.arrow_forward_ios_rounded,
+                color: Colors.white70,
+                size: 9,
+              ),
+            ],
+          ],
         ),
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 10,
-            fontWeight: FontWeight.w500,
-          ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            if (onTap != null) ...[
+              const SizedBox(width: 2),
+              const Icon(
+                Icons.touch_app_rounded,
+                color: Colors.white60,
+                size: 9,
+              ),
+            ],
+          ],
         ),
       ],
     );
+
+    if (onTap != null) {
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          child: content,
+        ),
+      );
+    }
+    return content;
   }
 
   Widget _buildPillFilter(String key, String title, int count, bool isDark) {
@@ -1012,14 +1173,52 @@ class _TripCard extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
 
-                          // Total Spend in Top Header
-                          Text(
-                            CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency),
-                            style: TextStyle(
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.3,
-                              color: isDark ? Colors.white : AppTheme.textMainLight,
+                          // Interactive Clickable Total Spend in Top Header
+                          Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                HapticFeedback.selectionClick();
+                                onBillsTap();
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.secondary.withAlpha(isDark ? 30 : 18),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: AppTheme.secondary.withAlpha(isDark ? 80 : 55),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.account_balance_wallet_outlined,
+                                      size: 12.5,
+                                      color: AppTheme.secondary,
+                                    ),
+                                    const SizedBox(width: 3.5),
+                                    Text(
+                                      CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency),
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: -0.3,
+                                        color: isDark ? Colors.white : AppTheme.textMainLight,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 2),
+                                    Icon(
+                                      Icons.chevron_right_rounded,
+                                      size: 14,
+                                      color: isDark ? Colors.grey[300] : const Color(0xFF64748B),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                         ],
@@ -1214,7 +1413,7 @@ class _TripCard extends StatelessWidget {
                             splashColor: const Color(0xFF0F766E).withAlpha(35),
                             highlightColor: const Color(0xFF0F766E).withAlpha(20),
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 2),
+                              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
@@ -1235,8 +1434,6 @@ class _TripCard extends StatelessWidget {
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 1.5),
-                                  const Icon(Icons.chevron_right_rounded, size: 12, color: Color(0xFF0F766E)),
                                 ],
                               ),
                             ),
@@ -1272,7 +1469,7 @@ class _TripCard extends StatelessWidget {
                             splashColor: AppTheme.primary.withAlpha(35),
                             highlightColor: AppTheme.primary.withAlpha(20),
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 2),
+                              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
@@ -1291,8 +1488,6 @@ class _TripCard extends StatelessWidget {
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 1.5),
-                                  const Icon(Icons.chevron_right_rounded, size: 12, color: AppTheme.primary),
                                 ],
                               ),
                             ),
@@ -1328,7 +1523,7 @@ class _TripCard extends StatelessWidget {
                             splashColor: AppTheme.secondary.withAlpha(35),
                             highlightColor: AppTheme.secondary.withAlpha(20),
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 2),
+                              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
@@ -1347,8 +1542,6 @@ class _TripCard extends StatelessWidget {
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 1.5),
-                                  const Icon(Icons.chevron_right_rounded, size: 12, color: AppTheme.secondary),
                                 ],
                               ),
                             ),
@@ -1385,7 +1578,7 @@ class _TripCard extends StatelessWidget {
                               splashColor: const Color(0xFFD97706).withAlpha(35),
                               highlightColor: const Color(0xFFD97706).withAlpha(20),
                               child: const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 7, horizontal: 2),
+                                padding: EdgeInsets.symmetric(vertical: 7, horizontal: 4),
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
@@ -1404,8 +1597,6 @@ class _TripCard extends StatelessWidget {
                                         ),
                                       ),
                                     ),
-                                    SizedBox(width: 1.5),
-                                    Icon(Icons.chevron_right_rounded, size: 12, color: Color(0xFFD97706)),
                                   ],
                                 ),
                               ),

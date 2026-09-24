@@ -8,8 +8,10 @@ import 'trip_provider.dart';
 import 'package:uuid/uuid.dart';
 import '../models/trip_audit_log.dart';
 import '../models/sync_mutation.dart';
+import '../models/proximity_alert.dart';
 import '../core/services/offline_sync_engine.dart';
 import '../core/services/realtime_sync_service.dart';
+import '../core/services/proximity_alert_service.dart';
 import 'audit_log_provider.dart';
 
 class MemoryNotifier extends StateNotifier<List<Memory>> {
@@ -21,21 +23,39 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
   }
 
   void _loadAllMemories() {
-    state = _storage.getAllMemories();
+    final trips = _storage.getTrips();
+    final userTripIds = trips.map((t) => t.id).toSet();
+    state = _storage.getAllMemories().where((m) => userTripIds.contains(m.tripId)).toList();
   }
 
   void reload() {
     _loadAllMemories();
   }
 
+  void reset() {
+    state = [];
+  }
+
   Future<void> addMemory(Memory memory, {bool broadcast = true}) async {
-    state = [memory, ...state];
+    state = [memory, ...state.where((m) => m.id != memory.id)];
     await _storage.saveAllMemories(state);
     _syncToCloud(memory.tripId);
 
     if (broadcast) {
       try {
         _ref.read(realtimeSyncServiceProvider).broadcastNewMemory(memory);
+      } catch (_) {}
+      try {
+        final currentTrip = _ref.read(tripListProvider).where((t) => t.id == memory.tripId).firstOrNull;
+        final uploaderName = currentTrip?.getMemberName(memory.uploadedByMemberId) ?? 'Companion';
+        _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
+          tripId: memory.tripId,
+          type: AlertType.memoryAdded,
+          title: 'New Memory Added',
+          message: '$uploaderName shared a new memory: "${memory.caption?.isNotEmpty == true ? memory.caption! : "Trip photo"}"',
+          senderMemberId: memory.uploadedByMemberId,
+          senderName: uploaderName,
+        );
       } catch (_) {}
     }
 

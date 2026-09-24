@@ -11,8 +11,10 @@ class CloudTripSyncService {
   static final Map<String, StreamSubscription> _activeSubscriptions = {};
   static final Map<String, String> _tripRoomCodes = {};
   static final Map<String, DateTime> _lastSyncedTimes = {};
-  
-  static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  static FirebaseFirestore? _customDb;
+  static set customDb(FirebaseFirestore? db) => _customDb = db;
+  static FirebaseFirestore get firestore => _customDb ?? FirebaseFirestore.instance;
+  static FirebaseFirestore get _firestore => firestore;
 
   /// Generates a clean, memorable 6-character room join code (e.g. "TRIP-7482" or "TRIP-9K2M")
   static String generateRoomCode(String tripId) {
@@ -167,6 +169,42 @@ class CloudTripSyncService {
   /// Checks if live sync is actively running for a trip
   static bool isLiveSyncActive(String tripId) {
     return _activeSubscriptions.containsKey(tripId);
+  }
+
+  /// Deletes the room doc from Firestore when a trip is deleted
+  static Future<void> deleteRoom(String tripId) async {
+    stopLiveSync(tripId);
+    final roomCode = _tripRoomCodes[tripId];
+    if (roomCode != null) {
+      try {
+        await _firestore.collection('rooms').doc(roomCode).delete();
+      } catch (_) {}
+      _tripRoomCodes.remove(tripId);
+    }
+  }
+
+  /// Removes a companion from the live room package
+  static Future<void> removeMemberFromRoom(String tripId, String memberId) async {
+    final roomCode = _tripRoomCodes[tripId];
+    if (roomCode == null) return;
+    try {
+      final doc = await _firestore.collection('rooms').doc(roomCode).get();
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+        if (data.containsKey('package')) {
+          final pkgMap = Map<String, dynamic>.from(data['package'] as Map);
+          final tripMap = Map<String, dynamic>.from(pkgMap['trip'] as Map);
+          final members = (tripMap['members'] as List<dynamic>?) ?? [];
+          final filteredMembers = members.where((m) => m is Map && m['id'] != memberId).toList();
+          tripMap['members'] = filteredMembers;
+          pkgMap['trip'] = tripMap;
+          await _firestore.collection('rooms').doc(roomCode).update({
+            'package': pkgMap,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   /// Last synced timestamp

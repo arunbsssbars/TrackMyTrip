@@ -12,7 +12,11 @@ import '../../providers/settlement_provider.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
 import '../trip_detail/trip_detail_screen.dart';
-
+import '../../providers/auth_provider.dart';
+import '../../core/services/firestore_sync_service.dart';
+import '../../core/services/user_service.dart';
+import '../../core/services/proximity_alert_service.dart';
+import '../../models/proximity_alert.dart';
 import 'qr_scanner_screen.dart';
 
 class _UpperCaseTextFormatter extends TextInputFormatter {
@@ -36,17 +40,22 @@ class JoinTripSheet extends ConsumerStatefulWidget {
 
 class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
   final TextEditingController _codeController = TextEditingController();
-  final TextEditingController _newMemberNameController = TextEditingController();
+  final TextEditingController _displayNameController = TextEditingController();
 
   TripPackage? _parsedPackage;
-  String? _selectedMemberId;
-  bool _isCreatingNewMember = false;
   String? _errorMessage;
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
+    final authUser = ref.read(authNotifierProvider).valueOrNull;
+    final currentProfile = UserService.getCurrentUser();
+    final initialName = authUser?.displayName.isNotEmpty == true
+        ? authUser!.displayName
+        : (currentProfile.displayName.isNotEmpty ? currentProfile.displayName : '');
+    _displayNameController.text = initialName;
+
     if (widget.initialCode != null && widget.initialCode!.isNotEmpty) {
       _codeController.text = widget.initialCode!;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -63,7 +72,7 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
   @override
   void dispose() {
     _codeController.dispose();
-    _newMemberNameController.dispose();
+    _displayNameController.dispose();
     super.dispose();
   }
 
@@ -121,12 +130,6 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
         _parsedPackage = pkg;
         _errorMessage = null;
         _isLoading = false;
-        if (pkg.trip.members.isNotEmpty) {
-          _selectedMemberId = pkg.trip.members.first.id;
-          _isCreatingNewMember = false;
-        } else {
-          _isCreatingNewMember = true;
-        }
       });
       return;
     }
@@ -144,12 +147,6 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
           _parsedPackage = cloudPkg;
           _errorMessage = null;
           _isLoading = false;
-          if (cloudPkg.trip.members.isNotEmpty) {
-            _selectedMemberId = cloudPkg.trip.members.first.id;
-            _isCreatingNewMember = false;
-          } else {
-            _isCreatingNewMember = true;
-          }
         });
         return;
       }
@@ -166,34 +163,89 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
     final pkg = _parsedPackage;
     if (pkg == null) return;
 
-    String? activeMemberId = _selectedMemberId;
+    final authUser = ref.read(authNotifierProvider).valueOrNull;
+    final currentProfile = UserService.getCurrentUser();
+    final String currentUid = (authUser != null && authUser.id.isNotEmpty) ? authUser.id : currentProfile.id;
+    final String currentEmail = (authUser != null && authUser.email.isNotEmpty) ? authUser.email : (currentProfile.email ?? '');
+    final customName = _displayNameController.text.trim();
+    final currentDisplayName = customName.isNotEmpty
+        ? customName
+        : ((authUser?.displayName.isNotEmpty == true)
+            ? authUser!.displayName
+            : (currentProfile.displayName.isNotEmpty ? currentProfile.displayName : 'Co-Traveler'));
 
-    // If user chose to create a new traveler
-    if (_isCreatingNewMember) {
-      final customName = _newMemberNameController.text.trim();
-      final name = customName.isNotEmpty ? customName : 'Co-Traveler';
+    // Ensure all existing members have isCurrentUser = false initially
+    final updatedMembers = pkg.trip.members.map((m) => m.copyWith(isCurrentUser: false)).toList();
+
+    // Check if current user already exists in this trip
+    final existingIndex = updatedMembers.indexWhere((m) =>
+        (currentUid.isNotEmpty && m.id == currentUid) ||
+        (currentEmail.isNotEmpty && m.email != null && m.email!.trim().toLowerCase() == currentEmail.trim().toLowerCase())
+    );
+
+    String activeMemberId;
+    if (existingIndex != -1) {
+      updatedMembers[existingIndex] = updatedMembers[existingIndex].copyWith(
+        id: currentUid,
+        name: currentDisplayName,
+        email: currentEmail.isNotEmpty ? currentEmail : updatedMembers[existingIndex].email,
+        isCurrentUser: true,
+      );
+      activeMemberId = updatedMembers[existingIndex].id;
+    } else {
       const colors = ['0xFF10B981', '0xFFEC4899', '0xFF3B82F6', '0xFFF97316', '0xFF8B5CF6'];
-      final color = colors[pkg.trip.members.length % colors.length];
-
+      final color = colors[updatedMembers.length % colors.length];
       final newMember = TripMember(
-        id: 'member_${DateTime.now().millisecondsSinceEpoch}',
-        name: name,
+        id: currentUid.isNotEmpty ? currentUid : 'member_${DateTime.now().millisecondsSinceEpoch}',
+        name: currentDisplayName.isNotEmpty ? currentDisplayName : 'Traveler',
+        email: currentEmail.isNotEmpty ? currentEmail : null,
         colorHex: color,
         isCurrentUser: true,
       );
-      pkg.trip.members.add(newMember);
+      updatedMembers.add(newMember);
       activeMemberId = newMember.id;
     }
 
-    final importedTrip = await ref.read(tripListProvider.notifier).importTrip(
-          pkg,
-          activeMemberId: activeMemberId,
-        );
+    final resolvedShareCode = pkg.trip.shareCode ?? _codeController.text.trim();
+    final updatedTrip = pkg.trip.copyWith(
+      members: updatedMembers,
+      shareCode: resolvedShareCode.isNotEmpty ? resolvedShareCode : pkg.trip.shareCode,
+    );
+    final updatedPkg = TripPackage(
+      trip: updatedTrip,
+      stoppages: pkg.stoppages,
+      expenses: pkg.expenses,
+      memories: pkg.memories,
+      settlements: pkg.settlements,
+      auditLogs: pkg.auditLogs,
+    );
 
-    // Broadcast new traveler to cloud room
-    if (_isCreatingNewMember) {
-      CloudTripSyncService.publishTrip(pkg);
+    final importedTrip = await ref.read(tripListProvider.notifier).importTrip(
+      updatedPkg,
+      activeMemberId: activeMemberId,
+    );
+
+    // Register room code so live sync connects to the exact same room
+    if (resolvedShareCode.isNotEmpty) {
+      CloudTripSyncService.registerRoomCode(importedTrip.id, resolvedShareCode);
     }
+
+    // Sync to Cloud Live Room so all co-travelers see the joined member immediately
+    await CloudTripSyncService.publishTrip(updatedPkg);
+    try {
+      ref.read(firestoreSyncServiceProvider).pushTrip(importedTrip);
+    } catch (_) {}
+
+    try {
+      ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
+        tripId: importedTrip.id,
+        type: AlertType.memberJoined,
+        title: 'New Member Joined',
+        message: '${currentDisplayName.isNotEmpty ? currentDisplayName : "A companion"} joined "${importedTrip.title}" using the trip code',
+        senderMemberId: activeMemberId,
+        senderName: currentDisplayName,
+      );
+    } catch (_) {}
 
     // Refresh child providers
     ref.read(allStoppagesProvider.notifier).reload();
@@ -224,11 +276,13 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final selectedMemberName = _isCreatingNewMember
-        ? (_newMemberNameController.text.trim().isNotEmpty
-            ? _newMemberNameController.text.trim()
-            : 'New Traveler')
-        : (_parsedPackage?.trip.getMemberName(_selectedMemberId ?? '') ?? 'Traveler');
+    final authUser = ref.watch(authNotifierProvider).valueOrNull;
+    final currentProfile = UserService.getCurrentUser();
+    final activeDisplayName = _displayNameController.text.trim().isNotEmpty
+        ? _displayNameController.text.trim()
+        : ((authUser?.displayName.isNotEmpty == true)
+            ? authUser!.displayName
+            : (currentProfile.displayName.isNotEmpty ? currentProfile.displayName : 'Traveler'));
 
     return Container(
       constraints: BoxConstraints(
@@ -262,16 +316,16 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
             ),
             const SizedBox(height: 14),
 
-            // Header
+            // Header Banner
             Row(
               children: [
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppTheme.secondary.withAlpha(25),
+                    color: AppTheme.primary.withAlpha(25),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.group_add_rounded, color: AppTheme.secondary, size: 24),
+                  child: const Icon(Icons.add_location_alt_rounded, color: AppTheme.primary, size: 24),
                 ),
                 const SizedBox(width: 12),
                 const Expanded(
@@ -279,11 +333,11 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Join Shared Trip',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        "Join Friends' & Family Journey",
+                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                       ),
                       Text(
-                        'Enter 6-digit room code or scan QR',
+                        'Enter 6-digit room code or scan QR to sync live',
                         style: TextStyle(fontSize: 12, color: Colors.grey),
                       ),
                     ],
@@ -297,56 +351,13 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
             ),
             const SizedBox(height: 16),
 
-            // Quick Actions: Camera Scan + 1-Tap Paste
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _scanQrCode,
-                    icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
-                    label: const Text(
-                      'Scan QR Code',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      backgroundColor: AppTheme.secondary,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _pasteFromClipboard,
-                    icon: const Icon(Icons.paste_rounded, size: 18, color: AppTheme.primary),
-                    label: const Text(
-                      'Paste Code',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      side: const BorderSide(color: AppTheme.primary, width: 1.5),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-
-            // Text Input for Code
+            // 1. Text Input for 6-Digit Share Code (First)
             TextField(
               controller: _codeController,
               textCapitalization: TextCapitalization.characters,
               inputFormatters: [_UpperCaseTextFormatter()],
               decoration: InputDecoration(
-                labelText: 'Live Room Code',
+                labelText: 'Enter 6-Digit Share Code',
                 hintText: 'e.g. TRIP-3PNU or 3PNU',
                 prefixIcon: const Icon(Icons.vpn_key_rounded, color: AppTheme.secondary),
                 suffixIcon: _isLoading
@@ -368,6 +379,49 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
                         : null),
               ),
               onChanged: _analyzeInput,
+            ),
+            const SizedBox(height: 12),
+
+            // 2. Quick Actions: Paste Code (Left) + Scan QR Code (Right)
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _pasteFromClipboard,
+                    icon: const Icon(Icons.paste_rounded, size: 18, color: AppTheme.primary),
+                    label: const Text(
+                      'Paste Code',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      side: const BorderSide(color: AppTheme.primary, width: 1.5),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _scanQrCode,
+                    icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
+                    label: const Text(
+                      'Scan QR Code',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      backgroundColor: AppTheme.secondary,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 10),
 
@@ -393,175 +447,194 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
                 ),
               ),
 
-            // Step 1: Trip Preview Card
-            if (_parsedPackage != null) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppTheme.primary.withAlpha(80), width: 1.5),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+            // Trip Preview Card with Smooth Micro-motion
+            AnimatedCrossFade(
+              duration: const Duration(milliseconds: 320),
+              firstCurve: Curves.easeOutCubic,
+              secondCurve: Curves.easeInCubic,
+              crossFadeState: _parsedPackage != null
+                  ? CrossFadeState.showFirst
+                  : CrossFadeState.showSecond,
+              secondChild: const SizedBox.shrink(),
+              firstChild: _parsedPackage == null
+                  ? const SizedBox.shrink()
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const Icon(Icons.check_circle_rounded, color: Colors.green, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _parsedPackage!.trip.title,
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppTheme.primary.withAlpha(80), width: 1.5),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.check_circle_rounded, color: Colors.green, size: 20),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      _parsedPackage!.trip.title,
+                                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                DateFormatter.formatTripDateRange(
+                                  _parsedPackage!.trip.startDate,
+                                  _parsedPackage!.trip.endDate,
+                                ),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isDark ? Colors.grey[300] : const Color(0xFF475569),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                children: [
+                                  _buildBadge(
+                                    icon: Icons.place_rounded,
+                                    label: '${_parsedPackage!.stoppages.length} stops',
+                                    color: AppTheme.primary,
+                                  ),
+                                  _buildBadge(
+                                    icon: Icons.receipt_rounded,
+                                    label: '${_parsedPackage!.expenses.length} bills',
+                                    color: AppTheme.secondary,
+                                  ),
+                                  _buildBadge(
+                                    icon: Icons.group_rounded,
+                                    label: '${_parsedPackage!.trip.members.length} travelers',
+                                    color: const Color(0xFF8B5CF6),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Professional Joining Identity Card
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF161F2E) : Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 18,
+                                    backgroundColor: AppTheme.primary,
+                                    child: Text(
+                                      activeDisplayName.isNotEmpty
+                                          ? activeDisplayName[0].toUpperCase()
+                                          : 'U',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Flexible(
+                                              child: Text(
+                                                activeDisplayName,
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 14,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.green.withAlpha(30),
+                                                borderRadius: BorderRadius.circular(6),
+                                              ),
+                                              child: const Text(
+                                                'You',
+                                                style: TextStyle(
+                                                  color: Colors.green,
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        if (authUser?.email != null && authUser!.email.isNotEmpty)
+                                          Text(
+                                            authUser.email,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              TextField(
+                                controller: _displayNameController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Your Trip Nickname',
+                                  hintText: 'e.g. Liam, Maya',
+                                  prefixIcon: Icon(Icons.badge_rounded, color: AppTheme.secondary, size: 20),
+                                  isDense: true,
+                                ),
+                                onChanged: (_) => setState(() {}),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Action Button
+                        ElevatedButton.icon(
+                          onPressed: _importAndOpenTrip,
+                          icon: const Icon(Icons.check_circle_rounded),
+                          label: Text(
+                            'Join Journey as $activeDisplayName',
+                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            backgroundColor: AppTheme.primary,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      DateFormatter.formatTripDateRange(
-                        _parsedPackage!.trip.startDate,
-                        _parsedPackage!.trip.endDate,
-                      ),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isDark ? Colors.grey[300] : const Color(0xFF475569),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      children: [
-                        _buildBadge(
-                          icon: Icons.place_rounded,
-                          label: '${_parsedPackage!.stoppages.length} stops',
-                          color: AppTheme.primary,
-                        ),
-                        _buildBadge(
-                          icon: Icons.receipt_rounded,
-                          label: '${_parsedPackage!.expenses.length} bills',
-                          color: AppTheme.secondary,
-                        ),
-                        _buildBadge(
-                          icon: Icons.group_rounded,
-                          label: '${_parsedPackage!.trip.members.length} travelers',
-                          color: const Color(0xFF8B5CF6),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Step 2: Choose Traveler Persona (Super Easy 1-Tap Selection)
-              const Text(
-                'Who is using this device?',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Select your name to log stops and bills under your identity:',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
-                ),
-              ),
-              const SizedBox(height: 10),
-
-              // Traveler Chips
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  ..._parsedPackage!.trip.members.map((m) {
-                    final isSelected = !_isCreatingNewMember && _selectedMemberId == m.id;
-                    final color = m.colorHex != null
-                        ? Color(int.parse(m.colorHex!))
-                        : AppTheme.primary;
-
-                    return ChoiceChip(
-                      selected: isSelected,
-                      label: Text(m.name),
-                      avatar: CircleAvatar(
-                        radius: 10,
-                        backgroundColor: isSelected ? Colors.white : color,
-                        child: Text(
-                          m.name.substring(0, 1).toUpperCase(),
-                          style: TextStyle(
-                            color: isSelected ? color : Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      selectedColor: AppTheme.primary,
-                      labelStyle: TextStyle(
-                        color: isSelected ? Colors.white : (isDark ? Colors.white : Colors.black87),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                      onSelected: (selected) {
-                        if (selected) {
-                          setState(() {
-                            _isCreatingNewMember = false;
-                            _selectedMemberId = m.id;
-                          });
-                        }
-                      },
-                    );
-                  }),
-                  ActionChip(
-                    avatar: const Icon(Icons.person_add_rounded, size: 16, color: AppTheme.secondary),
-                    label: const Text('+ New Traveler', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.secondary)),
-                    backgroundColor: _isCreatingNewMember ? AppTheme.secondary.withAlpha(30) : null,
-                    side: _isCreatingNewMember ? const BorderSide(color: AppTheme.secondary, width: 1.5) : null,
-                    onPressed: () {
-                      setState(() {
-                        _isCreatingNewMember = true;
-                        _selectedMemberId = null;
-                      });
-                    },
-                  ),
-                ],
-              ),
-
-              if (_isCreatingNewMember) ...[
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _newMemberNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Your Name (Co-Traveler)',
-                    hintText: 'e.g. Liam, Maya, Chloe',
-                    prefixIcon: Icon(Icons.badge_rounded, color: AppTheme.secondary),
-                  ),
-                  autofocus: true,
-                  onChanged: (_) => setState(() {}),
-                ),
-              ],
-
-              const SizedBox(height: 20),
-
-              // Action Button
-              ElevatedButton.icon(
-                onPressed: _importAndOpenTrip,
-                icon: const Icon(Icons.check_circle_rounded),
-                label: Text(
-                  'Join Trip as $selectedMemberName',
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  backgroundColor: AppTheme.primary,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-              ),
-            ],
+            ),
           ],
         ),
       ),

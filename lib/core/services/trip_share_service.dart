@@ -182,8 +182,7 @@ class TripShareService {
     final totalSpent = package.expenses.fold<double>(0, (s, e) => s + e.totalAmount);
     final membersList = trip.members.map((m) => m.name).join(', ');
     final dates = DateFormatter.formatTripDateRange(trip.startDate, trip.endDate);
-    final roomCode = CloudTripSyncService.generateRoomCode(trip.id);
-    final code = encodePackage(package);
+    final roomCode = CloudTripSyncService.getRoomCode(trip.id, trip: trip);
 
     return '''
 🚗 You're invited to join "${trip.title}"!
@@ -195,12 +194,9 @@ ${senderName != null ? 'Shared by: $senderName\n' : ''}
 
 🔑 Live Join Code: $roomCode
 
-📲 How to join in real-time:
-1. Open Trip Tracker App
-2. Tap "Join Trip" and enter code: $roomCode (or scan QR)
-
-Offline Backup Code:
-$code
+📲 How to join:
+1. Open Track My Trip App
+2. Tap "Join Trip" and enter code: $roomCode (or scan QR in the app)
 ''';
   }
 

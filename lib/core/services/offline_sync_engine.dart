@@ -2,21 +2,21 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/sync_mutation.dart';
 import '../../providers/trip_provider.dart';
+import '../../providers/auth_provider.dart';
 import 'local_storage_service.dart';
 import 'trip_share_service.dart';
 import 'cloud_trip_sync_service.dart';
 
 class OfflineSyncEngine extends ChangeNotifier {
   final LocalStorageService _storage;
+  final Ref? _ref;
   bool _isSyncing = false;
   DateTime? _lastSyncedTime;
   String? _lastSyncError;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  OfflineSyncEngine(this._storage) {
+  OfflineSyncEngine(this._storage, [this._ref]) {
     _initAutoSync();
   }
 
@@ -50,6 +50,7 @@ class OfflineSyncEngine extends ChangeNotifier {
     required String entityId,
     required String tripId,
     required Map<String, dynamic> payload,
+    bool syncImmediately = true,
   }) async {
     const uuid = Uuid();
     final mutation = SyncMutation(
@@ -67,7 +68,9 @@ class OfflineSyncEngine extends ChangeNotifier {
     notifyListeners();
 
     // Trigger immediate sync attempt in background
-    syncPendingMutationsNow();
+    if (syncImmediately) {
+      syncPendingMutationsNow();
+    }
   }
 
   /// Remove single mutation by ID
@@ -96,6 +99,13 @@ class OfflineSyncEngine extends ChangeNotifier {
   Future<bool> syncPendingMutationsNow() async {
     if (_isSyncing) return false;
 
+    // Guard: Only sync if an authenticated user session is active
+    final authUser = _ref?.read(authNotifierProvider).valueOrNull ?? _storage.getAuthSession();
+    if (authUser == null) {
+      _isSyncing = false;
+      return false;
+    }
+
     final pending = _storage.getPendingMutations().where((m) => m.status == SyncStatus.pending).toList();
     if (pending.isEmpty) {
       _lastSyncError = null;
@@ -115,6 +125,28 @@ class OfflineSyncEngine extends ChangeNotifier {
         final tripIndex = trips.indexWhere((t) => t.id == tripId);
         if (tripIndex != -1) {
           final trip = trips[tripIndex];
+          if (trip.isDeleted) {
+            // Drop mutations for deleted trip
+            for (final m in pending.where((p) => p.tripId == tripId)) {
+              await _storage.removeMutation(m.id);
+            }
+            continue;
+          }
+
+          // Security guard: Ensure this trip actually belongs to the authenticated user
+          final isOwnerOrMember = trip.createdByMemberId == authUser.id ||
+              trip.members.any((m) =>
+                  m.id == authUser.id ||
+                  (authUser.email.isNotEmpty && m.email != null && m.email!.toLowerCase().trim() == authUser.email.toLowerCase().trim()));
+
+          if (!isOwnerOrMember) {
+            // Drop unauthenticated or foreign mutations
+            for (final m in pending.where((p) => p.tripId == tripId)) {
+              await _storage.removeMutation(m.id);
+            }
+            continue;
+          }
+
           final package = TripPackage(
             trip: trip,
             stoppages: _storage.getAllStoppages().where((s) => s.tripId == tripId).toList(),
@@ -137,6 +169,22 @@ class OfflineSyncEngine extends ChangeNotifier {
 
     if (allSuccess) {
       for (final mutation in pending) {
+        try {
+          final coll = _resolveCollection(mutation.entityType);
+          final docRef = CloudTripSyncService.firestore
+              .collection('trips')
+              .doc(mutation.tripId)
+              .collection(coll)
+              .doc(mutation.entityId);
+
+          if (mutation.action == MutationAction.deleteStoppage ||
+              mutation.action == MutationAction.deleteExpense ||
+              mutation.action == MutationAction.deleteMemory) {
+            await docRef.delete();
+          } else {
+            await docRef.set(mutation.payload);
+          }
+        } catch (_) {}
         await _storage.removeMutation(mutation.id);
       }
       _lastSyncedTime = DateTime.now();
@@ -149,11 +197,30 @@ class OfflineSyncEngine extends ChangeNotifier {
     notifyListeners();
     return allSuccess;
   }
+
+  String _resolveCollection(String entityType) {
+    switch (entityType.toLowerCase()) {
+      case 'stoppage':
+      case 'stoppages':
+        return 'stoppages';
+      case 'expense':
+      case 'expenses':
+        return 'expenses';
+      case 'memory':
+      case 'memories':
+        return 'memories';
+      case 'settlement':
+      case 'settlements':
+        return 'settlements';
+      default:
+        return entityType.endsWith('s') ? entityType : '${entityType}s';
+    }
+  }
 }
 
 final offlineSyncEngineProvider = ChangeNotifierProvider<OfflineSyncEngine>((ref) {
   final storage = ref.watch(localStorageServiceProvider);
-  return OfflineSyncEngine(storage);
+  return OfflineSyncEngine(storage, ref);
 });
 
 final pendingMutationsCountProvider = Provider<int>((ref) {

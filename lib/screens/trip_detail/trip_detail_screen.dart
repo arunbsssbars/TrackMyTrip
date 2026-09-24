@@ -6,6 +6,7 @@ import '../../core/services/pdf_export_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../models/trip.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/settlement_provider.dart';
@@ -22,10 +23,11 @@ import 'tabs/map_tab.dart';
 import 'tabs/memories_tab.dart';
 import 'tabs/settlement_tab.dart';
 import 'tabs/timeline_tab.dart';
-import 'dart:async';
-import '../../core/services/proximity_alert_service.dart';
+import 'tabs/members_tab.dart';
+import '../../core/services/firestore_sync_service.dart';
 import '../notifications/notification_center_sheet.dart';
-import '../notifications/in_app_notification_banner.dart';
+import '../common/universal_bottom_bar.dart';
+import '../common/sos_badge_icon.dart';
 
 class TripDetailScreen extends ConsumerStatefulWidget {
   final String tripId;
@@ -44,22 +46,28 @@ class TripDetailScreen extends ConsumerStatefulWidget {
 class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with TickerProviderStateMixin {
   late TabController _tabController;
   int _tabCount = 5;
-  StreamSubscription? _bannerSubscription;
+  bool _isExiting = false;
 
   @override
   void initState() {
     super.initState();
     final trips = ref.read(tripListProvider);
-    final trip = trips.where((t) => t.id == widget.tripId).firstOrNull;
-    _tabCount = (trip?.isSolo ?? false) ? 4 : 5;
+    Trip? trip = trips.where((t) => t.id == widget.tripId).firstOrNull;
+    trip ??= ref.read(localStorageServiceProvider).getTrip(widget.tripId);
+    _tabCount = (trip != null && trip.isSolo) ? 5 : 6;
     _tabController = TabController(
       length: _tabCount,
       vsync: this,
       initialIndex: widget.initialTabIndex.clamp(0, _tabCount - 1),
     );
 
+    // Connect to Firestore Real-Time Room (Stoppages, Expenses, Memories, Radar Locations, Alerts)
+    ref.read(firestoreSyncServiceProvider).connectTripRoom(widget.tripId);
+
     // Start Real-Time Cloud Sync
-    final roomCode = CloudTripSyncService.generateRoomCode(widget.tripId);
+    final roomCode = (trip != null && trip.shareCode != null)
+        ? trip.shareCode!
+        : CloudTripSyncService.getRoomCode(widget.tripId, trip: trip);
     CloudTripSyncService.startLiveSync(
       tripId: widget.tripId,
       roomCode: roomCode,
@@ -77,17 +85,11 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(liveLocationTrackerProvider.notifier).startTracking(widget.tripId);
     });
-
-    _bannerSubscription = ref.read(proximityAlertServiceProvider).bannerStream.listen((alert) {
-      if (mounted) {
-        InAppNotificationBanner.show(context, alert);
-      }
-    });
   }
 
   @override
   void dispose() {
-    _bannerSubscription?.cancel();
+    ref.read(firestoreSyncServiceProvider).disconnectAll();
     CloudTripSyncService.stopLiveSync(widget.tripId);
     _tabController.dispose();
     super.dispose();
@@ -120,65 +122,6 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (context) => ShareTripSheet(trip: trip),
-    );
-  }
-
-  void _showSwitchPersonaDialog(Trip trip) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Row(
-          children: [
-            Icon(Icons.switch_account_rounded, color: AppTheme.primary),
-            SizedBox(width: 8),
-            Text('Switch Active Traveler', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Select who is using this phone so new bills and memories default to this traveler:',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-            const SizedBox(height: 12),
-            ...trip.members.map((m) {
-              final isCurrent = m.id == trip.currentUserMember?.id;
-              final color = m.colorHex != null
-                  ? Color(int.parse(m.colorHex!))
-                  : AppTheme.primary;
-              return ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: CircleAvatar(
-                  backgroundColor: color,
-                  child: Text(
-                    m.name.substring(0, 1).toUpperCase(),
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                title: Text(
-                  m.name,
-                  style: TextStyle(fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal),
-                ),
-                subtitle: isCurrent ? const Text('Active on this device', style: TextStyle(color: AppTheme.primary, fontSize: 11)) : null,
-                trailing: isCurrent ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary) : null,
-                onTap: () {
-                  ref.read(tripListProvider.notifier).switchActiveMember(trip.id, m.id);
-                  Navigator.of(ctx).pop();
-                },
-              );
-            }),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -405,32 +348,127 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
   }
 
   void _confirmDeleteTrip(BuildContext context, Trip trip) {
+    final expenses = ref.read(allExpensesProvider).where((e) => e.tripId == trip.id).toList();
+    final companionCount = trip.members.where((m) => m.id != trip.createdByMemberId).length;
+    final hasExpenses = expenses.isNotEmpty;
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Delete Journey?'),
-        content: Text('Are you sure you want to delete "${trip.title}" and all its recorded stops and bills?'),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 24),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Delete for Everyone?',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Are you sure you want to permanently delete "${trip.title}"?'),
+              const SizedBox(height: 12),
+              if (companionCount > 0)
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withAlpha(20),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '⚠️ This will remove the trip for you and all $companionCount companion(s). All shared logs and memories will be permanently deleted.',
+                    style: const TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              if (hasExpenses)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(
+                    'Note: ${expenses.length} recorded expense(s) will be erased.',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ),
+            ],
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
+              setState(() => _isExiting = true);
               Navigator.of(ctx).pop();
-              ref.read(tripListProvider.notifier).deleteTrip(trip.id);
-              Navigator.of(context).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Trip "${trip.title}" deleted'),
-                  backgroundColor: Colors.red,
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
+              if (mounted && Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+              }
+              await ref.read(tripListProvider.notifier).deleteTrip(trip.id);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Trip "${trip.title}" deleted for everyone'),
+                    backgroundColor: Colors.red,
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Delete', style: TextStyle(color: Colors.white)),
+            child: const Text('Delete Trip', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmLeaveTrip(BuildContext context, Trip trip) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.exit_to_app_rounded, color: Colors.amber[900], size: 24),
+            const SizedBox(width: 8),
+            const Text('Leave Trip?'),
+          ],
+        ),
+        content: Text(
+          'You will no longer be part of "${trip.title}". Your recorded contributions will remain with the group, and this trip will be removed from your device.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              setState(() => _isExiting = true);
+              Navigator.of(ctx).pop();
+              if (mounted && Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+              }
+              await ref.read(tripListProvider.notifier).leaveTrip(trip.id);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('You left "${trip.title}"'),
+                    backgroundColor: Colors.amber[900],
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.amber[900]),
+            child: const Text('Leave Trip', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -439,6 +477,28 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<List<Trip>>(tripListProvider, (previous, next) {
+      if (previous != null && previous.any((t) => t.id == widget.tripId)) {
+        if (!next.any((t) => t.id == widget.tripId)) {
+          final stillInStorage = ref.read(localStorageServiceProvider).getTrip(widget.tripId);
+          if (stillInStorage == null) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) {
+                Navigator.of(context).popUntil((route) => route.isFirst);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('This trip was deleted or removed.'),
+                    backgroundColor: Colors.redAccent,
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
+            });
+          }
+        }
+      }
+    });
+
     final trips = ref.watch(tripListProvider);
     final currentTrip = ref.watch(currentTripProvider);
 
@@ -449,19 +509,60 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
         break;
       }
     }
-    final trip = matchedTrip ?? currentTrip;
-
-    if (trip == null) {
+    Trip? tripCandidate = matchedTrip ?? (currentTrip?.id == widget.tripId ? currentTrip : null);
+    if (tripCandidate == null) {
+      final fromStorage = ref.read(localStorageServiceProvider).getTrip(widget.tripId);
+      if (fromStorage != null && !fromStorage.isDeleted) {
+        tripCandidate = fromStorage;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          ref.read(tripListProvider.notifier).reload();
+        });
+      }
+    }
+    if (_isExiting || tripCandidate == null || tripCandidate.isDeleted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+          if (!_isExiting) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Row(
+                  children: [
+                    Icon(Icons.info_outline_rounded, color: Colors.white, size: 18),
+                    SizedBox(width: 8),
+                    Expanded(child: Text('This trip is no longer active or was deleted.')),
+                  ],
+                ),
+                backgroundColor: Color(0xFFE11D48),
+                behavior: SnackBarBehavior.floating,
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+        }
+      });
       return Scaffold(
-        appBar: AppBar(),
-        body: const Center(child: Text('Trip not found')),
+        appBar: AppBar(
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () {
+              if (Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+              }
+            },
+          ),
+        ),
+        body: const Center(
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
       );
     }
+    final Trip trip = tripCandidate;
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final activeMember = trip.currentUserMember ?? (trip.members.isNotEmpty ? trip.members.first : null);
 
-    final neededCount = trip.isSolo ? 4 : 5;
+    final neededCount = trip.isSolo ? 5 : 6;
     if (_tabCount != neededCount) {
       final oldIndex = _tabController.index;
       _tabCount = neededCount;
@@ -488,10 +589,10 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
           children: [
             Row(
               children: [
-                Flexible(
+                Expanded(
                   child: Text(
                     trip.title,
-                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17.5, letterSpacing: -0.3),
+                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16.5, letterSpacing: -0.3),
                     overflow: TextOverflow.ellipsis,
                     maxLines: 1,
                   ),
@@ -499,7 +600,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
                 if (trip.isCompleted) ...[
                   const SizedBox(width: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                     decoration: BoxDecoration(
                       color: Colors.amber.withAlpha(25),
                       borderRadius: BorderRadius.circular(6),
@@ -508,7 +609,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
                     child: Text(
                       trip.rating != null ? '⭐ ${trip.rating!.toStringAsFixed(1)}' : 'ENDED',
                       style: TextStyle(
-                        fontSize: 9.5,
+                        fontSize: 9,
                         fontWeight: FontWeight.w900,
                         color: Colors.amber[900],
                       ),
@@ -519,9 +620,9 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
             ),
             const SizedBox(height: 2),
             Text(
-              '${DateFormatter.formatTripDateRange(trip.startDate, trip.endDate)} • ${trip.isSolo ? "Solo" : (trip.isFamily ? "Family" : "Group")}${activeMember != null ? " • ${activeMember.name}" : ""}',
+              '${DateFormatter.formatTripDateRange(trip.startDate, trip.endDate)} • ${trip.isSolo ? "Solo" : (trip.isFamily ? "Family" : "Group")}',
               style: TextStyle(
-                fontSize: 11.5,
+                fontSize: 11,
                 color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                 fontWeight: FontWeight.w500,
               ),
@@ -531,19 +632,13 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
           ],
         ),
         actions: [
-          Consumer(
-            builder: (context, ref, _) {
-              final unread = ref.watch(proximityAlertServiceProvider).unreadCount;
-              return IconButton(
-                icon: Badge(
-                  isLabelVisible: unread > 0,
-                  label: Text('$unread', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                  child: const Icon(Icons.notifications_outlined),
-                ),
-                tooltip: 'Notifications & Safety',
-                onPressed: () => NotificationCenterSheet.show(context),
-              );
-            },
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+            child: SosBadgeIcon(
+              size: 32,
+              tooltip: 'Emergency SOS & Safety',
+              onTap: () => NotificationCenterSheet.show(context),
+            ),
           ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert_rounded, size: 22),
@@ -552,13 +647,11 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             constraints: const BoxConstraints(minWidth: 200, maxWidth: 230),
             position: PopupMenuPosition.under,
-            onSelected: (val) {
+            onSelected: (val) async {
               if (val == 'share') {
                 _openShareSheet(trip);
               } else if (val == 'edit_trip') {
                 EditTripDialog.show(context, trip);
-              } else if (val == 'switch_persona') {
-                _showSwitchPersonaDialog(trip);
               } else if (val == 'end_trip') {
                 _showEndTripExperienceDialog(trip);
               } else if (val == 'analytics') {
@@ -569,225 +662,331 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
                 _exportPdf();
               } else if (val == 'delete') {
                 _confirmDeleteTrip(context, trip);
+              } else if (val == 'leave') {
+                _confirmLeaveTrip(context, trip);
+              } else if (val == 'signout') {
+                await ref.read(authNotifierProvider.notifier).logout();
+                if (context.mounted) {
+                  Navigator.of(context, rootNavigator: true).popUntil((route) => route.isFirst);
+                }
               }
             },
-            itemBuilder: (context) => [
-              // 1. Share & Sync
-              PopupMenuItem(
-                height: 42,
-                value: 'share',
-                child: Row(
-                  children: [
-                    const Icon(Icons.share_outlined, color: AppTheme.secondary, size: 18),
-                    const SizedBox(width: 10),
-                    const Expanded(
-                      child: Text('Share Trip', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF10B981).withAlpha(20),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        CloudTripSyncService.getRoomCode(trip.id, trip: trip).replaceAll('TRIP-', ''),
-                        style: const TextStyle(fontSize: 10, color: Color(0xFF10B981), fontWeight: FontWeight.w800),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            itemBuilder: (context) {
+              final authUser = ref.read(authNotifierProvider).valueOrNull;
+              final isLead = trip.isCreator(authUser?.id);
 
-              // 2. Edit Trip Details & Companions
-              const PopupMenuItem(
-                height: 40,
-                value: 'edit_trip',
-                child: Row(
-                  children: [
-                    Icon(Icons.edit_outlined, color: AppTheme.primary, size: 18),
-                    SizedBox(width: 10),
-                    Text('Edit Trip & Members', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
-
-              // 3. Switch Persona (Only if group/family has multiple members)
-              if (trip.members.length > 1)
+              return [
+                // 1. Share & Sync
                 PopupMenuItem(
-                  height: 40,
-                  value: 'switch_persona',
+                  height: 42,
+                  value: 'share',
                   child: Row(
                     children: [
-                      const Icon(Icons.swap_horiz_rounded, color: AppTheme.primary, size: 18),
+                      const Icon(Icons.share_outlined, color: AppTheme.secondary, size: 18),
                       const SizedBox(width: 10),
-                      Expanded(
+                      const Expanded(
+                        child: Text('Share Trip', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withAlpha(20),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
                         child: Text(
-                          'Switch Traveler (${activeMember?.name ?? "Me"})',
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          CloudTripSyncService.getRoomCode(trip.id, trip: trip).replaceAll('TRIP-', ''),
+                          style: const TextStyle(fontSize: 10, color: Color(0xFF10B981), fontWeight: FontWeight.w800),
                         ),
                       ),
                     ],
                   ),
                 ),
 
-              // 4. End Trip / Experience Review
-              PopupMenuItem(
-                height: 40,
-                value: 'end_trip',
-                child: Row(
-                  children: [
-                    Icon(
-                      trip.isCompleted ? Icons.star_outline_rounded : Icons.flag_outlined,
-                      color: Colors.amber[800],
-                      size: 18,
+                // 2. Edit Trip Details & Companions
+                const PopupMenuItem(
+                  height: 40,
+                  value: 'edit_trip',
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit_outlined, color: AppTheme.primary, size: 18),
+                      SizedBox(width: 10),
+                      Text('Edit Trip & Members', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+
+                // 3. End Trip / Experience Review (Creator Only)
+                if (isLead)
+                  PopupMenuItem(
+                    height: 40,
+                    value: 'end_trip',
+                    child: Row(
+                      children: [
+                        Icon(
+                          trip.isCompleted ? Icons.star_outline_rounded : Icons.flag_outlined,
+                          color: Colors.amber[800],
+                          size: 18,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          trip.isCompleted ? 'Trip Review' : 'End Trip & Review',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.amber[900],
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 10),
-                    Text(
-                      trip.isCompleted ? 'Trip Review' : 'End Trip & Review',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.amber[900],
-                      ),
+                  ),
+
+
+                // 5. Trip Analytics
+                const PopupMenuItem(
+                  height: 40,
+                  value: 'analytics',
+                  child: Row(
+                    children: [
+                      Icon(Icons.insights_outlined, color: AppTheme.primary, size: 18),
+                      SizedBox(width: 10),
+                      Text('Trip Analytics', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+
+                // 6. Export PDF
+                const PopupMenuItem(
+                  height: 40,
+                  value: 'pdf',
+                  child: Row(
+                    children: [
+                      Icon(Icons.picture_as_pdf_outlined, color: Colors.deepOrange, size: 18),
+                      SizedBox(width: 10),
+                      Text('Export PDF', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+
+                const PopupMenuDivider(height: 8),
+
+                // 7. Role-based: Delete for Everyone (Creator) vs Leave Trip (Companion)
+                if (isLead)
+                  const PopupMenuItem(
+                    height: 38,
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_forever_rounded, color: Colors.red, size: 18),
+                        SizedBox(width: 10),
+                        Text('Delete for Everyone', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.red)),
+                      ],
                     ),
-                  ],
-                ),
-              ),
+                  )
+                else
+                  PopupMenuItem(
+                    height: 38,
+                    value: 'leave',
+                    child: Row(
+                      children: [
+                        Icon(Icons.exit_to_app_rounded, color: Colors.amber[900], size: 18),
+                        const SizedBox(width: 10),
+                        Text('Leave Trip', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.amber[900])),
+                      ],
+                    ),
+                  ),
 
-              // 5. Trip Analytics
-              const PopupMenuItem(
-                height: 40,
-                value: 'analytics',
-                child: Row(
-                  children: [
-                    Icon(Icons.insights_outlined, color: AppTheme.primary, size: 18),
-                    SizedBox(width: 10),
-                    Text('Trip Analytics', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                  ],
+                // 8. Sign Out
+                const PopupMenuItem(
+                  height: 38,
+                  value: 'signout',
+                  child: Row(
+                    children: [
+                      Icon(Icons.logout_rounded, color: Colors.red, size: 18),
+                      SizedBox(width: 10),
+                      Text('Sign Out', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.red)),
+                    ],
+                  ),
                 ),
-              ),
-
-              // 6. Export PDF
-              const PopupMenuItem(
-                height: 40,
-                value: 'pdf',
-                child: Row(
-                  children: [
-                    Icon(Icons.picture_as_pdf_outlined, color: Colors.deepOrange, size: 18),
-                    SizedBox(width: 10),
-                    Text('Export PDF', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
-
-              const PopupMenuDivider(height: 8),
-
-              // 7. Delete Trip
-              const PopupMenuItem(
-                height: 38,
-                value: 'delete',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete_outline_rounded, color: Colors.red, size: 18),
-                    SizedBox(width: 10),
-                    Text('Delete Journey', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.red)),
-                  ],
-                ),
-              ),
-            ],
+              ];
+            },
           ),
           const SizedBox(width: 4),
         ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(42),
+          child: Container(
+            height: 42,
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+              border: Border(
+                top: BorderSide(
+                  color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                  width: 0.8,
+                ),
+                bottom: BorderSide(
+                  color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0),
+                  width: 1,
+                ),
+              ),
+            ),
+            child: ShaderMask(
+              shaderCallback: (Rect bounds) {
+                return LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    Colors.white.withAlpha(0),
+                    Colors.white,
+                    Colors.white,
+                    Colors.white.withAlpha(0),
+                  ],
+                  stops: const [0.0, 0.02, 0.98, 1.0],
+                ).createShader(bounds);
+              },
+              blendMode: BlendMode.dstIn,
+              child: TabBar(
+                controller: _tabController,
+                isScrollable: true,
+                physics: const BouncingScrollPhysics(),
+                tabAlignment: TabAlignment.start,
+                labelColor: Colors.white,
+                unselectedLabelColor: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                indicator: BoxDecoration(
+                  color: AppTheme.primary,
+                  borderRadius: BorderRadius.circular(18),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primary.withAlpha(80),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1.5),
+                    ),
+                  ],
+                ),
+                indicatorSize: TabBarIndicatorSize.tab,
+                indicatorWeight: 0,
+                indicatorPadding: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
+                labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+                splashBorderRadius: BorderRadius.circular(18),
+                tabs: [
+                  const Tab(
+                    height: 34,
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.timeline_rounded, size: 14),
+                          SizedBox(width: 4),
+                          Text('Timeline', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const Tab(
+                    height: 34,
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.map_rounded, size: 14),
+                          SizedBox(width: 4),
+                          Text('Route', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const Tab(
+                    height: 34,
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.groups_rounded, size: 14),
+                          SizedBox(width: 4),
+                          Text('Members', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Tab(
+                    height: 34,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.receipt_long_rounded, size: 14),
+                          const SizedBox(width: 4),
+                          Text(trip.isSolo ? 'Budget' : 'Bills', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (!trip.isSolo)
+                    const Tab(
+                      height: 34,
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.handshake_rounded, size: 14),
+                            SizedBox(width: 4),
+                            Text('Settle', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  const Tab(
+                    height: 34,
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.photo_library_rounded, size: 14),
+                          SizedBox(width: 4),
+                          Text('Memories', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
       body: TabBarView(
         controller: _tabController,
         children: [
           TimelineTab(trip: trip),
+          MapTab(trip: trip),
+          MembersTab(trip: trip),
           ExpensesTab(trip: trip),
           if (!trip.isSolo)
             SettlementTab(trip: trip),
-          MapTab(trip: trip),
           MemoriesTab(trip: trip),
         ],
-      ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: isDark ? AppTheme.surfaceDark : Colors.white,
-          border: Border(
-            top: BorderSide(
-              color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0),
-              width: 1,
-            ),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withAlpha(isDark ? 30 : 8),
-              blurRadius: 10,
-              offset: const Offset(0, -3),
-            ),
-          ],
-        ),
-        child: SafeArea(
-          child: AnimatedBuilder(
-            animation: _tabController,
-            builder: (context, child) {
-              final currentIndex = _tabController.index;
-              return NavigationBar(
-                selectedIndex: currentIndex,
-                onDestinationSelected: (idx) {
-                  _tabController.animateTo(idx);
-                  setState(() {});
-                },
-                backgroundColor: Colors.transparent,
-                indicatorColor: AppTheme.primary.withAlpha(30),
-                height: 64,
-                elevation: 0,
-                labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-                destinations: [
-                  const NavigationDestination(
-                    icon: Icon(Icons.timeline_rounded, size: 22),
-                    selectedIcon: Icon(Icons.timeline_rounded, color: AppTheme.primary, size: 24),
-                    label: 'Timeline',
-                  ),
-                  NavigationDestination(
-                    icon: const Icon(Icons.receipt_long_rounded, size: 22),
-                    selectedIcon: const Icon(Icons.receipt_long_rounded, color: AppTheme.primary, size: 24),
-                    label: trip.isSolo ? 'Budget' : 'Bills',
-                  ),
-                  if (!trip.isSolo)
-                    const NavigationDestination(
-                      icon: Icon(Icons.handshake_rounded, size: 22),
-                      selectedIcon: Icon(Icons.handshake_rounded, color: AppTheme.primary, size: 24),
-                      label: 'Settle',
-                    ),
-                  const NavigationDestination(
-                    icon: Icon(Icons.map_rounded, size: 22),
-                    selectedIcon: Icon(Icons.map_rounded, color: AppTheme.primary, size: 24),
-                    label: 'Route',
-                  ),
-                  const NavigationDestination(
-                    icon: Icon(Icons.photo_library_rounded, size: 22),
-                    selectedIcon: Icon(Icons.photo_library_rounded, color: AppTheme.primary, size: 24),
-                    label: 'Memories',
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
       ),
       floatingActionButton: AnimatedBuilder(
         animation: _tabController,
         builder: (context, child) {
           final index = _tabController.index;
-          // Settle tab & Route tab - no screen-level FAB needed
-          if (index == 2 && !trip.isSolo) {
+          // Index 1: Route tab - internal map controls
+          if (index == 1) {
             return const SizedBox.shrink();
           }
-          final routeTabIndex = trip.isSolo ? 2 : 3;
-          if (index == routeTabIndex) {
+
+          // Index 2: Members tab - dedicated header action
+          if (index == 2) {
+            return const SizedBox.shrink();
+          }
+
+          // Index 4: Settle tab (when not solo) - internal settle action
+          if (index == 4 && !trip.isSolo) {
             return const SizedBox.shrink();
           }
 
@@ -802,8 +1001,8 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
             onPressed = () {
               AddStoppageDialog.show(context, tripId: trip.id);
             };
-          } else if (index == 1) {
-            // Tab 1: Bills & Splits / Budget tab
+          } else if (index == 3) {
+            // Tab 3: Bills & Splits / Budget tab
             icon = Icons.add_card_rounded;
             label = 'Add Bill';
             onPressed = () {
@@ -812,7 +1011,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
               );
             };
           } else if (index == (_tabCount - 1)) {
-            // Last Tab: Memories tab
+            // Last tab: Memories tab
             icon = Icons.add_a_photo_rounded;
             label = 'Add Photo';
             onPressed = () {
@@ -881,6 +1080,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
           );
         },
       ),
+      bottomNavigationBar: const UniversalBottomBar(selectedIndexOverride: 0),
     );
   }
 }

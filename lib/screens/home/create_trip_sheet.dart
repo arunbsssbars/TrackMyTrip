@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/services/cloud_trip_sync_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../models/trip.dart';
 import '../../models/trip_member.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/trip_provider.dart';
+import '../../providers/invitation_provider.dart';
 import '../trip/companion_search_dialog.dart';
 
 class CreateTripSheet extends ConsumerStatefulWidget {
@@ -31,24 +34,8 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
   DateTime _endDate = DateTime.now().add(const Duration(days: 3));
   String _selectedCurrency = LocationService.detectLocalCurrencyFast();
   late String _tripType; // 'group', 'family', 'solo'
-  final List<TripMember> _companions = [
-    const TripMember(
-      id: 'usr_sarah_101',
-      name: 'Sarah Jenkins',
-      colorHex: '0xFFEC4899',
-      isCurrentUser: false,
-      latitude: 37.7749,
-      longitude: -122.4194,
-    ),
-    const TripMember(
-      id: 'usr_mike_102',
-      name: 'Mike Chen',
-      colorHex: '0xFF3B82F6',
-      isCurrentUser: false,
-      latitude: 37.7849,
-      longitude: -122.4094,
-    ),
-  ];
+  final List<TripMember> _companions = [];
+  bool _isSubmitting = false;
 
   @override
   void initState() {
@@ -58,6 +45,10 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
       _tripType = init!;
     } else {
       _tripType = 'group';
+    }
+    final authUser = ref.read(authNotifierProvider).valueOrNull;
+    if (authUser != null && authUser.displayName.isNotEmpty) {
+      _myMemberNameController.text = authUser.displayName;
     }
     _autoDetectCurrency();
   }
@@ -107,16 +98,33 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
   }
 
   void _openCompanionSearch() {
+    final authUser = ref.read(authNotifierProvider).valueOrNull;
     final myMember = TripMember(
-      id: 'me',
+      id: authUser?.id ?? 'me',
       name: _myMemberNameController.text.trim().isEmpty ? 'You' : _myMemberNameController.text.trim(),
+      email: authUser?.email,
       isCurrentUser: true,
-      colorHex: '0xFF0F766E',
+      colorHex: authUser?.colorHex ?? '0xFF0F766E',
     );
 
     CompanionSearchDialog.show(
       context,
       currentMembers: [myMember, ..._companions],
+      actionLabel: 'Add',
+      onUserSelected: (user) {
+        final cleanEmail = (user.email != null && user.email!.trim().isNotEmpty) ? user.email!.trim().toLowerCase() : null;
+        final member = TripMember(
+          id: user.id,
+          name: user.displayName.isNotEmpty ? user.displayName : user.username,
+          email: cleanEmail,
+          colorHex: user.colorHex ?? '0xFF3B82F6',
+        );
+        if (!_companions.any((c) => c.id == member.id || (c.email != null && c.email == member.email))) {
+          setState(() {
+            _companions.add(member);
+          });
+        }
+      },
       onCompanionSelected: (member) {
         if (!_companions.any((c) => c.id == member.id || c.name.toLowerCase() == member.name.toLowerCase())) {
           setState(() {
@@ -140,7 +148,7 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
               primary: AppTheme.primary,
               onPrimary: Colors.white,
               surface: Colors.white,
-              onSurface: AppTheme.primary,
+              onSurface: Color(0xFF1E293B),
             ),
           ),
           child: child!,
@@ -156,26 +164,38 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
     }
   }
 
-  void _submit() {
+  void _submit() async {
+    if (_isSubmitting) return;
     if (!_formKey.currentState!.validate()) return;
 
-    const uuid = Uuid();
-    final myMemberId = 'member_${uuid.v4().substring(0, 8)}';
+    setState(() => _isSubmitting = true);
+
+    final authUser = ref.read(authNotifierProvider).valueOrNull;
+    final myMemberId = authUser?.id ?? 'member_${const Uuid().v4().substring(0, 8)}';
+    final myName = _myMemberNameController.text.trim().isNotEmpty
+        ? _myMemberNameController.text.trim()
+        : (authUser?.displayName.isNotEmpty == true ? authUser!.displayName : 'You');
+    final myEmail = authUser?.email;
 
     final myMember = TripMember(
       id: myMemberId,
-      name: _myMemberNameController.text.trim().isEmpty ? 'You' : _myMemberNameController.text.trim(),
+      name: myName,
+      email: myEmail,
       isCurrentUser: true,
-      colorHex: '0xFF0F766E',
+      colorHex: authUser?.colorHex ?? '0xFF0F766E',
     );
 
-    final memberList = <TripMember>[myMember];
-    if (_tripType != 'solo') {
-      memberList.addAll(_companions);
-    }
+    // Two-Phase Workflow: Only creator and offline manual companions are in initial trip.members.
+    // Registered companions receive invitations and join once accepted.
+    final offlineCompanions = _companions.where((c) => c.id.startsWith('custom_') && (c.email == null || c.email!.isEmpty)).toList();
+    final memberList = <TripMember>[myMember, ...offlineCompanions];
+
+    final newTripId = const Uuid().v4();
+    final generatedRoomCode = CloudTripSyncService.generateRoomCode(newTripId);
+    CloudTripSyncService.registerRoomCode(newTripId, generatedRoomCode);
 
     final newTrip = Trip(
-      id: uuid.v4(),
+      id: newTripId,
       title: _titleController.text.trim(),
       description: _descriptionController.text.trim().isNotEmpty ? _descriptionController.text.trim() : null,
       startDate: _startDate,
@@ -185,10 +205,25 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
       members: memberList,
       createdByMemberId: myMemberId,
       createdAt: DateTime.now(),
+      shareCode: generatedRoomCode,
     );
 
     ref.read(tripListProvider.notifier).addTrip(newTrip);
     ref.read(selectedTripIdProvider.notifier).state = newTrip.id;
+
+    // Two-Phase Workflow: Dispatch invitations in batch (creates exactly 1 consolidated notification for the creator)
+    if (_tripType != 'solo' && _companions.isNotEmpty) {
+      final registerableCompanions = _companions.where((c) => c.email != null || !c.id.startsWith('custom_')).toList();
+      if (registerableCompanions.isNotEmpty) {
+        ref.read(invitationProvider.notifier).sendInvitationsBatch(
+          tripId: newTrip.id,
+          tripTitle: newTrip.title,
+          invitees: registerableCompanions,
+          tripJson: newTrip.toJson(),
+        );
+      }
+    }
+
     Navigator.of(context).pop();
   }
 
@@ -309,7 +344,7 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
                 controller: _titleController,
                 decoration: const InputDecoration(
                   labelText: 'Trip Destination / Title *',
-                  hintText: 'e.g. Manali Road Trip, Bali Vacation',
+                  hintText: 'Enter trip title or destination',
                   prefixIcon: Icon(Icons.flight_takeoff_rounded),
                 ),
                 validator: (val) => val == null || val.trim().isEmpty ? 'Please enter a trip title' : null,
@@ -319,7 +354,7 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
                 controller: _descriptionController,
                 decoration: const InputDecoration(
                   labelText: 'Description / Route Notes',
-                  hintText: 'e.g. Exploring scenic viewpoints, cafes and stays',
+                  hintText: 'Add route notes or description (optional)',
                   prefixIcon: Icon(Icons.notes_rounded),
                 ),
                 maxLines: 2,
@@ -561,9 +596,18 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
               const SizedBox(height: 24),
 
               ElevatedButton.icon(
-                onPressed: _submit,
-                icon: const Icon(Icons.check_circle_rounded, size: 18),
-                label: const Text('Create & Start Trip', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                onPressed: _isSubmitting ? null : _submit,
+                icon: _isSubmitting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.check_circle_rounded, size: 18),
+                label: Text(
+                  _isSubmitting ? 'Creating Trip...' : 'Create & Start Trip',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primary,
                   foregroundColor: Colors.white,

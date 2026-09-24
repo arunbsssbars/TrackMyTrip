@@ -17,7 +17,7 @@ void main() {
 
   group('Phase 1 Verification: User Identity & Companion Discovery', () {
     test('UserProfile serializes and deserializes correctly with @username', () {
-      final profile = const UserProfile(
+      const profile = UserProfile(
         id: 'usr_123',
         username: 'arun_explorer',
         displayName: 'Arun V',
@@ -38,7 +38,20 @@ void main() {
       expect(revived.displayName, equals('Arun V'));
     });
 
-    test('UserService searches mock companion directory by @username and display name', () async {
+    test('UserService searches registered companion directory by @username and display name', () async {
+      UserService.registerUser(const UserProfile(
+        id: 'usr_sarah_test',
+        username: 'sarah_travels',
+        displayName: 'Sarah Jenkins',
+        email: 'sarah.j@example.com',
+      ));
+      UserService.registerUser(const UserProfile(
+        id: 'usr_mike_test',
+        username: 'mike_trekker',
+        displayName: 'Mike Chen',
+        email: 'mike.chen@example.com',
+      ));
+
       // Search with '@'
       final results1 = await UserService.searchUsers('@sarah');
       expect(results1, isNotEmpty);
@@ -188,7 +201,7 @@ void main() {
       expect(defaultUser.id, isNotEmpty);
 
       // Switch persona to Sarah
-      final sarah = const UserProfile(
+      const sarah = UserProfile(
         id: 'usr_sarah_101',
         username: 'sarah_travels',
         displayName: 'Sarah Jenkins',

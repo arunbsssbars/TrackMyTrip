@@ -9,15 +9,21 @@ import 'screens/main_scaffold.dart';
 import 'screens/auth/login_screen.dart';
 
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+
+import 'screens/auth/email_verification_screen.dart';
+import 'models/auth_user.dart';
+
+import 'core/utils/app_logger.dart';
+import 'core/database/app_database.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  print("Handling a background message: ${message.messageId}");
+  AppLogger.info("Handling a background message: ${message.messageId}");
 }
 
 void main() async {
@@ -35,14 +41,13 @@ void main() async {
     cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
   );
 
-  // Authenticate anonymously so we can write to Firestore securely
-  final auth = FirebaseAuth.instance;
-  if (auth.currentUser == null) {
-    await auth.signInAnonymously();
-  }
-
   await MapTileCacheService.purgeLegacyCache();
-  final storageService = await LocalStorageService.init();
+  await AppDatabase.purgeLegacyDatabase();
+
+  final initialUser = FirebaseAuth.instance.currentUser;
+  final storageService = await LocalStorageService.init(
+    initialUserId: initialUser?.uid,
+  );
 
   runApp(
     ProviderScope(
@@ -54,21 +59,42 @@ void main() async {
   );
 }
 
+class AppScrollBehavior extends MaterialScrollBehavior {
+  const AppScrollBehavior();
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) {
+    return const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
+  }
+}
+
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
 class TripStopsApp extends ConsumerWidget {
   const TripStopsApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final authState = ref.watch(authNotifierProvider);
+    final authService = ref.watch(authServiceProvider);
 
     return MaterialApp(
-      title: 'Trip Tracker',
+      navigatorKey: appNavigatorKey,
+      title: 'Track My Trip',
       debugShowCheckedModeBanner: false,
+      scrollBehavior: const AppScrollBehavior(),
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.system,
       home: authState.when(
-        data: (user) => user != null ? const MainScaffold() : const LoginScreen(),
+        data: (user) {
+          if (user == null) return const LoginScreen();
+          // Require email verification for email-based accounts
+          if (user.provider == AuthProviderType.email && !authService.isEmailVerified) {
+            return EmailVerificationScreen(email: user.email);
+          }
+          return const MainScaffold();
+        },
         loading: () => const Scaffold(
           body: Center(child: CircularProgressIndicator()),
         ),

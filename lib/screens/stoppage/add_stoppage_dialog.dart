@@ -52,6 +52,7 @@ class AddStoppageDialog extends ConsumerStatefulWidget {
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useRootNavigator: true,
       backgroundColor: Colors.transparent,
       builder: (context) => AddStoppageDialog(
         tripId: tripId,
@@ -103,8 +104,8 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
   final _nameController = TextEditingController();
   final _addressController = TextEditingController();
   final _notesController = TextEditingController();
-  final _latController = TextEditingController(text: '28.4990');
-  final _lngController = TextEditingController(text: '77.5330');
+  final _latController = TextEditingController();
+  final _lngController = TextEditingController();
 
   // In-Stoppage Bill Creation State
   bool _attachBill = false;
@@ -132,6 +133,7 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
   @override
   void initState() {
     super.initState();
+    _isDetectingLocation = widget.autoDetectGps && widget.initialPosition == null;
     if (widget.initialCategory != null) {
       _selectedCategory = widget.initialCategory!;
     }
@@ -148,6 +150,10 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
       }
     } else if (widget.autoDetectGps) {
       _detectCurrentLocation();
+    } else {
+      // Fallback coordinates when GPS is disabled
+      _latController.text = '28.4990';
+      _lngController.text = '77.5330';
     }
   }
 
@@ -424,15 +430,19 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
   Future<void> _detectCurrentLocation() async {
     setState(() => _isDetectingLocation = true);
 
-    final pos = await LocationService.getCurrentPosition();
-    if (pos != null && mounted) {
-      _latController.text = pos.latitude.toStringAsFixed(6);
-      _lngController.text = pos.longitude.toStringAsFixed(6);
-      await _reverseGeocode(pos.latitude, pos.longitude);
-    }
-
-    if (mounted) {
-      setState(() => _isDetectingLocation = false);
+    try {
+      final pos = await LocationService.getCurrentPosition();
+      if (pos != null && mounted) {
+        setState(() {
+          _latController.text = pos.latitude.toStringAsFixed(6);
+          _lngController.text = pos.longitude.toStringAsFixed(6);
+        });
+        await _reverseGeocode(pos.latitude, pos.longitude);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isDetectingLocation = false);
+      }
     }
   }
 
@@ -453,18 +463,27 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
   }
 
   Future<void> _reverseGeocode(double lat, double lng) async {
-    _fetchNearbyPOIs(lat, lng);
-    final details = await LocationService.reverseGeocode(lat, lng);
-    if (mounted) {
-      if (_nameController.text.trim().isEmpty || _nameController.text.startsWith('Waypoint') || _nameController.text == 'Highway Pitstop') {
-        _nameController.text = details.placeName;
+    if (mounted) setState(() => _isDetectingLocation = true);
+    try {
+      _fetchNearbyPOIs(lat, lng);
+      final details = await LocationService.reverseGeocode(lat, lng);
+      if (mounted) {
+        if (_nameController.text.trim().isEmpty ||
+            _nameController.text.startsWith('Waypoint') ||
+            _nameController.text == 'Highway Pitstop' ||
+            _nameController.text == 'Looking up address...') {
+          _nameController.text = details.placeName;
+        }
+        if (details.address != null &&
+            (_addressController.text.trim().isEmpty || _addressController.text == 'Looking up address...')) {
+          _addressController.text = details.address!;
+        }
+        if (details.category != null && AppConstants.stoppageCategories.contains(details.category)) {
+          setState(() => _selectedCategory = details.category!);
+        }
       }
-      if (details.address != null && _addressController.text.trim().isEmpty) {
-        _addressController.text = details.address!;
-      }
-      if (details.category != null && AppConstants.stoppageCategories.contains(details.category)) {
-        setState(() => _selectedCategory = details.category!);
-      }
+    } finally {
+      if (mounted) setState(() => _isDetectingLocation = false);
     }
   }
 
@@ -520,7 +539,24 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
   }
 
   void _submit() {
-    if (!_formKey.currentState!.validate()) return;
+    final lat = double.tryParse(_latController.text) ?? 28.4990;
+    final lng = double.tryParse(_lngController.text) ?? 77.5330;
+
+    var placeName = _nameController.text.trim();
+    if (placeName.isEmpty || placeName == 'Looking up address...') {
+      placeName = 'Stop at ${lat.toStringAsFixed(3)}, ${lng.toStringAsFixed(3)}';
+      _nameController.text = placeName;
+    }
+
+    if (!_formKey.currentState!.validate()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a place name for this stoppage.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
 
     // If attaching a bill, validate amount
     double? billAmount;
@@ -538,115 +574,120 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
       }
     }
 
-    final currentTrip = ref.read(currentTripProvider);
-    final myMemberId = currentTrip?.currentUserMember?.id ?? 'me';
+    try {
+      final currentTrip = ref.read(currentTripProvider);
+      final myMemberId = currentTrip?.currentUserMember?.id ?? 'me';
 
-    final lat = double.tryParse(_latController.text) ?? 28.4990;
-    final lng = double.tryParse(_lngController.text) ?? 77.5330;
-
-    final newStoppage = Stoppage(
-      id: const Uuid().v4(),
-      tripId: widget.tripId,
-      name: _nameController.text.trim(),
-      latitude: lat,
-      longitude: lng,
-      address: _addressController.text.trim().isNotEmpty ? _addressController.text.trim() : null,
-      category: _selectedCategory,
-      arrivedAt: _arrivedAt,
-      departedAt: _isOngoing ? null : _arrivedAt.add(const Duration(minutes: 45)),
-      notes: _notesController.text.trim().isNotEmpty ? _notesController.text.trim() : null,
-      createdBy: myMemberId,
-    );
-
-    ref.read(allStoppagesProvider.notifier).addStoppage(newStoppage);
-
-    // Save attached photo memories
-    for (final photoPath in _attachedPhotos) {
-      final memory = Memory(
+      final newStoppage = Stoppage(
         id: const Uuid().v4(),
         tripId: widget.tripId,
-        stoppageId: newStoppage.id,
-        uploadedByMemberId: myMemberId,
-        mediaPath: photoPath,
-        caption: 'Captured at ${newStoppage.name}',
-        createdAt: DateTime.now(),
-      );
-      ref.read(allMemoriesProvider.notifier).addMemory(memory);
-    }
-
-    // Save attached bill if enabled
-    if (_attachBill && billAmount != null && currentTrip != null) {
-      final payerId = _paidByMemberId ?? myMemberId;
-      final expenseCategory = _selectedExpenseCategory ?? mapStoppageToExpenseCategory(_selectedCategory);
-      final rawTitle = _billTitleController.text.trim();
-      final title = rawTitle.isNotEmpty ? rawTitle : 'Bill at ${newStoppage.name}';
-
-      // Build equal splits among selected members
-      final includedMembers = currentTrip.members
-          .where((m) => _splitIncludedMemberIds.contains(m.id))
-          .toList();
-      final splitCount = includedMembers.isEmpty ? currentTrip.members.length : includedMembers.length;
-      final perPerson = billAmount / splitCount;
-
-      final splits = currentTrip.members.map((m) {
-        final isInc = _splitIncludedMemberIds.isEmpty || _splitIncludedMemberIds.contains(m.id);
-        return ExpenseSplit(
-          memberId: m.id,
-          allocatedAmount: isInc ? perPerson : 0.0,
-          isIncluded: isInc,
-        );
-      }).toList();
-
-      final newExpense = Expense(
-        id: const Uuid().v4(),
-        tripId: widget.tripId,
-        stoppageId: newStoppage.id,
-        title: title,
-        totalAmount: billAmount,
-        currency: currentTrip.defaultCurrency,
-        category: expenseCategory,
-        paidByMemberId: payerId,
-        splitType: SplitType.equal,
-        splits: splits,
-        receiptImagePath: _receiptImagePath ?? (_attachedPhotos.isNotEmpty ? _attachedPhotos.first : null),
-        notes: 'Attached during stop tagging at ${newStoppage.name}',
-        createdAt: _arrivedAt,
+        name: placeName,
+        latitude: lat,
+        longitude: lng,
+        address: _addressController.text.trim().isNotEmpty ? _addressController.text.trim() : null,
+        category: _selectedCategory,
+        arrivedAt: _arrivedAt,
+        departedAt: _isOngoing ? null : _arrivedAt.add(const Duration(minutes: 45)),
+        notes: _notesController.text.trim().isNotEmpty ? _notesController.text.trim() : null,
+        createdBy: myMemberId,
       );
 
-      ref.read(allExpensesProvider.notifier).addExpense(newExpense);
+      ref.read(allStoppagesProvider.notifier).addStoppage(newStoppage);
 
-      // Audit Log for the expense
-      final currentMember = currentTrip.currentUserMember;
-      ref.read(allAuditLogsProvider.notifier).logAction(
-        TripAuditLog(
+      // Save attached photo memories
+      for (final photoPath in _attachedPhotos) {
+        final memory = Memory(
           id: const Uuid().v4(),
           tripId: widget.tripId,
-          actionType: 'create_expense',
-          itemTitle: newExpense.title,
-          performedByMemberId: currentMember?.id ?? myMemberId,
-          performedByName: currentMember?.name ?? 'Traveler',
-          timestamp: DateTime.now(),
-          changeDetails: 'Added bill of ${CurrencyFormatter.format(newExpense.totalAmount, currency: currentTrip.defaultCurrency)} for stoppage "${newStoppage.name}"',
-        ),
-      );
+          stoppageId: newStoppage.id,
+          uploadedByMemberId: myMemberId,
+          mediaPath: photoPath,
+          caption: 'Captured at ${newStoppage.name}',
+          createdAt: DateTime.now(),
+        );
+        ref.read(allMemoriesProvider.notifier).addMemory(memory);
+      }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✓ Tagged "${newStoppage.name}" & saved bill of ${CurrencyFormatter.format(billAmount, currency: currentTrip.defaultCurrency)}'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✓ Tagged stoppage "${newStoppage.name}"'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
+      // Save attached bill if enabled
+      if (_attachBill && billAmount != null && currentTrip != null) {
+        final payerId = _paidByMemberId ?? myMemberId;
+        final expenseCategory = _selectedExpenseCategory ?? mapStoppageToExpenseCategory(_selectedCategory);
+        final rawTitle = _billTitleController.text.trim();
+        final title = rawTitle.isNotEmpty ? rawTitle : 'Bill at ${newStoppage.name}';
+
+        // Build equal splits among selected members
+        final includedMembers = currentTrip.members
+            .where((m) => _splitIncludedMemberIds.contains(m.id))
+            .toList();
+        final splitCount = includedMembers.isEmpty ? (currentTrip.members.isEmpty ? 1 : currentTrip.members.length) : includedMembers.length;
+        final perPerson = billAmount / splitCount;
+
+        final splits = currentTrip.members.map((m) {
+          final isInc = _splitIncludedMemberIds.isEmpty || _splitIncludedMemberIds.contains(m.id);
+          return ExpenseSplit(
+            memberId: m.id,
+            allocatedAmount: isInc ? perPerson : 0.0,
+            isIncluded: isInc,
+          );
+        }).toList();
+
+        final newExpense = Expense(
+          id: const Uuid().v4(),
+          tripId: widget.tripId,
+          stoppageId: newStoppage.id,
+          title: title,
+          totalAmount: billAmount,
+          currency: currentTrip.defaultCurrency,
+          category: expenseCategory,
+          paidByMemberId: payerId,
+          splitType: SplitType.equal,
+          splits: splits,
+          receiptImagePath: _receiptImagePath ?? (_attachedPhotos.isNotEmpty ? _attachedPhotos.first : null),
+          notes: 'Attached during stop tagging at ${newStoppage.name}',
+          createdAt: _arrivedAt,
+        );
+
+        ref.read(allExpensesProvider.notifier).addExpense(newExpense);
+
+        // Audit Log for the expense
+        final currentMember = currentTrip.currentUserMember;
+        ref.read(allAuditLogsProvider.notifier).logAction(
+          TripAuditLog(
+            id: const Uuid().v4(),
+            tripId: widget.tripId,
+            actionType: 'create_expense',
+            itemTitle: newExpense.title,
+            performedByMemberId: currentMember?.id ?? myMemberId,
+            performedByName: currentMember?.name ?? 'Traveler',
+            timestamp: DateTime.now(),
+            changeDetails: 'Added bill of ${CurrencyFormatter.format(newExpense.totalAmount, currency: currentTrip.defaultCurrency)} for stoppage "${newStoppage.name}"',
+          ),
+        );
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✓ Tagged "${newStoppage.name}" & saved bill of ${CurrencyFormatter.format(billAmount, currency: currentTrip.defaultCurrency)}'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✓ Tagged stoppage "${newStoppage.name}"'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (_) {}
 
     HapticFeedback.mediumImpact();
-    Navigator.of(context).pop();
+    if (mounted) {
+      if (Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop(true);
+      } else if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop(true);
+      }
+    }
   }
 
   @override
@@ -725,11 +766,44 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
           ),
           const Divider(height: 1),
 
+          if (_isDetectingLocation)
+            Container(
+              margin: const EdgeInsets.fromLTRB(18, 8, 18, 2),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withAlpha(20),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.primary.withAlpha(80)),
+              ),
+              child: const Row(
+                children: [
+                  SizedBox(
+                    width: 15,
+                    height: 15,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary),
+                  ),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Acquiring precise GPS location & address... Please wait before saving.',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           // Content Form
           Expanded(
             child: Form(
               key: _formKey,
               child: ListView(
+
+                physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
                 padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                 children: [
                   // Location Detection Card
@@ -812,7 +886,9 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
                               const SizedBox(width: 6),
                               Expanded(
                                 child: Text(
-                                  'GPS: ${_latController.text}, ${_lngController.text}',
+                                  _latController.text.isNotEmpty
+                                      ? 'GPS: ${_latController.text}, ${_lngController.text}'
+                                      : (_isDetectingLocation ? 'GPS: Detecting location...' : 'GPS: Tap map to pick location'),
                                   style: TextStyle(fontSize: 11, fontFamily: 'monospace', color: isDark ? Colors.grey[300] : Colors.grey[700]),
                                 ),
                               ),
@@ -916,7 +992,10 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
                       hintText: 'e.g. McWay Falls, Starbucks Midway',
                       prefixIcon: Icon(Icons.place_rounded),
                     ),
-                    validator: (val) => val == null || val.trim().isEmpty ? 'Please enter place name' : null,
+                    validator: (val) {
+                      // Gracefully handled in _submit if empty
+                      return null;
+                    },
                   ),
                   const SizedBox(height: 12),
 
@@ -1085,7 +1164,8 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
                   // ============================================
                   // ATTACH BILL / EXPENSE (Senior Developer Architecture)
                   // ============================================
-                  Container(
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: _attachBill
@@ -1098,77 +1178,119 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
                             : (isDark ? AppTheme.borderDark : AppTheme.borderLight),
                         width: _attachBill ? 1.4 : 1.0,
                       ),
+                      boxShadow: _attachBill
+                          ? [
+                              BoxShadow(
+                                color: const Color(0xFF10B981).withAlpha(isDark ? 35 : 20),
+                                blurRadius: 10,
+                                offset: const Offset(0, 2),
+                              ),
+                            ]
+                          : null,
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(7),
-                              decoration: BoxDecoration(
-                                color: _attachBill
-                                    ? const Color(0xFF10B981).withAlpha(30)
-                                    : (isDark ? Colors.white10 : Colors.black.withAlpha(10)),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Icon(
-                                Icons.receipt_long_rounded,
-                                size: 18,
-                                color: _attachBill ? const Color(0xFF10B981) : Colors.grey,
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
+                        InkWell(
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            setState(() {
+                              _attachBill = !_attachBill;
+                              if (_attachBill && _billTitleController.text.trim().isEmpty && _nameController.text.trim().isNotEmpty) {
+                                _billTitleController.text = 'Bill at ${_nameController.text.trim()}';
+                              }
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(7),
+                                  decoration: BoxDecoration(
+                                    color: _attachBill
+                                        ? const Color(0xFF10B981).withAlpha(30)
+                                        : (isDark ? Colors.white10 : Colors.black.withAlpha(10)),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Icon(
+                                    Icons.receipt_long_rounded,
+                                    size: 18,
+                                    color: _attachBill ? const Color(0xFF10B981) : Colors.grey,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      const Text(
-                                        'Attach Bill / Expense',
-                                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                                      Row(
+                                        children: [
+                                          const Text(
+                                            'Attach Bill / Expense',
+                                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                                          ),
+                                          if (_attachBill) ...[
+                                            const SizedBox(width: 6),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF10B981).withAlpha(30),
+                                                borderRadius: BorderRadius.circular(5),
+                                              ),
+                                              child: const Text(
+                                                'Active',
+                                                style: TextStyle(fontSize: 9, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
+                                              ),
+                                            ),
+                                          ],
+                                        ],
                                       ),
-                                      if (_attachBill) ...[
-                                        const SizedBox(width: 6),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFF10B981).withAlpha(30),
-                                            borderRadius: BorderRadius.circular(5),
-                                          ),
-                                          child: const Text(
-                                            'Active',
-                                            style: TextStyle(fontSize: 9, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
-                                          ),
+                                      Text(
+                                        'Split fuel, food, tickets or stay for this stop',
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                                         ),
-                                      ],
+                                      ),
                                     ],
                                   ),
-                                  Text(
-                                    'Split fuel, food, tickets or stay for this stop',
-                                    style: TextStyle(
-                                      fontSize: 10.5,
-                                      color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                ),
+                                const SizedBox(width: 8),
+                                // Custom animated toggle switch
+                                AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  curve: Curves.easeInOut,
+                                  width: 48,
+                                  height: 28,
+                                  padding: const EdgeInsets.all(3),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(20),
+                                    color: _attachBill
+                                        ? const Color(0xFF10B981)
+                                        : (isDark ? Colors.grey[800] : const Color(0xFFCBD5E1)),
+                                  ),
+                                  alignment: _attachBill ? Alignment.centerRight : Alignment.centerLeft,
+                                  child: Container(
+                                    width: 22,
+                                    height: 22,
+                                    decoration: const BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Colors.white,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black26,
+                                          blurRadius: 3,
+                                          offset: Offset(0, 1),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
-                            Switch.adaptive(
-                              value: _attachBill,
-                              activeColor: const Color(0xFF10B981),
-                              onChanged: (val) {
-                                HapticFeedback.lightImpact();
-                                setState(() {
-                                  _attachBill = val;
-                                  if (val && _billTitleController.text.trim().isEmpty && _nameController.text.trim().isNotEmpty) {
-                                    _billTitleController.text = 'Bill at ${_nameController.text.trim()}';
-                                  }
-                                });
-                              },
-                            ),
-                          ],
+                          ),
                         ),
 
                         if (_attachBill) ...[
@@ -1269,6 +1391,7 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
                                       return Padding(
                                         padding: const EdgeInsets.only(right: 6),
                                         child: ChoiceChip(
+                                          showCheckmark: false,
                                           avatar: CircleAvatar(
                                             backgroundColor: isPayer ? Colors.white : AppTheme.primary,
                                             child: Text(
@@ -1345,10 +1468,21 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
                                   children: trip.members.map((m) {
                                     final isInc = _splitIncludedMemberIds.contains(m.id);
                                     return FilterChip(
-                                      label: Text(m.isCurrentUser ? 'You' : m.name, style: const TextStyle(fontSize: 10.5)),
+                                      showCheckmark: false,
+                                      label: Text(
+                                        m.isCurrentUser ? 'You' : m.name,
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: isInc ? FontWeight.bold : FontWeight.normal,
+                                          color: isInc ? const Color(0xFF10B981) : (isDark ? Colors.grey[300] : Colors.grey[800]),
+                                        ),
+                                      ),
                                       selected: isInc,
-                                      selectedColor: const Color(0xFF10B981).withAlpha(40),
-                                      checkmarkColor: const Color(0xFF10B981),
+                                      selectedColor: const Color(0xFF10B981).withAlpha(35),
+                                      side: BorderSide(
+                                        color: isInc ? const Color(0xFF10B981) : (isDark ? Colors.grey[700]! : const Color(0xFFCBD5E1)),
+                                        width: isInc ? 1.2 : 0.8,
+                                      ),
                                       onSelected: (selected) {
                                         setState(() {
                                           if (selected) {
@@ -1444,15 +1578,35 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
                       const SizedBox(width: 10),
                       Expanded(
                         flex: 2,
-                        child: FilledButton.icon(
-                          onPressed: _submit,
-                          icon: const Icon(Icons.check_rounded, size: 18),
-                          label: const Text('Save Stoppage', style: TextStyle(fontWeight: FontWeight.bold)),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppTheme.primary,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
+                        child: ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: _nameController,
+                          builder: (context, nameVal, _) {
+                            final hasCoordinates = double.tryParse(_latController.text) != null && double.tryParse(_lngController.text) != null;
+                            final isPendingLookup = _isDetectingLocation || (!hasCoordinates && widget.autoDetectGps) || nameVal.text.trim() == 'Looking up address...';
+                            return FilledButton.icon(
+                              onPressed: isPendingLookup ? null : _submit,
+                              icon: isPendingLookup
+                                  ? const SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70),
+                                    )
+                                  : const Icon(Icons.check_rounded, size: 18),
+                              label: Text(
+                                isPendingLookup
+                                    ? (_isDetectingLocation ? 'Locating GPS... Please wait' : 'Acquiring GPS coordinates...')
+                                    : 'Save Stoppage',
+                                style: const TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: AppTheme.primary,
+                                disabledBackgroundColor: AppTheme.primary.withAlpha(120),
+                                disabledForegroundColor: Colors.white70,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ],

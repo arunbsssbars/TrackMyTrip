@@ -2,6 +2,7 @@ enum InvitationStatus {
   pending,
   accepted,
   declined,
+  rejected,
 }
 
 class TripInvitation {
@@ -10,7 +11,9 @@ class TripInvitation {
   final String tripTitle;
   final String inviterId;
   final String inviterName;
+  final String? inviteeId;
   final String inviteeUsername;
+  final String? inviteeEmail;
   final String? inviteePhone;
   final DateTime createdAt;
   final InvitationStatus status;
@@ -22,7 +25,9 @@ class TripInvitation {
     required this.tripTitle,
     required this.inviterId,
     required this.inviterName,
+    this.inviteeId,
     required this.inviteeUsername,
+    this.inviteeEmail,
     this.inviteePhone,
     required this.createdAt,
     this.status = InvitationStatus.pending,
@@ -35,7 +40,9 @@ class TripInvitation {
     String? tripTitle,
     String? inviterId,
     String? inviterName,
+    String? inviteeId,
     String? inviteeUsername,
+    String? inviteeEmail,
     String? inviteePhone,
     DateTime? createdAt,
     InvitationStatus? status,
@@ -47,7 +54,9 @@ class TripInvitation {
       tripTitle: tripTitle ?? this.tripTitle,
       inviterId: inviterId ?? this.inviterId,
       inviterName: inviterName ?? this.inviterName,
+      inviteeId: inviteeId ?? this.inviteeId,
       inviteeUsername: inviteeUsername ?? this.inviteeUsername,
+      inviteeEmail: inviteeEmail ?? this.inviteeEmail,
       inviteePhone: inviteePhone ?? this.inviteePhone,
       createdAt: createdAt ?? this.createdAt,
       status: status ?? this.status,
@@ -62,7 +71,9 @@ class TripInvitation {
       'tripTitle': tripTitle,
       'inviterId': inviterId,
       'inviterName': inviterName,
+      'inviteeId': inviteeId,
       'inviteeUsername': inviteeUsername,
+      'inviteeEmail': inviteeEmail,
       'inviteePhone': inviteePhone,
       'createdAt': createdAt.toIso8601String(),
       'status': status.name,
@@ -77,7 +88,9 @@ class TripInvitation {
       tripTitle: json['tripTitle'] as String,
       inviterId: json['inviterId'] as String,
       inviterName: json['inviterName'] as String,
-      inviteeUsername: json['inviteeUsername'] as String,
+      inviteeId: json['inviteeId'] as String?,
+      inviteeUsername: json['inviteeUsername'] as String? ?? 'Traveler',
+      inviteeEmail: json['inviteeEmail'] as String?,
       inviteePhone: json['inviteePhone'] as String?,
       createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
       status: InvitationStatus.values.firstWhere(

@@ -75,24 +75,72 @@ class CompanionsDetailSheet extends ConsumerWidget {
                 Navigator.of(ctx).pop();
                 CompanionSearchDialog.show(
                   context,
+                  tripId: trip.id,
                   currentMembers: trip.members,
-                  onCompanionSelected: (member) async {
+                  actionLabel: 'Invite',
+                  onUserSelected: (user) async {
+                    final cleanEmail = (user.email != null && user.email!.trim().isNotEmpty) ? user.email!.trim().toLowerCase() : null;
+                    final username = user.username.isNotEmpty ? user.username.trim().toLowerCase() : (cleanEmail?.split('@').first ?? user.displayName);
+                    final inviteeId = user.id.isNotEmpty ? user.id : null;
+
                     await ref.read(invitationProvider.notifier).sendInvitation(
                       tripId: trip.id,
                       tripTitle: trip.title,
-                      inviteeUsername: member.name,
+                      inviteeId: inviteeId,
+                      inviteeUsername: username,
+                      inviteeEmail: cleanEmail,
                       tripJson: trip.toJson(),
                     );
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('Trip invitation sent to ${member.name}! They will receive it on their app to accept.'),
+                          content: Text('Trip invitation sent to ${user.displayName}! They will join once accepted.'),
                           backgroundColor: Colors.green,
                           behavior: SnackBarBehavior.floating,
                         ),
                       );
                     }
                   },
+                  onCompanionSelected: (member) async {
+                    if (member.id.startsWith('custom_') || member.id.startsWith('offline_') || member.id.startsWith('member_')) {
+                      await ref.read(tripListProvider.notifier).addMemberToTrip(trip.id, member);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Added "${member.name}" to trip!'),
+                            backgroundColor: Colors.green,
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                      return;
+                    }
+
+                    final cleanEmail = member.email?.trim().toLowerCase();
+                    final username = cleanEmail != null
+                        ? cleanEmail.split('@').first
+                        : member.name.replaceAll(' ', '_').toLowerCase();
+                    final inviteeId = member.id;
+
+                    await ref.read(invitationProvider.notifier).sendInvitation(
+                      tripId: trip.id,
+                      tripTitle: trip.title,
+                      inviteeId: inviteeId,
+                      inviteeUsername: username,
+                      inviteeEmail: cleanEmail,
+                      tripJson: trip.toJson(),
+                    );
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Trip invitation sent to ${member.name}! They will join once accepted.'),
+                          backgroundColor: Colors.green,
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    }
+                  },
+
                 );
               },
             ),
@@ -165,12 +213,30 @@ class CompanionsDetailSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final allExpenses = ref.watch(allExpensesProvider).where((e) => e.tripId == trip.id).toList();
-    final netBalances = ref.watch(tripNetBalancesProvider);
+    final allSettlements = ref.watch(allSettlementsProvider).where((s) => s.tripId == trip.id).toList();
+
+    // Calculate trip-specific net balances to prevent phantom balances from other trips
+    final Map<String, double> netBalances = {};
+    for (final member in trip.members) {
+      netBalances[member.id] = 0.0;
+    }
+    for (final expense in allExpenses) {
+      netBalances[expense.paidByMemberId] = (netBalances[expense.paidByMemberId] ?? 0.0) + expense.totalAmount;
+      for (final split in expense.splits) {
+        netBalances[split.memberId] = (netBalances[split.memberId] ?? 0.0) - split.allocatedAmount;
+      }
+    }
+    for (final settlement in allSettlements) {
+      netBalances[settlement.payerMemberId] = (netBalances[settlement.payerMemberId] ?? 0.0) + settlement.amount;
+      netBalances[settlement.receiverMemberId] = (netBalances[settlement.receiverMemberId] ?? 0.0) - settlement.amount;
+    }
+
     final roomCode = CloudTripSyncService.getRoomCode(trip.id, trip: trip);
 
     // Calculate total spend & member contributions
     final double totalTripSpent = allExpenses.fold<double>(0, (s, e) => s + e.totalAmount);
     final double perPersonAvg = trip.members.isNotEmpty ? totalTripSpent / trip.members.length : 0.0;
+
 
     return Container(
       constraints: BoxConstraints(
@@ -302,8 +368,10 @@ class CompanionsDetailSheet extends ConsumerWidget {
             ),
             const SizedBox(height: 8),
 
-            // Travelers Cards List
-            ...trip.members.map((member) {
+            // Travelers Cards List with smooth entrance motion
+            ...trip.members.asMap().entries.map((entry) {
+              final index = entry.key;
+              final member = entry.value;
               final color = member.colorHex != null
                   ? Color(int.parse(member.colorHex!))
                   : AppTheme.primary;
@@ -328,107 +396,123 @@ class CompanionsDetailSheet extends ConsumerWidget {
               // Net Balance
               final netBalance = netBalances[member.id] ?? (paidAmount - memberShare);
 
-              return Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: isCurrentUser
-                      ? AppTheme.primary.withAlpha(20)
-                      : (isDark ? const Color(0xFF0F172A) : Colors.white),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
+              return TweenAnimationBuilder<double>(
+                key: ValueKey(member.id),
+                duration: Duration(milliseconds: 240 + (index * 60)),
+                curve: Curves.easeOutCubic,
+                tween: Tween<double>(begin: 0.0, end: 1.0),
+                builder: (context, value, child) {
+                  return Transform.translate(
+                    offset: Offset(0, 16 * (1.0 - value)),
+                    child: Opacity(
+                      opacity: value,
+                      child: child,
+                    ),
+                  );
+                },
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
                     color: isCurrentUser
-                        ? AppTheme.primary
-                        : (isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
-                    width: isCurrentUser ? 2 : 1,
+                        ? AppTheme.primary.withAlpha(20)
+                        : (isDark ? const Color(0xFF0F172A) : Colors.white),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isCurrentUser
+                          ? AppTheme.primary
+                          : (isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+                      width: isCurrentUser ? 2 : 1,
+                    ),
                   ),
-                ),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 20,
-                          backgroundColor: color,
-                          child: Text(
-                            member.name.substring(0, 1).toUpperCase(),
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                          ),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: color,
+                        child: Text(
+                          member.name.isNotEmpty ? member.name.substring(0, 1).toUpperCase() : '?',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Flexible(
-                                    child: Text(
-                                      member.name,
-                                      style: TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.bold,
-                                        color: isCurrentUser ? AppTheme.primary : null,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  if (isCurrentUser) ...[
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.primary,
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: const Text(
-                                        'YOU',
-                                        style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900),
-                                      ),
-                                    ),
-                                  ],
-                                  if (isHost && !isCurrentUser) ...[
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: Colors.orange.withAlpha(40),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: const Text(
-                                        'HOST',
-                                        style: TextStyle(color: Colors.orange, fontSize: 9, fontWeight: FontWeight.w900),
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  Text(
-                                    'Paid: ${CurrencyFormatter.format(paidAmount, currency: trip.defaultCurrency)}',
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    member.name,
                                     style: TextStyle(
-                                      fontSize: 12,
-                                      color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      color: isCurrentUser ? AppTheme.primary : null,
                                     ),
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                  const SizedBox(width: 10),
-                                  Text(
-                                    'Share: ${CurrencyFormatter.format(memberShare, currency: trip.defaultCurrency)}',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                ),
+                                if (isCurrentUser) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primary,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: const Text(
+                                      'YOU',
+                                      style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900),
                                     ),
                                   ),
                                 ],
-                              ),
-                            ],
-                          ),
+                                if (isHost && !isCurrentUser) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.orange.withAlpha(40),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: const Text(
+                                      'HOST',
+                                      style: TextStyle(color: Colors.orange, fontSize: 9, fontWeight: FontWeight.w900),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 2,
+                              children: [
+                                Text(
+                                  'Paid: ${CurrencyFormatter.format(paidAmount, currency: trip.defaultCurrency)}',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                  ),
+                                ),
+                                Text(
+                                  'Share: ${CurrencyFormatter.format(memberShare, currency: trip.defaultCurrency)}',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
+                      ),
 
-                        // Balance Chip
-                        Column(
+                      // Balance Chip (Responsively constrained)
+                      const SizedBox(width: 8),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 105),
+                        child: Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             Text(
@@ -439,11 +523,13 @@ class CompanionsDetailSheet extends ConsumerWidget {
                                       : 'Settled'),
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
-                                fontSize: 13,
+                                fontSize: 12.5,
                                 color: netBalance > 0.01
                                     ? Colors.green
                                     : (netBalance < -0.01 ? Colors.red : Colors.grey),
                               ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                             Text(
                               netBalance > 0.01 ? 'gets back' : (netBalance < -0.01 ? 'owes group' : 'all settled'),
@@ -453,40 +539,15 @@ class CompanionsDetailSheet extends ConsumerWidget {
                                     ? Colors.green
                                     : (netBalance < -0.01 ? Colors.red : Colors.grey),
                               ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                    if (!isCurrentUser) ...[
-                      const SizedBox(height: 10),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton.icon(
-                          onPressed: () async {
-                            await ref.read(tripListProvider.notifier).switchActiveMember(trip.id, member.id);
-                            if (context.mounted) {
-                              Navigator.of(context).pop();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Switched active traveler to ${member.name}!'),
-                                  backgroundColor: AppTheme.primary,
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                            }
-                          },
-                          icon: const Icon(Icons.swap_horiz_rounded, size: 16),
-                          label: Text('Use this device as ${member.name}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                        ),
                       ),
+
                     ],
-                  ],
+                  ),
                 ),
               );
             }),

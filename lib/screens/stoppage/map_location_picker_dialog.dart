@@ -150,9 +150,10 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                 alignment: Alignment.center,
                 child: SizedBox(
                   width: 60,
-                  height: 60,
+                  height: 80,
                   child: Stack(
                     alignment: Alignment.center,
+                    clipBehavior: Clip.none,
                     children: [
                       // Target Ground Shadow
                       Positioned(
@@ -173,14 +174,14 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                           ),
                         ),
                       ),
-                      // Floating Stationary Pin Icon
+                      // Floating Stationary Pin Icon (Adjusted so tip points to ground shadow and top is never clipped)
                       AnimatedPositioned(
                         duration: const Duration(milliseconds: 180),
-                        bottom: _isDragging ? 22 : 12,
+                        bottom: _isDragging ? 26 : 14,
                         child: const Icon(
                           Icons.location_pin,
                           color: Colors.redAccent,
-                          size: 48,
+                          size: 46,
                           shadows: [
                             Shadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 3)),
                           ],
@@ -382,19 +383,30 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                       ],
                       const SizedBox(height: 12),
                       ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.of(context).pop(
-                            LocationDetails(
-                              latitude: _pickedPosition.latitude,
-                              longitude: _pickedPosition.longitude,
-                              placeName: _placeName,
-                              address: _address,
-                              category: _inferredCategory,
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.check_circle_rounded, size: 18),
-                        label: const Text('Confirm This Location', style: TextStyle(fontWeight: FontWeight.bold)),
+                        onPressed: (_isGeocoding || _placeName == 'Looking up address...')
+                            ? null
+                            : () {
+                                Navigator.of(context).pop(
+                                  LocationDetails(
+                                    latitude: _pickedPosition.latitude,
+                                    longitude: _pickedPosition.longitude,
+                                    placeName: _placeName,
+                                    address: _address,
+                                    category: _inferredCategory,
+                                  ),
+                                );
+                              },
+                        icon: _isGeocoding
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70),
+                              )
+                            : const Icon(Icons.check_circle_rounded, size: 18),
+                        label: Text(
+                          _isGeocoding ? 'Detecting Address...' : 'Confirm This Location',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppTheme.primary,
                           foregroundColor: Colors.white,

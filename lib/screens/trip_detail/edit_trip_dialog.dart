@@ -7,6 +7,7 @@ import '../../core/utils/currency_formatter.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../models/trip.dart';
 import '../../models/trip_member.dart';
+import '../../providers/invitation_provider.dart';
 import '../../providers/trip_provider.dart';
 import '../trip/companion_search_dialog.dart';
 
@@ -99,17 +100,76 @@ class _EditTripDialogState extends ConsumerState<EditTripDialog> {
   void _openCompanionSearch() {
     CompanionSearchDialog.show(
       context,
+      tripId: widget.trip.id,
       currentMembers: _members,
-      onCompanionSelected: (member) {
-        if (!_members.any((m) => m.id == member.id || m.name.toLowerCase() == member.name.toLowerCase())) {
-          setState(() {
-            _members.add(member);
-            if (_tripType == 'solo') {
-              _tripType = 'group';
-            }
-          });
+      actionLabel: 'Invite',
+      onUserSelected: (user) async {
+        final cleanEmail = (user.email != null && user.email!.trim().isNotEmpty) ? user.email!.trim().toLowerCase() : null;
+        final username = user.username.isNotEmpty ? user.username.trim().toLowerCase() : (cleanEmail?.split('@').first ?? user.displayName);
+        final inviteeId = user.id.isNotEmpty ? user.id : null;
+
+        await ref.read(invitationProvider.notifier).sendInvitation(
+          tripId: widget.trip.id,
+          tripTitle: widget.trip.title,
+          inviteeId: inviteeId,
+          inviteeUsername: username,
+          inviteeEmail: cleanEmail,
+          tripJson: widget.trip.toJson(),
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Trip invitation sent to "${user.displayName}"! They will join once accepted.'),
+              backgroundColor: AppTheme.primary,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
         }
       },
+      onCompanionSelected: (member) async {
+        if (member.id.startsWith('custom_') || member.id.startsWith('offline_')) {
+          if (!_members.any((m) => m.id == member.id)) {
+            setState(() => _members.add(member));
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Added "${member.name}" to trip roster.'),
+                  backgroundColor: AppTheme.primary,
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            }
+          }
+          return;
+        }
+
+        final cleanEmail = member.email?.trim().toLowerCase();
+        final username = cleanEmail != null
+            ? cleanEmail.split('@').first
+            : member.name.replaceAll(' ', '_').toLowerCase();
+        final inviteeId = member.id;
+
+        await ref.read(invitationProvider.notifier).sendInvitation(
+          tripId: widget.trip.id,
+          tripTitle: widget.trip.title,
+          inviteeId: inviteeId,
+          inviteeUsername: username,
+          inviteeEmail: cleanEmail,
+          tripJson: widget.trip.toJson(),
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Trip invitation sent to "${member.name}"! They will join once accepted.'),
+              backgroundColor: AppTheme.primary,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      },
+
     );
   }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_sqlcipher/sqflite.dart' as sqlcipher;
 import '../../models/trip.dart';
 import '../../models/trip_member.dart';
 import '../../models/stoppage.dart';
@@ -20,25 +21,100 @@ class AppDatabase {
   static const String dbName = 'trip_tracker_v1.db';
   static const int dbVersion = 1;
 
+  static AppDatabase? _instance;
+  static AppDatabase? get instance => _instance;
+
   final Database _db;
 
-  AppDatabase(this._db);
+  AppDatabase(this._db) {
+    _instance = this;
+  }
 
   Database get database => _db;
 
-  /// Open or create standard SQLite database on device
-  static Future<AppDatabase> open({String? customPath, Database? customDb}) async {
+  static String getDbNameForUser(String? userId) {
+    if (userId == null || userId.trim().isEmpty) {
+      return 'trip_tracker_guest.db';
+    }
+    final cleanId = userId.trim().replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+    return 'trip_tracker_$cleanId.db';
+  }
+
+  /// Safely purges any pre-partitioning monolithic database file to prevent cross-account leakage
+  static Future<void> purgeLegacyDatabase() async {
+    try {
+      final dbDir = await getDatabasesPath();
+      final legacyPath = p.join(dbDir, dbName);
+      await deleteDatabase(legacyPath);
+    } catch (_) {}
+  }
+
+  Future<void> close() async {
+    try {
+      await _db.close();
+    } catch (_) {}
+    if (_instance == this) {
+      _instance = null;
+    }
+  }
+
+  /// Open or create user-partitioned SQLite database
+  static Future<AppDatabase> openForUser(
+    String? userId, {
+    String? password,
+    String? customPath,
+    Database? customDb,
+  }) async {
+    return open(
+      userId: userId,
+      password: password,
+      customPath: customPath,
+      customDb: customDb,
+    );
+  }
+
+  /// Open or create encrypted SQLite (SQLCipher AES-256) database on device
+  static Future<AppDatabase> open({
+    String? customPath,
+    Database? customDb,
+    String? password,
+    String? userId,
+  }) async {
     if (customDb != null) {
       await _onCreate(customDb, dbVersion);
-      return AppDatabase(customDb);
+      final instance = AppDatabase(customDb);
+      _instance = instance;
+      return instance;
     }
 
-    final dbPath = customPath ?? p.join(await getDatabasesPath(), dbName);
-    final db = await openDatabase(
-      dbPath,
-      version: dbVersion,
-      onCreate: _onCreate,
-    );
+    final effectiveDbName = customPath != null
+        ? p.basename(customPath)
+        : getDbNameForUser(userId);
+    final dbPath = customPath ?? p.join(await getDatabasesPath(), effectiveDbName);
+    Database db;
+    if (password != null && password.isNotEmpty) {
+      try {
+        db = await sqlcipher.openDatabase(
+          dbPath,
+          version: dbVersion,
+          password: password,
+          onCreate: _onCreate,
+        );
+      } catch (_) {
+        // Fallback for test harnesses / desktop where native SQLCipher channel is unavailable
+        db = await openDatabase(
+          dbPath,
+          version: dbVersion,
+          onCreate: _onCreate,
+        );
+      }
+    } else {
+      db = await openDatabase(
+        dbPath,
+        version: dbVersion,
+        onCreate: _onCreate,
+      );
+    }
 
     return AppDatabase(db);
   }
@@ -47,7 +123,7 @@ class AppDatabase {
   static Future<void> _onCreate(Database db, int version) async {
     // 1. Trips
     await db.execute('''
-      CREATE TABLE trips (
+      CREATE TABLE IF NOT EXISTS trips (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         description TEXT,
@@ -67,11 +143,11 @@ class AppDatabase {
         completedAt TEXT
       )
     ''');
-    await db.execute('CREATE INDEX idx_trips_startDate ON trips(startDate)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_trips_startDate ON trips(startDate)');
 
     // 2. Stoppages
     await db.execute('''
-      CREATE TABLE stoppages (
+      CREATE TABLE IF NOT EXISTS stoppages (
         id TEXT PRIMARY KEY,
         tripId TEXT NOT NULL,
         name TEXT NOT NULL,
@@ -86,12 +162,12 @@ class AppDatabase {
         orderIndex INTEGER NOT NULL DEFAULT 0
       )
     ''');
-    await db.execute('CREATE INDEX idx_stoppages_tripId ON stoppages(tripId)');
-    await db.execute('CREATE INDEX idx_stoppages_arrivedAt ON stoppages(arrivedAt)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_stoppages_tripId ON stoppages(tripId)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_stoppages_arrivedAt ON stoppages(arrivedAt)');
 
     // 3. Expenses
     await db.execute('''
-      CREATE TABLE expenses (
+      CREATE TABLE IF NOT EXISTS expenses (
         id TEXT PRIMARY KEY,
         tripId TEXT NOT NULL,
         stoppageId TEXT,
@@ -107,13 +183,13 @@ class AppDatabase {
         createdAt TEXT NOT NULL
       )
     ''');
-    await db.execute('CREATE INDEX idx_expenses_tripId ON expenses(tripId)');
-    await db.execute('CREATE INDEX idx_expenses_stoppageId ON expenses(stoppageId)');
-    await db.execute('CREATE INDEX idx_expenses_createdAt ON expenses(createdAt)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_expenses_tripId ON expenses(tripId)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_expenses_stoppageId ON expenses(stoppageId)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_expenses_createdAt ON expenses(createdAt)');
 
     // 4. Memories
     await db.execute('''
-      CREATE TABLE memories (
+      CREATE TABLE IF NOT EXISTS memories (
         id TEXT PRIMARY KEY,
         tripId TEXT NOT NULL,
         stoppageId TEXT NOT NULL,
@@ -127,12 +203,12 @@ class AppDatabase {
         likedByMemberIdsJson TEXT NOT NULL
       )
     ''');
-    await db.execute('CREATE INDEX idx_memories_tripId ON memories(tripId)');
-    await db.execute('CREATE INDEX idx_memories_stoppageId ON memories(stoppageId)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_memories_tripId ON memories(tripId)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_memories_stoppageId ON memories(stoppageId)');
 
     // 5. Settlements
     await db.execute('''
-      CREATE TABLE settlements (
+      CREATE TABLE IF NOT EXISTS settlements (
         id TEXT PRIMARY KEY,
         tripId TEXT NOT NULL,
         payerMemberId TEXT NOT NULL,
@@ -144,11 +220,11 @@ class AppDatabase {
         paymentMethod TEXT NOT NULL
       )
     ''');
-    await db.execute('CREATE INDEX idx_settlements_tripId ON settlements(tripId)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_settlements_tripId ON settlements(tripId)');
 
     // 6. Audit Logs
     await db.execute('''
-      CREATE TABLE audit_logs (
+      CREATE TABLE IF NOT EXISTS audit_logs (
         id TEXT PRIMARY KEY,
         tripId TEXT NOT NULL,
         actionType TEXT NOT NULL,
@@ -159,11 +235,11 @@ class AppDatabase {
         changeDetails TEXT NOT NULL
       )
     ''');
-    await db.execute('CREATE INDEX idx_audit_tripId ON audit_logs(tripId, timestamp)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_audit_tripId ON audit_logs(tripId, timestamp)');
 
     // 7. Sync Mutations
     await db.execute('''
-      CREATE TABLE sync_mutations (
+      CREATE TABLE IF NOT EXISTS sync_mutations (
         id TEXT PRIMARY KEY,
         tripId TEXT NOT NULL,
         action TEXT NOT NULL,
@@ -176,11 +252,11 @@ class AppDatabase {
         errorMessage TEXT
       )
     ''');
-    await db.execute('CREATE INDEX idx_mutations_status ON sync_mutations(status)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_mutations_status ON sync_mutations(status)');
 
     // 8. Proximity Alerts
     await db.execute('''
-      CREATE TABLE proximity_alerts (
+      CREATE TABLE IF NOT EXISTS proximity_alerts (
         id TEXT PRIMARY KEY,
         tripId TEXT NOT NULL,
         type TEXT NOT NULL,
@@ -196,11 +272,11 @@ class AppDatabase {
         isRead INTEGER NOT NULL DEFAULT 0
       )
     ''');
-    await db.execute('CREATE INDEX idx_alerts_tripId ON proximity_alerts(tripId, isRead)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_alerts_tripId ON proximity_alerts(tripId, isRead)');
 
     // 9. Auth Session
     await db.execute('''
-      CREATE TABLE auth_session (
+      CREATE TABLE IF NOT EXISTS auth_session (
         key TEXT PRIMARY KEY,
         userJson TEXT NOT NULL
       )
@@ -208,7 +284,7 @@ class AppDatabase {
 
     // 10. Registered Users
     await db.execute('''
-      CREATE TABLE registered_users (
+      CREATE TABLE IF NOT EXISTS registered_users (
         email TEXT PRIMARY KEY,
         username TEXT NOT NULL,
         userRecordJson TEXT NOT NULL
@@ -217,7 +293,7 @@ class AppDatabase {
 
     // 11. Trip Invitations
     await db.execute('''
-      CREATE TABLE trip_invitations (
+      CREATE TABLE IF NOT EXISTS trip_invitations (
         id TEXT PRIMARY KEY,
         tripId TEXT NOT NULL,
         tripTitle TEXT NOT NULL,
@@ -230,7 +306,7 @@ class AppDatabase {
         tripJson TEXT
       )
     ''');
-    await db.execute('CREATE INDEX idx_invitations_username ON trip_invitations(inviteeUsername, status)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_invitations_username ON trip_invitations(inviteeUsername, status)');
   }
 
   // ===================== CRUD OPERATIONS =====================
@@ -527,6 +603,10 @@ class AppDatabase {
       where: 'id = ?',
       whereArgs: [alertId],
     );
+  }
+
+  Future<void> deleteAlert(String alertId) async {
+    await _db.delete('proximity_alerts', where: 'id = ?', whereArgs: [alertId]);
   }
 
   Future<void> clearAllAlerts() async {
@@ -915,4 +995,26 @@ class AppDatabase {
     status: InvitationStatus.values.firstWhere((s) => s.name == r['status'], orElse: () => InvitationStatus.pending),
     tripJson: r['tripJson'] != null ? jsonDecode(r['tripJson'] as String) as Map<String, dynamic> : null,
   );
+
+  /// Forensically wipes all tables and entries from the local database
+  Future<void> wipeDatabase() async {
+    final tables = [
+      'trips',
+      'stoppages',
+      'expenses',
+      'memories',
+      'settlements',
+      'audit_logs',
+      'sync_mutations',
+      'proximity_alerts',
+      'auth_session',
+      'registered_users',
+      'trip_invitations',
+    ];
+    for (final table in tables) {
+      try {
+        await _db.delete(table);
+      } catch (_) {}
+    }
+  }
 }

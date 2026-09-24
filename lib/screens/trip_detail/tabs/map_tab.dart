@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/firestore_sync_service.dart';
 import '../../../core/services/live_companion_tracker_service.dart';
 import '../../../core/services/live_location_tracker_service.dart';
 import '../../../core/services/location_service.dart';
@@ -20,6 +21,7 @@ import '../../stoppage/add_stoppage_dialog.dart';
 import '../../stoppage/stoppage_detail_screen.dart';
 import '../../../core/services/map_tile_cache_service.dart';
 import '../widgets/offline_map_download_sheet.dart';
+import '../../notifications/notification_center_sheet.dart';
 
 class MapTab extends ConsumerStatefulWidget {
   final Trip trip;
@@ -30,14 +32,18 @@ class MapTab extends ConsumerStatefulWidget {
   ConsumerState<MapTab> createState() => _MapTabState();
 }
 
-class _MapTabState extends ConsumerState<MapTab> {
-  late MapController _mapController;
+class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
+  late final MapController _mapController;
+  final DraggableScrollableController _sheetController = DraggableScrollableController();
+
+  bool _isMapReady = false;
+  String? _offlineCachePath;
+
+  // Selected entities for interaction and navigation
   Stoppage? _selectedMarkerStoppage;
   TripMember? _selectedCompanion;
-  List<LatLng> _roadGeometry = [];
-  String? _lastStoppagesHash;
 
-  // Companion Navigation State
+  // In-app verified navigation routing states
   bool _isNavigatingToCompanion = false;
   List<LatLng> _companionNavRoute = [];
   double _companionNavDistanceKm = 0.0;
@@ -45,7 +51,10 @@ class _MapTabState extends ConsumerState<MapTab> {
   TransportMode _activeNavMode = TransportMode.car;
   bool _isCompanionRouteNavigable = true;
   List<String> _companionNavSafetyAdvisories = [];
-  String? _offlineCachePath;
+
+  // Cached calculated road geometry between stoppages
+  List<LatLng> _roadGeometry = [];
+  String? _lastStoppagesHash;
 
   @override
   void initState() {
@@ -55,7 +64,8 @@ class _MapTabState extends ConsumerState<MapTab> {
       if (mounted) setState(() => _offlineCachePath = dir.path);
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Connect to WebSocket room for real-time multi-device sync
+      // Connect to Firestore & WebSocket rooms for real-time multi-device sync
+      ref.read(firestoreSyncServiceProvider).connectTripRoom(widget.trip.id);
       ref.read(realtimeSyncServiceProvider).connectTripRoom(widget.trip.id);
 
       final trackingState = ref.read(liveLocationTrackerProvider);
@@ -69,6 +79,7 @@ class _MapTabState extends ConsumerState<MapTab> {
 
   @override
   void dispose() {
+    _sheetController.dispose();
     // Save 100% battery & CPU by stopping companion movement simulation when leaving Route tab
     ref.read(liveCompanionTrackerProvider.notifier).stopConvoySimulation();
     super.dispose();
@@ -106,6 +117,7 @@ class _MapTabState extends ConsumerState<MapTab> {
   }
 
   void _locateAndCenterUser() async {
+    if (!_isMapReady) return;
     final trackingState = ref.read(liveLocationTrackerProvider);
     if (trackingState.currentPosition != null) {
       _mapController.move(
@@ -118,16 +130,19 @@ class _MapTabState extends ConsumerState<MapTab> {
     try {
       final pos = await Geolocator.getCurrentPosition();
       final userLatLng = LatLng(pos.latitude, pos.longitude);
-      _mapController.move(userLatLng, 14.5);
+      if (_isMapReady) {
+        _mapController.move(userLatLng, 14.5);
+      }
     } catch (_) {
       final stoppages = ref.read(currentTripStoppagesProvider);
-      if (stoppages.isNotEmpty) {
+      if (stoppages.isNotEmpty && _isMapReady) {
         _mapController.move(LatLng(stoppages.first.latitude, stoppages.first.longitude), 12.0);
       }
     }
   }
 
   void _fitAllStoppagesAndRoute(List<Stoppage> stoppages, List<LatLng> breadcrumbs, {List<LatLng>? extraPoints}) {
+    if (!_isMapReady) return;
     final points = <LatLng>[];
     for (final s in stoppages) {
       points.add(LatLng(s.latitude, s.longitude));
@@ -171,7 +186,53 @@ class _MapTabState extends ConsumerState<MapTab> {
       zoom = 14.5;
     }
 
-    _mapController.move(center, zoom);
+    if (_isMapReady) {
+      _mapController.move(center, zoom);
+    }
+  }
+
+  void _focusStoppageInVisibleViewport(Stoppage stop) {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _selectedMarkerStoppage = stop;
+      _selectedCompanion = null;
+    });
+
+    // Retract shutter to reveal the map with smooth easeOutCubic curve
+    if (_sheetController.isAttached) {
+      _sheetController.animateTo(
+        0.16,
+        duration: const Duration(milliseconds: 380),
+        curve: Curves.easeOutCubic,
+      );
+    }
+
+    // Offset the center south so the stoppage marker is vertically centered
+    // in the visible gap between top speed bar and the collapsed bottom sheet.
+    if (_isMapReady) {
+      const double latOffset = 0.0035;
+      _mapController.move(LatLng(stop.latitude - latOffset, stop.longitude), 14.5);
+    }
+  }
+
+  void _selectCompanion(TripMember companion) {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _selectedCompanion = companion;
+      _selectedMarkerStoppage = null;
+    });
+
+    if (companion.latitude != null && companion.longitude != null && _isMapReady) {
+      _mapController.move(LatLng(companion.latitude!, companion.longitude!), 14.5);
+    }
+
+    if (_sheetController.isAttached) {
+      _sheetController.animateTo(
+        0.44,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic,
+      );
+    }
   }
 
   void _showTagGpsStoppageDialog(BuildContext context, LatLng? currentPos) {
@@ -183,13 +244,16 @@ class _MapTabState extends ConsumerState<MapTab> {
     );
   }
 
-  /// Calculates or reads live dynamic positions for companions around the trip route
+  /// Calculates or reads live dynamic positions for verified companions around the trip route
   List<TripMember> _getCompanionsWithLocation(
     LatLng userPos,
     List<Stoppage> stoppages,
     Map<String, CompanionLivePosition> liveMap,
     Trip currentTrip,
   ) {
+    // Solo trips do not have companions
+    if (currentTrip.isSolo) return [];
+
     final companions = currentTrip.members.where((m) => !m.isCurrentUser).toList();
     final result = <TripMember>[];
 
@@ -206,22 +270,6 @@ class _MapTabState extends ConsumerState<MapTab> {
         );
       } else if (m.hasLocation) {
         result.add(m);
-      } else {
-        // Fallback default position
-        double baseLat = userPos.latitude;
-        double baseLng = userPos.longitude;
-        if (stoppages.isNotEmpty) {
-          final s = stoppages[i % stoppages.length];
-          baseLat = s.latitude;
-          baseLng = s.longitude;
-        }
-        result.add(
-          m.copyWith(
-            latitude: baseLat + 0.003 * (i + 1),
-            longitude: baseLng + 0.003 * (i + 1),
-            lastSeen: DateTime.now(),
-          ),
-        );
       }
     }
     return result;
@@ -300,13 +348,14 @@ class _MapTabState extends ConsumerState<MapTab> {
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: isDark ? AppTheme.surfaceDark : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
       builder: (ctx) {
         return SafeArea(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -334,18 +383,20 @@ class _MapTabState extends ConsumerState<MapTab> {
                       child: const Icon(Icons.share_location_rounded, color: Color(0xFF10B981), size: 22),
                     ),
                     const SizedBox(width: 12),
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Share Live Location',
-                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
-                        ),
-                        Text(
-                          'Select duration to broadcast to companions',
-                          style: TextStyle(fontSize: 12, color: Colors.grey),
-                        ),
-                      ],
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Share Live Location',
+                            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+                          ),
+                          Text(
+                            'Select duration to broadcast to companions',
+                            style: TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -353,7 +404,7 @@ class _MapTabState extends ConsumerState<MapTab> {
                 _buildDurationOption(
                   ctx,
                   title: '15 Minutes',
-                  subtitle: 'Ideal for pitstops & quick meetups',
+                  subtitle: 'Ideal for stops & quick meetups',
                   icon: Icons.timer_rounded,
                   duration: const Duration(minutes: 15),
                   onTap: () {
@@ -523,7 +574,7 @@ class _MapTabState extends ConsumerState<MapTab> {
         ? LatLng(trackingState.currentPosition!.latitude, trackingState.currentPosition!.longitude)
         : (stoppages.isNotEmpty
             ? LatLng(stoppages.first.latitude, stoppages.first.longitude)
-            : const LatLng(36.6002, -121.8947));
+            : const LatLng(28.6139, 77.2090));
 
     // Live Recorded Trajectory Breadcrumbs (Actual path travelled)
     final liveBreadcrumbs = trackingState.routePoints;
@@ -607,95 +658,101 @@ class _MapTabState extends ConsumerState<MapTab> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          displayDistanceKm >= 100
-                              ? '${displayDistanceKm.toStringAsFixed(0)} km'
-                              : '${displayDistanceKm.toStringAsFixed(2)} km',
-                          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15.5, letterSpacing: -0.3),
-                        ),
-                        const SizedBox(width: 5),
-                        if (isCompleted)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                            decoration: BoxDecoration(
-                              color: Colors.amber.withAlpha(25),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: Colors.amber.withAlpha(60), width: 0.8),
-                            ),
-                            child: const Text(
-                              'FINISHED',
-                              style: TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w900,
-                                color: Color(0xFFD97706),
-                              ),
-                            ),
-                          )
-                        else if (trackingState.isTracking)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF10B981).withAlpha(20),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 4.5,
-                                  height: 4.5,
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFF10B981),
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 3),
-                                Text(
-                                  '${trackingState.currentSpeedKmh.toStringAsFixed(0)} km/h',
-                                  style: const TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w900,
-                                    color: Color(0xFF10B981),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          )
-                        else
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.withAlpha(20),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Text(
-                              'PAUSED',
-                              style: TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w900,
-                                color: Colors.orange,
-                              ),
-                            ),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            displayDistanceKm >= 100
+                                ? '${displayDistanceKm.toStringAsFixed(0)} km'
+                                : '${displayDistanceKm.toStringAsFixed(2)} km',
+                            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15.5, letterSpacing: -0.3),
                           ),
-                      ],
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      isCompleted
-                          ? '${stoppages.length} ${stoppages.length == 1 ? "Stop" : "Stops"} • Travelled Route'
-                          : (stoppages.isEmpty
-                              ? (trackingState.isTracking ? 'GPS live tracing' : 'GPS paused')
-                              : '${stoppages.length} ${stoppages.length == 1 ? "Stop" : "Stops"} • ${trackingState.isTracking ? "Live Tracing" : "Paused"}'),
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
-                        fontWeight: FontWeight.w600,
+                          const SizedBox(width: 5),
+                          if (isCompleted)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.withAlpha(25),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: Colors.amber.withAlpha(60), width: 0.8),
+                              ),
+                              child: const Text(
+                                'FINISHED',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFFD97706),
+                                ),
+                              ),
+                            )
+                          else if (trackingState.isTracking)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF10B981).withAlpha(20),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 4.5,
+                                    height: 4.5,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF10B981),
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    '${trackingState.currentSpeedKmh.toStringAsFixed(0)} km/h',
+                                    style: const TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w900,
+                                      color: Color(0xFF10B981),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withAlpha(20),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                'PAUSED',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.orange,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    ),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        isCompleted
+                            ? '${stoppages.length} stops • Route'
+                            : (stoppages.isEmpty
+                                ? (trackingState.isTracking ? 'GPS live' : 'GPS paused')
+                                : '${stoppages.length} ${stoppages.length == 1 ? "stop" : "stops"} • ${trackingState.isTracking ? "Live GPS" : "Paused"}'),
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                      ),
                     ),
                   ],
                 ),
@@ -866,6 +923,9 @@ class _MapTabState extends ConsumerState<MapTab> {
                 options: MapOptions(
                   initialCenter: userOrCenterPos,
                   initialZoom: stoppages.isNotEmpty ? 11.5 : 13.0,
+                  onMapReady: () {
+                    if (mounted) setState(() => _isMapReady = true);
+                  },
                   onTap: (_, __) {
                     setState(() {
                       _selectedMarkerStoppage = null;
@@ -974,13 +1034,7 @@ class _MapTabState extends ConsumerState<MapTab> {
                         height: 44,
                         alignment: Alignment.topCenter,
                         child: GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _selectedMarkerStoppage = stop;
-                              _selectedCompanion = null;
-                            });
-                            _mapController.move(LatLng(stop.latitude, stop.longitude), 14);
-                          },
+                          onTap: () => _focusStoppageInVisibleViewport(stop),
                           child: Stack(
                             alignment: Alignment.center,
                             children: [
@@ -1048,13 +1102,7 @@ class _MapTabState extends ConsumerState<MapTab> {
                         height: 72,
                         alignment: Alignment.topCenter,
                         child: GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _selectedCompanion = companion;
-                              _selectedMarkerStoppage = null;
-                            });
-                            _mapController.move(LatLng(companion.latitude!, companion.longitude!), 14.5);
-                          },
+                          onTap: () => _selectCompanion(companion),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -1181,6 +1229,16 @@ class _MapTabState extends ConsumerState<MapTab> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     FloatingActionButton.small(
+                      heroTag: 'map_sos_btn',
+                      onPressed: () => NotificationCenterSheet.show(context),
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                      elevation: 5,
+                      tooltip: 'Emergency SOS & Safety',
+                      child: const Icon(Icons.sos_rounded, size: 22, color: Colors.white),
+                    ),
+                    const SizedBox(height: 8),
+                    FloatingActionButton.small(
                       heroTag: 'map_center_btn',
                       onPressed: _locateAndCenterUser,
                       backgroundColor: isDark ? AppTheme.surfaceDark : Colors.white,
@@ -1235,8 +1293,79 @@ class _MapTabState extends ConsumerState<MapTab> {
                 ),
               ),
 
+              // Focused Stoppage Floating Overlay Badge
+              if (_selectedMarkerStoppage != null)
+                Positioned(
+                  top: 12,
+                  left: 14,
+                  right: 64,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF0F172A).withAlpha(230) : Colors.white.withAlpha(240),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppTheme.primary.withAlpha(120), width: 1.2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withAlpha(35),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(5),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withAlpha(30),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            AppConstants.getStoppageIcon(_selectedMarkerStoppage!.category),
+                            size: 14,
+                            color: AppTheme.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _selectedMarkerStoppage!.name,
+                                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                'Viewing location in map focus',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        InkWell(
+                          onTap: () => setState(() => _selectedMarkerStoppage = null),
+                          borderRadius: BorderRadius.circular(12),
+                          child: const Padding(
+                            padding: EdgeInsets.all(4),
+                            child: Icon(Icons.close_rounded, size: 16, color: Colors.grey),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
               // Expandable Bottom Sheet (Apple Maps / Google Maps Pattern)
               DraggableScrollableSheet(
+                controller: _sheetController,
                 initialChildSize: 0.16,
                 minChildSize: 0.12,
                 maxChildSize: 0.72,
@@ -1286,36 +1415,33 @@ class _MapTabState extends ConsumerState<MapTab> {
                         Divider(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0), height: 1),
                         const SizedBox(height: 14),
 
-                        // Section 1: Active Navigation Controls (Transport Mode Selector & Safety Advisories)
-                        if (_isNavigatingToCompanion && _selectedCompanion != null) ...[
-                          _buildNavigationControlsSection(isDark, userOrCenterPos),
-                          const SizedBox(height: 16),
-                        ],
-
-                        // Section 2: Selected Companion Card (Direct Actions & Nav Modes)
-                        if (!_isNavigatingToCompanion && _selectedCompanion != null && _selectedCompanion!.latitude != null) ...[
-                          _buildSelectedCompanionSection(isDark, userOrCenterPos, companionLiveMap),
-                          const SizedBox(height: 16),
-                        ],
-
-                        // Section 3: Selected Stoppage Card
+                        // Section 1: Selected Stoppage Card (if a stoppage was selected)
                         if (_selectedMarkerStoppage != null) ...[
                           _buildSelectedStoppageSection(isDark),
                           const SizedBox(height: 16),
                         ],
 
-                        // Section 4: Convoy Radar
-                        _buildConvoyRadarSection(isDark, companionsWithLoc, companionLiveMap, userOrCenterPos),
-                        const SizedBox(height: 18),
+                        // Section 2: Convoy Radar (Live companions carousel)
+                        if (!widget.trip.isSolo) ...[
+                          _buildConvoyRadarSection(isDark, companionsWithLoc, companionLiveMap, userOrCenterPos),
+                          const SizedBox(height: 14),
 
-                        // Section 5: Route Stoppages
+                          // Section 3: Selected Companion Card & Direct Navigation (Placed directly BELOW Convoy Radar)
+                          if (_selectedCompanion != null && _selectedCompanion!.latitude != null) ...[
+                            _buildSelectedCompanionSection(isDark, userOrCenterPos, companionLiveMap),
+                            const SizedBox(height: 16),
+                          ],
+                        ],
+
+                        // Section 4: Route Stoppages
                         if (stoppages.isNotEmpty) ...[
                           _buildRouteStoppagesSection(isDark, stoppages),
                           const SizedBox(height: 18),
                         ],
 
-                        // Section 6: Map Tools & Offline Download
+                        // Section 5: Map Tools & Offline Download
                         _buildMapToolsSection(isDark, trackingState, stoppages, liveBreadcrumbs, userOrCenterPos),
+
                       ],
                     ),
                   );
@@ -1442,7 +1568,7 @@ class _MapTabState extends ConsumerState<MapTab> {
             style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1450,30 +1576,65 @@ class _MapTabState extends ConsumerState<MapTab> {
             children: [
               Row(
                 children: [
-                  Text(
-                    c.name,
-                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5),
+                  Flexible(
+                    child: Text(
+                      c.name,
+                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
                   ),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 4),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(
                       color: const Color(0xFF10B981).withAlpha(20),
                       borderRadius: BorderRadius.circular(6),
                     ),
-                    child: const Text('Convoy', style: TextStyle(fontSize: 9, color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
+                    child: const Text('Convoy', style: TextStyle(fontSize: 8.5, color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
               Text(
-                '${dist.toStringAsFixed(1)} km away • Drag up for route',
-                style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                '${dist.toStringAsFixed(1)} km away',
+                style: TextStyle(fontSize: 10.5, color: isDark ? Colors.grey[400] : const Color(0xFF64748B)),
               ),
             ],
           ),
         ),
+        if (c.latitude != null && c.longitude != null) ...[
+          FilledButton.tonalIcon(
+            onPressed: () => _startNavigationToCompanion(c, userPos, mode: _activeNavMode),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF0891B2).withAlpha(isDark ? 50 : 25),
+              foregroundColor: const Color(0xFF0891B2),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            icon: Icon(_getTransportIcon(_activeNavMode), size: 13),
+            label: const Text('Nav', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: const Icon(Icons.map_rounded, size: 18, color: AppTheme.secondary),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            tooltip: 'Google Maps',
+            onPressed: () {
+              LocationService.openExternalNavigation(
+                c.latitude!,
+                c.longitude!,
+                label: 'Meet ${c.name}',
+              );
+            },
+          ),
+        ],
         IconButton(
-          icon: const Icon(Icons.close_rounded, size: 20),
+          icon: const Icon(Icons.close_rounded, size: 18),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
           tooltip: 'Deselect',
           onPressed: () => setState(() => _selectedCompanion = null),
         ),
@@ -1575,116 +1736,6 @@ class _MapTabState extends ConsumerState<MapTab> {
     );
   }
 
-  Widget _buildNavigationControlsSection(bool isDark, LatLng userPos) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.surfaceDark : const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF06B6D4).withAlpha(100), width: 1.2),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Navigation Transport Mode', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 8),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: TransportMode.values.map((mode) {
-                final isSelected = _activeNavMode == mode;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: InkWell(
-                    onTap: () => _changeNavMode(mode, userPos),
-                    borderRadius: BorderRadius.circular(10),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: isSelected ? const Color(0xFF06B6D4) : (isDark ? Colors.white12 : Colors.white),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: isSelected ? const Color(0xFF06B6D4) : (isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0)),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _getTransportIcon(mode),
-                            size: 14,
-                            color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
-                          ),
-                          const SizedBox(width: 5),
-                          Text(
-                            mode.label,
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
-                              color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-          if (!_isCompanionRouteNavigable) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.red.withAlpha(25),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.redAccent.withAlpha(100)),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.warning_amber_rounded, color: Colors.red, size: 16),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'No verified navigable road route found between locations.',
-                      style: TextStyle(color: Colors.red, fontSize: 11, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ] else if (_companionNavSafetyAdvisories.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.amber.withAlpha(25),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.amber.withAlpha(100)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.health_and_safety_outlined, color: Colors.orange, size: 16),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _companionNavSafetyAdvisories.first,
-                      style: TextStyle(
-                        color: isDark ? Colors.amber[200] : const Color(0xFFB45309),
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 
   Widget _buildSelectedCompanionSection(
     bool isDark,
@@ -1749,97 +1800,269 @@ class _MapTabState extends ConsumerState<MapTab> {
             ],
           ),
           const SizedBox(height: 12),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: TransportMode.values.map((mode) {
-                final isSelectedMode = _activeNavMode == mode;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: InkWell(
-                    onTap: () {
-                      HapticFeedback.selectionClick();
-                      setState(() => _activeNavMode = mode);
-                    },
-                    borderRadius: BorderRadius.circular(10),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
-                      decoration: BoxDecoration(
-                        color: isSelectedMode
-                            ? const Color(0xFF0891B2)
-                            : (isDark ? Colors.white10 : Colors.white),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: isSelectedMode ? const Color(0xFF0891B2) : (isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0)),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
+
+          // Direct Navigation Actions or Active Navigation Banner
+          if (_isNavigatingToCompanion) ...[
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0891B2).withAlpha(isDark ? 35 : 20),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF0891B2).withAlpha(80)),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
                         children: [
-                          Icon(
-                            _getTransportIcon(mode),
-                            size: 13,
-                            color: isSelectedMode ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
-                          ),
-                          const SizedBox(width: 4),
+                          Icon(_getTransportIcon(_activeNavMode), size: 16, color: const Color(0xFF0891B2)),
+                          const SizedBox(width: 6),
                           Text(
-                            mode.label,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: isSelectedMode ? FontWeight.w800 : FontWeight.w500,
-                              color: isSelectedMode ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
-                            ),
+                            '${_companionNavDistanceKm.toStringAsFixed(1)} km • ${_companionNavEta.inMinutes}m ETA (${_activeNavMode.label})',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF0891B2)),
                           ),
                         ],
                       ),
+                      TextButton.icon(
+                        onPressed: _stopNavigationToCompanion,
+                        icon: const Icon(Icons.stop_rounded, size: 14, color: Colors.red),
+                        label: const Text('Stop', style: TextStyle(color: Colors.red, fontSize: 11.5, fontWeight: FontWeight.bold)),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  // Quick mode switcher
+                  Row(
+                    children: [
+                      _buildQuickModePill(TransportMode.car, userPos, isDark),
+                      const SizedBox(width: 6),
+                      _buildQuickModePill(TransportMode.bike, userPos, isDark),
+                      const SizedBox(width: 6),
+                      _buildQuickModePill(TransportMode.foot, userPos, isDark),
+                      const SizedBox(width: 6),
+                      InkWell(
+                        onTap: () => LocationService.openExternalNavigation(c.latitude!, c.longitude!, label: 'Meet ${c.name}'),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: isDark ? Colors.white12 : Colors.grey[200],
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.map_rounded, size: 12),
+                              SizedBox(width: 3),
+                              Text('Maps', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_companionNavSafetyAdvisories.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      _companionNavSafetyAdvisories.first,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: isDark ? Colors.amber[300] : const Color(0xFFB45309),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ] else ...[
+            // Senior Developer Navigation Control UI
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.white.withAlpha(8) : const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'SELECT NAVIGATION MODE',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.8,
+                          color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                        ),
+                      ),
+                      Text(
+                        '${dist.toStringAsFixed(1)} km direct',
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _buildModeSelectionChip(
+                        mode: TransportMode.car,
+                        isSelected: _activeNavMode == TransportMode.car,
+                        onTap: () => setState(() => _activeNavMode = TransportMode.car),
+                        isDark: isDark,
+                      ),
+                      const SizedBox(width: 8),
+                      _buildModeSelectionChip(
+                        mode: TransportMode.bike,
+                        isSelected: _activeNavMode == TransportMode.bike,
+                        onTap: () => setState(() => _activeNavMode = TransportMode.bike),
+                        isDark: isDark,
+                      ),
+                      const SizedBox(width: 8),
+                      _buildModeSelectionChip(
+                        mode: TransportMode.foot,
+                        isSelected: _activeNavMode == TransportMode.foot,
+                        onTap: () => setState(() => _activeNavMode = TransportMode.foot),
+                        isDark: isDark,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  FilledButton.icon(
+                    onPressed: () => _startNavigationToCompanion(c, userPos, mode: _activeNavMode),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 0,
+                    ),
+                    icon: Icon(_getTransportIcon(_activeNavMode), size: 16),
+                    label: Text(
+                      'Start In-App Navigation (${_activeNavMode.label})',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
                     ),
                   ),
-                );
-              }).toList(),
+                  const SizedBox(height: 6),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      LocationService.openExternalNavigation(
+                        c.latitude!,
+                        c.longitude!,
+                        label: 'Meet ${c.name}',
+                      );
+                    },
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      side: BorderSide(
+                        color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+                      ),
+                    ),
+                    icon: const Icon(Icons.open_in_new_rounded, size: 14),
+                    label: const Text(
+                      'Open in External Google Maps',
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 11.5),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                flex: 3,
-                child: FilledButton.icon(
-                  onPressed: () => _startNavigationToCompanion(c, userPos, mode: _activeNavMode),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF0891B2),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  icon: Icon(_getTransportIcon(_activeNavMode), size: 16),
-                  label: Text('Navigate (${_activeNavMode.label})', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 2,
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    LocationService.openExternalNavigation(
-                      c.latitude!,
-                      c.longitude!,
-                      label: 'Meet ${c.name}',
-                    );
-                  },
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  icon: const Icon(Icons.map_rounded, size: 15),
-                  label: const Text('Google Maps', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
-                ),
-              ),
-            ],
-          ),
+          ],
         ],
       ),
     );
   }
+
+  Widget _buildModeSelectionChip({
+    required TransportMode mode,
+    required bool isSelected,
+    required VoidCallback onTap,
+    required bool isDark,
+  }) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? AppTheme.primary.withAlpha(isDark ? 50 : 25)
+                : (isDark ? Colors.white10 : const Color(0xFFF1F5F9)),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isSelected ? AppTheme.primary : (isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+              width: isSelected ? 1.5 : 1.0,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                _getTransportIcon(mode),
+                size: 18,
+                color: isSelected ? AppTheme.primary : (isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                mode.label,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                  color: isSelected ? AppTheme.primary : (isDark ? Colors.grey[300] : const Color(0xFF475569)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickModePill(TransportMode mode, LatLng userPos, bool isDark) {
+    final isSelected = _activeNavMode == mode;
+    return InkWell(
+      onTap: () => _changeNavMode(mode, userPos),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF0891B2) : (isDark ? Colors.white12 : Colors.grey[200]),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Icon(_getTransportIcon(mode), size: 12, color: isSelected ? Colors.white : null),
+            const SizedBox(width: 3),
+            Text(
+              mode.label,
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: isSelected ? FontWeight.w900 : FontWeight.bold,
+                color: isSelected ? Colors.white : null,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
 
   Widget _buildSelectedStoppageSection(bool isDark) {
     final stop = _selectedMarkerStoppage!;
@@ -1991,16 +2214,7 @@ class _MapTabState extends ConsumerState<MapTab> {
                         : (isDark ? AppTheme.surfaceDark : const Color(0xFFF8FAFC)),
                     borderRadius: BorderRadius.circular(16),
                     child: InkWell(
-                      onTap: () {
-                        HapticFeedback.selectionClick();
-                        if (c.latitude != null && c.longitude != null) {
-                          setState(() {
-                            _selectedCompanion = c;
-                            _selectedMarkerStoppage = null;
-                          });
-                          _mapController.move(LatLng(c.latitude!, c.longitude!), 14.5);
-                        }
-                      },
+                      onTap: () => _selectCompanion(c),
                       borderRadius: BorderRadius.circular(16),
                       child: Container(
                         padding: const EdgeInsets.all(10),
@@ -2046,17 +2260,24 @@ class _MapTabState extends ConsumerState<MapTab> {
                               },
                               borderRadius: BorderRadius.circular(8),
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4.5),
                                 decoration: BoxDecoration(
                                   color: const Color(0xFF06B6D4),
                                   borderRadius: BorderRadius.circular(8),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFF06B6D4).withAlpha(60),
+                                      blurRadius: 3,
+                                      offset: const Offset(0, 1),
+                                    ),
+                                  ],
                                 ),
                                 child: const Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.navigation_rounded, size: 11, color: Colors.white),
-                                    SizedBox(width: 3),
-                                    Text('Nav', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                                    Icon(Icons.navigation_rounded, size: 12, color: Colors.white),
+                                    SizedBox(width: 3.5),
+                                    Text('Navigate', style: TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold)),
                                   ],
                                 ),
                               ),
@@ -2114,14 +2335,7 @@ class _MapTabState extends ConsumerState<MapTab> {
                       : (isDark ? AppTheme.surfaceDark : const Color(0xFFF8FAFC)),
                   borderRadius: BorderRadius.circular(14),
                   child: InkWell(
-                    onTap: () {
-                      HapticFeedback.selectionClick();
-                      setState(() {
-                        _selectedMarkerStoppage = stop;
-                        _selectedCompanion = null;
-                      });
-                      _mapController.move(LatLng(stop.latitude, stop.longitude), 14.5);
-                    },
+                    onTap: () => _focusStoppageInVisibleViewport(stop),
                     borderRadius: BorderRadius.circular(14),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),

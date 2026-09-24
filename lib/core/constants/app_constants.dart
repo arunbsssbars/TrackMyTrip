@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class AppConstants {
-  static const String appName = 'Trip Tracker';
+  static const String appName = 'Track My Trip';
   static const String appTagline = 'Memories, Stoppages & Shared Expenses';
 
   // OpenStreetMap Tile Server Endpoints (100% Free, Pure OSM Data, No API Key Required, No Watermarks)

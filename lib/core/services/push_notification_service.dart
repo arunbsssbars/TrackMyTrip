@@ -1,5 +1,6 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import '../utils/app_logger.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 final pushNotificationServiceProvider = Provider<PushNotificationService>((ref) {
@@ -24,11 +25,11 @@ class PushNotificationService {
     );
 
     if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-      print('User granted permission');
+      AppLogger.info('Push notification permission granted');
     } else if (settings.authorizationStatus == AuthorizationStatus.provisional) {
-      print('User granted provisional permission');
+      AppLogger.info('Push notification provisional permission granted');
     } else {
-      print('User declined or has not accepted permission');
+      AppLogger.warn('Push notification permission declined or not accepted');
     }
 
     // Configure Local Notifications for foreground display
@@ -41,7 +42,7 @@ class PushNotificationService {
       initSettings,
       onDidReceiveNotificationResponse: (details) {
         // Handle notification tap
-        print('Notification tapped: ${details.payload}');
+        AppLogger.info('Notification tapped: ${details.payload}');
       },
     );
 
@@ -59,11 +60,11 @@ class PushNotificationService {
 
     // Listen for foreground messages
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print('Got a message whilst in the foreground!');
-      print('Message data: ${message.data}');
+      AppLogger.info('Foreground message received');
+      AppLogger.debug('Message data: ${message.data}');
 
       if (message.notification != null) {
-        print('Message also contained a notification: ${message.notification}');
+        AppLogger.info('Foreground message includes notification banner');
         _showForegroundNotification(message, channel);
       }
     });

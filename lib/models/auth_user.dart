@@ -1,3 +1,5 @@
+import 'user_profile.dart';
+
 enum AuthProviderType {
   email,
   google,
@@ -32,6 +34,19 @@ class AuthUser {
   });
 
   String get handle => username.startsWith('@') ? username : '@$username';
+
+  UserProfile toUserProfile() {
+    return UserProfile(
+      id: id,
+      username: username,
+      displayName: displayName,
+      email: email,
+      phone: phone,
+      bio: bio,
+      colorHex: colorHex ?? '0xFF0D9488',
+      avatarUrl: photoUrl,
+    );
+  }
 
   AuthUser copyWith({
     String? id,

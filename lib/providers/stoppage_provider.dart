@@ -5,12 +5,9 @@ import '../core/services/trip_share_service.dart';
 import '../models/stoppage.dart';
 import 'trip_provider.dart';
 
-import 'package:uuid/uuid.dart';
-import '../models/trip_audit_log.dart';
 import '../models/sync_mutation.dart';
 import '../core/services/offline_sync_engine.dart';
 import '../core/services/realtime_sync_service.dart';
-import 'audit_log_provider.dart';
 
 class StoppageNotifier extends StateNotifier<List<Stoppage>> {
   final LocalStorageService _storage;
@@ -28,6 +25,10 @@ class StoppageNotifier extends StateNotifier<List<Stoppage>> {
     _loadAllStoppages();
   }
 
+  void reset() {
+    state = [];
+  }
+
   Future<void> addStoppage(Stoppage stoppage, {bool broadcast = true}) async {
     state = [...state, stoppage];
     await _storage.saveAllStoppages(state);
@@ -39,20 +40,7 @@ class StoppageNotifier extends StateNotifier<List<Stoppage>> {
       } catch (_) {}
     }
 
-    try {
-      _ref.read(allAuditLogsProvider.notifier).logAction(
-        TripAuditLog(
-          id: const Uuid().v4(),
-          tripId: stoppage.tripId,
-          actionType: 'create_stoppage',
-          itemTitle: stoppage.name,
-          performedByMemberId: 'me',
-          performedByName: 'Companion',
-          timestamp: DateTime.now(),
-          changeDetails: 'Tagged new pitstop at ${stoppage.name}',
-        ),
-      );
-    } catch (_) {}
+
 
     try {
       _ref.read(offlineSyncEngineProvider).enqueueMutation(
@@ -92,20 +80,7 @@ class StoppageNotifier extends StateNotifier<List<Stoppage>> {
     final updated = stoppage.copyWith(departedAt: DateTime.now());
     await updateStoppage(updated);
 
-    try {
-      _ref.read(allAuditLogsProvider.notifier).logAction(
-        TripAuditLog(
-          id: const Uuid().v4(),
-          tripId: stoppage.tripId,
-          actionType: 'depart_stoppage',
-          itemTitle: stoppage.name,
-          performedByMemberId: 'me',
-          performedByName: 'Companion',
-          timestamp: DateTime.now(),
-          changeDetails: 'Departed from ${stoppage.name}',
-        ),
-      );
-    } catch (_) {}
+
   }
 
   Future<void> deleteStoppage(String stoppageId) async {
@@ -114,20 +89,7 @@ class StoppageNotifier extends StateNotifier<List<Stoppage>> {
     await _storage.saveAllStoppages(state);
     _syncToCloud(existing.tripId);
 
-    try {
-      _ref.read(allAuditLogsProvider.notifier).logAction(
-        TripAuditLog(
-          id: const Uuid().v4(),
-          tripId: existing.tripId,
-          actionType: 'delete_stoppage',
-          itemTitle: existing.name,
-          performedByMemberId: 'me',
-          performedByName: 'Companion',
-          timestamp: DateTime.now(),
-          changeDetails: 'Deleted pitstop from route',
-        ),
-      );
-    } catch (_) {}
+
 
     try {
       _ref.read(offlineSyncEngineProvider).enqueueMutation(

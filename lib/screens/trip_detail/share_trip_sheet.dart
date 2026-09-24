@@ -11,10 +11,12 @@ import '../../models/trip.dart';
 import '../../models/trip_member.dart';
 import '../../providers/audit_log_provider.dart';
 import '../../providers/expense_provider.dart';
+import '../../providers/invitation_provider.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/settlement_provider.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
+import '../trip/companion_search_dialog.dart';
 
 class ShareTripSheet extends ConsumerStatefulWidget {
   final Trip trip;
@@ -27,7 +29,6 @@ class ShareTripSheet extends ConsumerStatefulWidget {
 
 class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
   int _selectedTabIndex = 0; // 0: Quick Share, 1: QR Code, 2: Travelers
-  bool _copied = false;
 
   @override
   void initState() {
@@ -62,23 +63,6 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
       package,
       senderName: activeMember?.name,
     );
-  }
-
-  void _copyCode() async {
-    final package = _buildTripPackage();
-    await TripShareService.copyCodeToClipboard(package);
-    if (!mounted) return;
-    setState(() => _copied = true);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Trip share code copied to clipboard! Share it with your friends.'),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: AppTheme.primary,
-      ),
-    );
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) setState(() => _copied = false);
-    });
   }
 
   void _showAddTravelerDialog() {
@@ -221,18 +205,18 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
             segments: const [
               ButtonSegment(
                 value: 0,
-                label: Text('Share Link'),
-                icon: Icon(Icons.send_rounded, size: 16),
+                label: Text('Share Link', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                icon: Icon(Icons.send_rounded, size: 15),
               ),
               ButtonSegment(
                 value: 1,
-                label: Text('QR Code'),
-                icon: Icon(Icons.qr_code_2_rounded, size: 16),
+                label: Text('QR Code', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                icon: Icon(Icons.qr_code_2_rounded, size: 15),
               ),
               ButtonSegment(
                 value: 2,
-                label: Text('Travelers'),
-                icon: Icon(Icons.group_rounded, size: 16),
+                label: Text('Members', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                icon: Icon(Icons.group_rounded, size: 15),
               ),
             ],
             selected: {_selectedTabIndex},
@@ -265,7 +249,7 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
     String shareCode,
     bool isDark,
   ) {
-    final roomCode = CloudTripSyncService.generateRoomCode(trip.id);
+    final roomCode = CloudTripSyncService.getRoomCode(trip.id, trip: trip);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -390,89 +374,7 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           ),
         ),
-        const SizedBox(height: 10),
-
-        // Action Buttons Row
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: roomCode));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Room code $roomCode copied!'),
-                      behavior: SnackBarBehavior.floating,
-                      backgroundColor: AppTheme.secondary,
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.vpn_key_rounded, size: 18, color: AppTheme.secondary),
-                label: Text(
-                  'Copy $roomCode',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  side: const BorderSide(color: AppTheme.secondary),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _copyCode,
-                icon: Icon(_copied ? Icons.check_rounded : Icons.copy_rounded, size: 18),
-                label: Text(
-                  _copied ? 'Copied!' : 'Copy Full Invite',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-            ),
-          ],
-        ),
         const SizedBox(height: 16),
-
-        // Share Code Preview Box
-        Text(
-          'Share Code Preview:',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: isDark ? Colors.white10 : const Color(0xFFCBD5E1),
-            ),
-          ),
-          child: Text(
-            shareCode,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 11,
-              color: Colors.grey,
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -480,7 +382,7 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                'Co-travelers can tap "Join Trip" on their device and paste this code to import the full itinerary and split bills.',
+                'Co-travelers can tap "Join Trip" on their device and enter this room code to follow route & split expenses.',
                 style: TextStyle(
                   fontSize: 11,
                   color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
@@ -502,7 +404,7 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
         ),
         const SizedBox(height: 4),
         Text(
-          'Ask your friend to scan this QR code using their camera or Trip Tracker app.',
+          'Ask your friend to scan this QR code using their camera or Track My Trip app.',
           style: TextStyle(
             fontSize: 12,
             color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
@@ -541,13 +443,64 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
             fontWeight: FontWeight.w500,
           ),
         ),
-        const SizedBox(height: 12),
-        OutlinedButton.icon(
-          onPressed: _copyCode,
-          icon: Icon(_copied ? Icons.check_rounded : Icons.copy_rounded, size: 18),
-          label: Text(_copied ? 'Code Copied!' : 'Copy Code as Text'),
+        const SizedBox(height: 14),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            OutlinedButton.icon(
+              onPressed: () {
+                final roomCode = CloudTripSyncService.getRoomCode(widget.trip.id, trip: widget.trip);
+                Clipboard.setData(ClipboardData(text: roomCode));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Join code $roomCode copied to clipboard!'),
+                    behavior: SnackBarBehavior.floating,
+                    backgroundColor: AppTheme.secondary,
+                  ),
+                );
+              },
+              icon: const Icon(Icons.copy_rounded, size: 16),
+              label: const Text('Copy Code', style: TextStyle(fontSize: 12)),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.icon(
+              onPressed: _shareViaApps,
+              icon: const Icon(Icons.share_rounded, size: 16),
+              label: const Text('Share Invite', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+              ),
+            ),
+          ],
         ),
       ],
+    );
+  }
+
+  void _openCompanionSearch(BuildContext context, Trip trip) {
+    CompanionSearchDialog.show(
+      context,
+      tripId: trip.id,
+      currentMembers: trip.members,
+      onCompanionSelected: (member) async {
+        await ref.read(invitationProvider.notifier).sendInvitation(
+          tripId: trip.id,
+          tripTitle: trip.title,
+          inviteeId: member.id,
+          inviteeUsername: member.name,
+          inviteeEmail: member.email,
+          tripJson: trip.toJson(),
+        );
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Trip invitation sent to ${member.name}! They will join once accepted.'),
+              backgroundColor: AppTheme.primary,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      },
     );
   }
 
@@ -562,10 +515,28 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
               'Trip Companions (${trip.members.length})',
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
             ),
-            TextButton.icon(
-              onPressed: _showAddTravelerDialog,
-              icon: const Icon(Icons.person_add_rounded, size: 18),
-              label: const Text('Add New'),
+            Row(
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _showAddTravelerDialog,
+                  icon: const Icon(Icons.person_add_rounded, size: 14),
+                  label: const Text('Manual', style: TextStyle(fontSize: 11)),
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                FilledButton.tonalIcon(
+                  onPressed: () => _openCompanionSearch(context, trip),
+                  icon: const Icon(Icons.person_search_rounded, size: 15),
+                  label: const Text('Invite', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -595,30 +566,39 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
               subtitle: Text(
-                member.isCurrentUser ? 'You (Active Traveler)' : 'Co-Traveler',
+                member.isCurrentUser ? 'You (Active Traveler)' : (member.id == trip.createdByMemberId ? 'Trip Host' : 'Co-Traveler'),
                 style: TextStyle(
                   fontSize: 12,
                   color: member.isCurrentUser ? AppTheme.primary : Colors.grey,
                   fontWeight: member.isCurrentUser ? FontWeight.bold : FontWeight.normal,
                 ),
               ),
-              trailing: member.isCurrentUser
-                  ? const Chip(
-                      label: Text('Active', style: TextStyle(fontSize: 11, color: Colors.white)),
-                      backgroundColor: AppTheme.primary,
-                      visualDensity: VisualDensity.compact,
-                    )
-                  : OutlinedButton(
-                      onPressed: () {
-                        ref.read(tripListProvider.notifier).switchActiveMember(trip.id, member.id);
-                        setState(() {});
-                      },
-                      style: OutlinedButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                      ),
-                      child: const Text('Switch to Me', style: TextStyle(fontSize: 11)),
-                    ),
+              trailing: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: member.isCurrentUser
+                      ? AppTheme.primary.withAlpha(25)
+                      : (isDark ? Colors.white.withAlpha(15) : const Color(0xFFF1F5F9)),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: member.isCurrentUser
+                        ? AppTheme.primary
+                        : (isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1)),
+                  ),
+                ),
+                child: Text(
+                  member.isCurrentUser
+                      ? 'You (Active)'
+                      : (member.id == trip.createdByMemberId ? 'Host' : 'Companion'),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: member.isCurrentUser
+                        ? AppTheme.primary
+                        : (isDark ? Colors.grey[300] : const Color(0xFF475569)),
+                  ),
+                ),
+              ),
             );
           },
         ),

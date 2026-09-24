@@ -1,22 +1,28 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/expense.dart';
 import '../../models/memory.dart';
 import '../../models/proximity_alert.dart';
+import '../../models/settlement.dart';
 import '../../models/stoppage.dart';
 import '../../models/trip.dart';
 import '../../models/trip_audit_log.dart';
+import '../../models/trip_member.dart';
 import '../../providers/audit_log_provider.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
+import 'cloud_trip_sync_service.dart';
 import 'live_companion_tracker_service.dart';
 import 'proximity_alert_service.dart';
-import 'local_storage_service.dart';
+import 'trip_share_service.dart';
+import 'user_service.dart';
 
 /// ---------------------------------------------------------------------------
 /// FirestoreSyncService
@@ -69,8 +75,104 @@ class FirestoreSyncService {
   double? _lastBroadcastLng;
   DateTime? _lastBroadcastTime;
 
+  /// Active subscriptions to listen for trip changes across the user's workspace in real-time
+  final List<StreamSubscription> _userTripsSubscriptions = [];
+
   FirestoreSyncService(this._ref, {FirebaseFirestore? db})
       : _db = db ?? FirebaseFirestore.instance;
+
+  /// Subscribes to changes on trips where the user is a creator or member.
+  /// Automatically purges deleted trips from local workspace in real-time.
+  void subscribeUserTrips({required String userId, String? email}) {
+    if (userId.isEmpty) return;
+    for (final sub in _userTripsSubscriptions) {
+      sub.cancel();
+    }
+    _userTripsSubscriptions.clear();
+
+    final cleanEmail = email?.trim().toLowerCase();
+
+    void handleTripChange(DocumentChange<Map<String, dynamic>> change) {
+      try {
+        final doc = change.doc;
+        final tripId = doc.id;
+        final data = doc.data();
+
+        if (change.type == DocumentChangeType.removed) {
+          _ref.read(tripListProvider.notifier).deleteTripLocally(tripId);
+          return;
+        }
+
+        if (data != null) {
+          final isDeleted = data['status'] == 'deleted' || data['isDeleted'] == true;
+          if (isDeleted) {
+            _ref.read(tripListProvider.notifier).deleteTripLocally(tripId);
+            return;
+          }
+
+          final isCreator = data['creatorId'] == userId || data['createdByMemberId'] == userId;
+          if (!isCreator) {
+            final memberIds = (data['memberIds'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
+            final memberEmails = (data['memberEmails'] as List<dynamic>?)?.map((e) => e.toString().trim().toLowerCase()).toList() ?? [];
+            final hasEmail = cleanEmail != null && cleanEmail.isNotEmpty;
+            if (!memberIds.contains(userId) && (!hasEmail || !memberEmails.contains(cleanEmail))) {
+              _ref.read(tripListProvider.notifier).deleteTripLocally(tripId);
+            }
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) debugPrint('[FirestoreSyncService] handleTripChange error: $e');
+      }
+    }
+
+    try {
+      final memberSub = _db
+          .collection('trips')
+          .where('memberIds', arrayContains: userId)
+          .snapshots()
+          .listen((snap) {
+        for (final change in snap.docChanges) {
+          handleTripChange(change);
+        }
+      });
+      _userTripsSubscriptions.add(memberSub);
+    } catch (_) {}
+
+    try {
+      final creatorSub = _db
+          .collection('trips')
+          .where('creatorId', isEqualTo: userId)
+          .snapshots()
+          .listen((snap) {
+        for (final change in snap.docChanges) {
+          handleTripChange(change);
+        }
+      });
+      _userTripsSubscriptions.add(creatorSub);
+    } catch (_) {}
+
+    if (cleanEmail != null && cleanEmail.isNotEmpty) {
+      try {
+        final emailSub = _db
+            .collection('trips')
+            .where('memberEmails', arrayContains: cleanEmail)
+            .snapshots()
+            .listen((snap) {
+          for (final change in snap.docChanges) {
+            handleTripChange(change);
+          }
+        });
+        _userTripsSubscriptions.add(emailSub);
+      } catch (_) {}
+    }
+  }
+
+  void cancelUserTripsSubscription() {
+    for (final sub in _userTripsSubscriptions) {
+      sub.cancel();
+    }
+    _userTripsSubscriptions.clear();
+  }
 
   // --------------------------------------------------------------------------
   // Lifecycle
@@ -84,6 +186,7 @@ class FirestoreSyncService {
     if (_activeTripId == tripId) return;
     disconnectAll();
     _activeTripId = tripId;
+    _subscribeTripDoc(tripId);
     _subscribeStoppages(tripId);
     _subscribeExpenses(tripId);
     _subscribeMemories(tripId);
@@ -106,6 +209,45 @@ class FirestoreSyncService {
     _listeners.clear();
     _docListeners.clear();
     _activeTripId = null;
+    try {
+      _ref.read(liveCompanionTrackerProvider.notifier).clearAllCompanionLocations();
+    } catch (_) {}
+  }
+
+  // --------------------------------------------------------------------------
+  // Trip Doc — Subscribe (Deletion & Membership Revocation Listener)
+  // --------------------------------------------------------------------------
+
+  void _subscribeTripDoc(String tripId) {
+    final path = 'trip_$tripId';
+    _docListeners[path] = _db.collection('trips').doc(tripId).snapshots().listen((snap) {
+      if (!snap.exists || snap.data() == null) {
+        disconnectAll();
+        _ref.read(tripListProvider.notifier).deleteTripLocally(tripId);
+        return;
+      }
+      final data = snap.data()!;
+      if (data['status'] == 'deleted' || data['isDeleted'] == true) {
+        disconnectAll();
+        _ref.read(tripListProvider.notifier).deleteTripLocally(tripId);
+        return;
+      }
+
+      final authUser = _ref.read(authNotifierProvider).valueOrNull;
+      final myUid = authUser?.id;
+      final myEmail = authUser?.email.trim().toLowerCase();
+      final isCreator = data['createdByMemberId'] == myUid || data['creatorId'] == myUid;
+
+      if (!isCreator && myUid != null) {
+        final memberIds = (data['memberIds'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
+        final memberEmails = (data['memberEmails'] as List<dynamic>?)?.map((e) => e.toString().trim().toLowerCase()).toList() ?? [];
+        final hasEmail = myEmail != null && myEmail.isNotEmpty;
+        if (!memberIds.contains(myUid) && (!hasEmail || !memberEmails.contains(myEmail))) {
+          disconnectAll();
+          _ref.read(tripListProvider.notifier).deleteTripLocally(tripId);
+        }
+      }
+    });
   }
 
   // --------------------------------------------------------------------------
@@ -301,6 +443,8 @@ class FirestoreSyncService {
           final data = change.doc.data();
           if (data == null) continue;
           final memberId = change.doc.id;
+          final currentUserId = UserService.getCurrentUser().id;
+          if (memberId == currentUserId) continue;
           final lat = (data['lat'] as num?)?.toDouble() ?? 0.0;
           final lng = (data['lng'] as num?)?.toDouble() ?? 0.0;
           final speedKmh = (data['speedKmh'] as num?)?.toDouble() ?? 0.0;
@@ -518,13 +662,308 @@ class FirestoreSyncService {
   /// Creates or updates the top-level trip document in Firestore.
   Future<void> pushTrip(Trip trip) async {
     try {
+      String? authUid;
+      try {
+        authUid = FirebaseAuth.instance.currentUser?.uid;
+      } catch (_) {}
+      final effectiveCreatorId = (authUid != null && authUid.isNotEmpty)
+          ? authUid
+          : trip.createdByMemberId;
+
       await _db.collection('trips').doc(trip.id).set({
         ...trip.toJson(),
+        'createdByMemberId': effectiveCreatorId,
+        'creatorId': effectiveCreatorId,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (e) {
       if (kDebugMode) debugPrint('[FirestoreSyncService] pushTrip error: $e');
     }
+  }
+
+  /// Soft-deletes a trip in Firestore
+  Future<void> markTripDeleted(String tripId) async {
+    try {
+      await _db.collection('trips').doc(tripId).set({
+        'status': 'deleted',
+        'isDeleted': true,
+        'deletedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      if (kDebugMode) debugPrint('[FirestoreSyncService] markTripDeleted error: $e');
+    }
+  }
+
+  /// Checks whether a trip is explicitly marked deleted or missing in Firestore
+  Future<bool> isTripDeletedOrMissing(
+    String tripId, {
+    String? userId,
+    String? email,
+  }) async {
+    try {
+      final doc = await _db.collection('trips').doc(tripId).get();
+      if (!doc.exists || doc.data() == null) {
+        return true; // Document no longer exists -> deleted!
+      }
+      final data = doc.data()!;
+      if (data['status'] == 'deleted' || data['isDeleted'] == true) {
+        return true;
+      }
+      if (userId != null && userId.isNotEmpty) {
+        final isCreator = data['creatorId'] == userId || data['createdByMemberId'] == userId;
+        final memberIds = (data['memberIds'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
+        final memberEmails = (data['memberEmails'] as List<dynamic>?)?.map((e) => e.toString().trim().toLowerCase()).toList() ?? [];
+        final cleanEmail = email?.trim().toLowerCase();
+        final isMember = memberIds.contains(userId) || (cleanEmail != null && cleanEmail.isNotEmpty && memberEmails.contains(cleanEmail));
+        if (!isCreator && !isMember) {
+          return true; // User was removed from this trip
+        }
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Removes a companion member from the trip document in Firestore
+  Future<void> removeMemberFromTripInCloud(
+    String tripId,
+    String memberId, {
+    String? email,
+  }) async {
+    try {
+      final tripDoc = await _db.collection('trips').doc(tripId).get();
+      if (!tripDoc.exists || tripDoc.data() == null) return;
+      final data = tripDoc.data()!;
+      final currentMembers = (data['members'] as List<dynamic>?) ?? [];
+      final updatedMembers = currentMembers.where((m) {
+        if (m is Map) {
+          final id = m['id'];
+          final mEmail = m['email']?.toString().trim().toLowerCase();
+          if (id == memberId) return false;
+          if (email != null && email.isNotEmpty && mEmail == email.trim().toLowerCase()) return false;
+        }
+        return true;
+      }).toList();
+
+      final currentMemberIds = (data['memberIds'] as List<dynamic>?) ?? [];
+      final updatedMemberIds = currentMemberIds.where((id) => id != memberId).toList();
+
+      final currentEmails = (data['memberEmails'] as List<dynamic>?) ?? [];
+      final cleanEmail = email?.trim().toLowerCase();
+      final updatedEmails = currentEmails.where((e) => cleanEmail == null || cleanEmail.isEmpty || e != cleanEmail).toList();
+
+      await _db.collection('trips').doc(tripId).update({
+        'members': updatedMembers,
+        'memberIds': updatedMemberIds,
+        'memberEmails': updatedEmails,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      if (kDebugMode) debugPrint('[FirestoreSyncService] removeMemberFromTripInCloud error: $e');
+    }
+  }
+
+  /// Fetches all trips where [userId] is the creator or a member, or where [email] is in memberEmails.
+  Future<List<TripPackage>> fetchTripsForUser({
+    required String userId,
+    String? email,
+  }) async {
+    final results = <String, TripPackage>{};
+    if (userId.isEmpty) return [];
+
+    final cleanEmail = email?.trim().toLowerCase();
+
+    // 1. Trips created by user (creatorId)
+    try {
+      final creatorQuery = await _db
+          .collection('trips')
+          .where('creatorId', isEqualTo: userId)
+          .get();
+      for (final doc in creatorQuery.docs) {
+        try {
+          final data = doc.data();
+          if (data['status'] == 'deleted' || data['isDeleted'] == true) continue;
+          final trip = Trip.fromJson(data);
+          if (trip.isDeleted) continue;
+          final pkg = await _fetchTripPackage(trip);
+          results[trip.id] = pkg;
+        } catch (_) {}
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[FirestoreSyncService] creatorId query error: $e');
+    }
+
+    // 2. Also createdByMemberId fallback
+    try {
+      final creatorQuery2 = await _db
+          .collection('trips')
+          .where('createdByMemberId', isEqualTo: userId)
+          .get();
+      for (final doc in creatorQuery2.docs) {
+        try {
+          final data = doc.data();
+          if (data['status'] == 'deleted' || data['isDeleted'] == true) continue;
+          final trip = Trip.fromJson(data);
+          if (trip.isDeleted) continue;
+          if (!results.containsKey(trip.id)) {
+            final pkg = await _fetchTripPackage(trip);
+            results[trip.id] = pkg;
+          }
+        } catch (_) {}
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[FirestoreSyncService] createdByMemberId query error: $e');
+    }
+
+    // 3. Trips where user is listed in memberIds
+    try {
+      final memberQuery = await _db
+          .collection('trips')
+          .where('memberIds', arrayContains: userId)
+          .get();
+      for (final doc in memberQuery.docs) {
+        try {
+          final data = doc.data();
+          if (data['status'] == 'deleted' || data['isDeleted'] == true) continue;
+          final trip = Trip.fromJson(data);
+          if (trip.isDeleted) continue;
+          if (!results.containsKey(trip.id)) {
+            final pkg = await _fetchTripPackage(trip);
+            results[trip.id] = pkg;
+          }
+        } catch (_) {}
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[FirestoreSyncService] memberIds query error: $e');
+    }
+
+    // 4. Trips where user's email is in memberEmails
+    if (cleanEmail != null && cleanEmail.isNotEmpty) {
+      try {
+        final emailQuery = await _db
+            .collection('trips')
+            .where('memberEmails', arrayContains: cleanEmail)
+            .get();
+        for (final doc in emailQuery.docs) {
+          try {
+            final data = doc.data();
+            if (data['status'] == 'deleted' || data['isDeleted'] == true) continue;
+            final trip = Trip.fromJson(data);
+            if (trip.isDeleted) continue;
+            if (!results.containsKey(trip.id)) {
+              final pkg = await _fetchTripPackage(trip);
+              results[trip.id] = pkg;
+            }
+          } catch (_) {}
+        }
+      } catch (e) {
+        if (kDebugMode) debugPrint('[FirestoreSyncService] memberEmails query error: $e');
+      }
+    }
+
+    // 5. Scan rooms collection for shared trips (e.g. TRIP-78C9, TRIP-UV7W) matching user identity or member list
+    try {
+      final roomsSnap = await _db.collection('rooms').limit(100).get();
+      for (final doc in roomsSnap.docs) {
+        try {
+          final data = doc.data();
+          if (data['status'] == 'deleted' || data['isDeleted'] == true) continue;
+          if (data.containsKey('package')) {
+            final pkgMap = data['package'] as Map<String, dynamic>;
+            final pkg = TripPackage.fromJson(pkgMap);
+            final trip = pkg.trip;
+            if (trip.isDeleted) continue;
+            final isCreator = trip.createdByMemberId == userId;
+            final isMember = trip.members.any((m) {
+              final matchId = m.id == userId;
+              final mEmail = m.email?.trim().toLowerCase();
+              final matchEmail = cleanEmail != null && mEmail != null && mEmail == cleanEmail;
+              return matchId || matchEmail;
+            });
+
+            if (isCreator || isMember) {
+              CloudTripSyncService.registerRoomCode(trip.id, doc.id);
+              results.putIfAbsent(trip.id, () => pkg);
+            }
+          }
+        } catch (_) {}
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[FirestoreSyncService] rooms query error: $e');
+    }
+
+    return results.values.toList();
+  }
+
+  /// Fetches a specific trip package by ID directly from Cloud Firestore
+  Future<TripPackage?> fetchTripById(String tripId) async {
+    try {
+      final doc = await _db.collection('trips').doc(tripId).get();
+      if (doc.exists && doc.data() != null) {
+        final trip = Trip.fromJson(doc.data()!);
+        return await _fetchTripPackage(trip);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<TripPackage> _fetchTripPackage(Trip trip) async {
+    TripPackage? roomPkg;
+    if (trip.shareCode != null && trip.shareCode!.isNotEmpty) {
+      try {
+        roomPkg = await CloudTripSyncService.fetchTripByCode(trip.shareCode!);
+      } catch (_) {}
+    }
+
+    final tripRef = _db.collection('trips').doc(trip.id);
+    final stoppagesSnap = await tripRef.collection('stoppages').get();
+    final stoppages = stoppagesSnap.docs.map((d) => Stoppage.fromJson(d.data())).toList();
+    if (stoppages.isEmpty && roomPkg != null) {
+      stoppages.addAll(roomPkg.stoppages);
+    }
+
+    final expensesSnap = await tripRef.collection('expenses').get();
+    final expenses = expensesSnap.docs.map((d) => Expense.fromJson(d.data())).toList();
+    if (expenses.isEmpty && roomPkg != null) {
+      expenses.addAll(roomPkg.expenses);
+    }
+
+    final memoriesSnap = await tripRef.collection('memories').get();
+    final memories = memoriesSnap.docs.map((d) => Memory.fromJson(d.data())).toList();
+    if (memories.isEmpty && roomPkg != null) {
+      memories.addAll(roomPkg.memories);
+    }
+
+    final settlementsSnap = await tripRef.collection('settlements').get();
+    final settlements = settlementsSnap.docs.map((d) => Settlement.fromJson(d.data())).toList();
+    if (settlements.isEmpty && roomPkg != null) {
+      settlements.addAll(roomPkg.settlements);
+    }
+
+    // Merge members: union of trip.members and roomPkg members
+    final Map<String, TripMember> memberMap = {};
+    for (final m in trip.members) {
+      memberMap[m.id] = m;
+    }
+    if (roomPkg != null) {
+      for (final m in roomPkg.trip.members) {
+        memberMap.putIfAbsent(m.id, () => m);
+      }
+    }
+
+    final mergedTrip = trip.copyWith(
+      members: memberMap.values.toList(),
+      shareCode: trip.shareCode ?? roomPkg?.trip.shareCode,
+    );
+
+    return TripPackage(
+      trip: mergedTrip,
+      stoppages: stoppages,
+      expenses: expenses,
+      memories: memories,
+      settlements: settlements,
+    );
   }
 
   // --------------------------------------------------------------------------
@@ -634,7 +1073,9 @@ class FirestoreSyncService {
   static double _sqrt(double x) {
     if (x <= 0) return 0;
     double r = x;
-    for (int i = 0; i < 10; i++) r = (r + x / r) / 2;
+    for (int i = 0; i < 10; i++) {
+      r = (r + x / r) / 2;
+    }
     return r;
   }
 }

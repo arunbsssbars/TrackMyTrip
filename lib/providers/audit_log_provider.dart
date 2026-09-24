@@ -23,6 +23,10 @@ class AuditLogNotifier extends StateNotifier<List<TripAuditLog>> {
     state = _storage.getAllAuditLogs();
   }
 
+  void reload() {
+    _loadAll();
+  }
+
   Future<void> logAction(TripAuditLog log, {bool broadcast = true}) async {
     final updated = [log, ...state];
     state = updated;

@@ -820,6 +820,80 @@ class StoppageDetailScreen extends ConsumerWidget {
                                 ),
                               ],
                             ),
+                            const SizedBox(width: 2),
+                            PopupMenuButton<String>(
+                              icon: const Icon(Icons.more_vert_rounded, size: 18, color: Colors.grey),
+                              padding: EdgeInsets.zero,
+                              tooltip: 'Expense options',
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                              onSelected: (action) async {
+                                if (action == 'edit') {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (context) => AddExpenseScreen(
+                                        tripId: tripId,
+                                        initialExpense: expense,
+                                      ),
+                                    ),
+                                  );
+                                } else if (action == 'delete') {
+                                  final confirmed = await showDialog<bool>(
+                                    context: context,
+                                    builder: (ctx) => AlertDialog(
+                                      title: const Text('Delete Expense?'),
+                                      content: Text('Are you sure you want to delete "${expense.title}"?'),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.of(ctx).pop(false),
+                                          child: const Text('Cancel'),
+                                        ),
+                                        FilledButton(
+                                          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                                          onPressed: () => Navigator.of(ctx).pop(true),
+                                          child: const Text('Delete'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                  if (confirmed == true) {
+                                    ref.read(allExpensesProvider.notifier).deleteExpense(expense.id);
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('Deleted "${expense.title}"'),
+                                          behavior: SnackBarBehavior.floating,
+                                        ),
+                                      );
+                                    }
+                                  }
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(
+                                  value: 'edit',
+                                  height: 38,
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.edit_rounded, size: 16, color: AppTheme.primary),
+                                      SizedBox(width: 8),
+                                      Text('Edit Expense', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'delete',
+                                  height: 38,
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.delete_outline_rounded, size: 16, color: Colors.red),
+                                      SizedBox(width: 8),
+                                      Text('Delete', style: TextStyle(fontSize: 13, color: Colors.red, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
                           ],
                         ),
                       ),

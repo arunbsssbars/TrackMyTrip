@@ -398,6 +398,7 @@ class _RecordSettlementDialogState extends ConsumerState<_RecordSettlementDialog
   late TextEditingController _amountController;
   late TextEditingController _notesController;
   late String _paymentMethod;
+  bool _isAdvance = false;
 
   @override
   void initState() {
@@ -411,12 +412,14 @@ class _RecordSettlementDialogState extends ConsumerState<_RecordSettlementDialog
       _amountController = TextEditingController(text: existing.amount.toStringAsFixed(2));
       _notesController = TextEditingController(text: existing.notes ?? '');
       _paymentMethod = existing.paymentMethod;
+      _isAdvance = existing.isAdvance;
     } else {
       _payerId = transfer?.fromMemberId ?? (widget.trip.members.isNotEmpty ? widget.trip.members.first.id : '');
       _receiverId = transfer?.toMemberId ?? (widget.trip.members.length > 1 ? widget.trip.members[1].id : '');
       _amountController = TextEditingController(text: transfer != null ? transfer.amount.toStringAsFixed(2) : '');
       _notesController = TextEditingController();
       _paymentMethod = 'Cash / Direct';
+      _isAdvance = false;
     }
   }
 
@@ -446,6 +449,7 @@ class _RecordSettlementDialogState extends ConsumerState<_RecordSettlementDialog
         amount: amount,
         paymentMethod: _paymentMethod,
         notes: _notesController.text.trim(),
+        isAdvance: _isAdvance,
       );
       ref.read(allSettlementsProvider.notifier).updateSettlement(updated);
 
@@ -473,6 +477,7 @@ class _RecordSettlementDialogState extends ConsumerState<_RecordSettlementDialog
         settledAt: DateTime.now(),
         paymentMethod: _paymentMethod,
         notes: _notesController.text.trim(),
+        isAdvance: _isAdvance,
       );
       ref.read(allSettlementsProvider.notifier).addSettlement(newSettlement);
 
@@ -600,6 +605,17 @@ class _RecordSettlementDialogState extends ConsumerState<_RecordSettlementDialog
                     hintText: 'e.g. Settle lunch & fuel',
                     prefixIcon: Icon(Icons.notes),
                   ),
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  title: const Text('Initial Advance Contribution'),
+                  subtitle: const Text('Mark this as an upfront deposit to the trip organizer', style: TextStyle(fontSize: 11)),
+                  value: _isAdvance,
+                  activeColor: AppTheme.primary,
+                  contentPadding: EdgeInsets.zero,
+                  onChanged: (val) {
+                    setState(() => _isAdvance = val);
+                  },
                 ),
               ],
             ),

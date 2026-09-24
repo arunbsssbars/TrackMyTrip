@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/proximity_alert_service.dart';
 import '../../core/services/user_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/notification_formatter.dart';
 import '../../models/proximity_alert.dart';
 import '../../providers/trip_provider.dart';
 
@@ -58,8 +59,8 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                 tripId: currentTrip?.id ?? 'trip_general',
                 memberId: currentUser.id,
                 memberName: currentUser.displayName,
-                lat: currentUser.latitude ?? 37.7749,
-                lng: currentUser.longitude ?? -122.4194,
+                lat: currentUser.latitude ?? 28.6139,
+                lng: currentUser.longitude ?? 77.2090,
               );
 
               ScaffoldMessenger.of(context).showSnackBar(
@@ -84,14 +85,47 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
     return '${diff.inDays}d ago';
   }
 
-  Color _getUrgencyColor(AlertUrgency urgency) {
+  Color _getUrgencyColor(AlertUrgency urgency, [AlertType? type]) {
+    if (urgency == AlertUrgency.critical) return Colors.red;
+    if (type != null) {
+      switch (type) {
+        case AlertType.sosEmergency:
+          return Colors.red;
+        case AlertType.companionStray:
+          return Colors.orange;
+        case AlertType.invitation:
+          return AppTheme.primary;
+        case AlertType.invitationAccepted:
+          return const Color(0xFF10B981);
+        case AlertType.invitationRejected:
+          return Colors.redAccent;
+        case AlertType.memberJoined:
+          return Colors.teal;
+        case AlertType.memberLeft:
+          return Colors.deepOrange;
+        case AlertType.billAdded:
+          return Colors.indigo;
+        case AlertType.settlementRecorded:
+          return const Color(0xFF10B981);
+        case AlertType.memoryAdded:
+          return Colors.purple;
+        case AlertType.stoppageAdded:
+        case AlertType.stoppageArrival:
+        case AlertType.stoppageDeparture:
+          return Colors.amber.shade800;
+        case AlertType.locationShared:
+          return Colors.blue;
+        default:
+          break;
+      }
+    }
     switch (urgency) {
       case AlertUrgency.critical:
         return Colors.red;
       case AlertUrgency.high:
         return Colors.orange;
       case AlertUrgency.normal:
-        return AppTheme.primary;
+        return Colors.teal;
       case AlertUrgency.low:
         return Colors.grey;
     }
@@ -107,6 +141,26 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
         return Icons.pin_drop_rounded;
       case AlertType.stoppageDeparture:
         return Icons.directions_walk_rounded;
+      case AlertType.invitation:
+        return Icons.mail_outline_rounded;
+      case AlertType.invitationAccepted:
+        return Icons.how_to_reg_rounded;
+      case AlertType.invitationRejected:
+        return Icons.person_off_rounded;
+      case AlertType.memberJoined:
+        return Icons.person_add_alt_1_rounded;
+      case AlertType.memberLeft:
+        return Icons.exit_to_app_rounded;
+      case AlertType.billAdded:
+        return Icons.receipt_long_rounded;
+      case AlertType.settlementRecorded:
+        return Icons.payments_rounded;
+      case AlertType.memoryAdded:
+        return Icons.photo_camera_rounded;
+      case AlertType.stoppageAdded:
+        return Icons.add_location_alt_rounded;
+      case AlertType.locationShared:
+        return Icons.my_location_rounded;
       default:
         return Icons.notifications_rounded;
     }
@@ -115,7 +169,13 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
   @override
   Widget build(BuildContext context) {
     final alertService = ref.watch(proximityAlertServiceProvider);
-    final alerts = alertService.alerts;
+    final allAlerts = alertService.alerts;
+    // Keep only safety/proximity alerts and sort in descending order (most recent first)
+    final alerts = allAlerts.where((a) => 
+      a.type == AlertType.sosEmergency || 
+      a.type == AlertType.companionStray ||
+      a.type == AlertType.stoppageArrival
+    ).toList()..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
@@ -162,7 +222,7 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                       Row(
                         children: [
                           const Text(
-                            'Notifications & Proximity',
+                            'Emergency SOS & Safety',
                             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: -0.3),
                           ),
                           if (alertService.unreadCount > 0) ...[
@@ -321,8 +381,8 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                       // Stoppage Arrival toggle
                       SwitchListTile.adaptive(
                         contentPadding: EdgeInsets.zero,
-                        title: const Text('Pitstop Arrival Geofence', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                        subtitle: const Text('Auto-alert when entering within 350m of a stoppage', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                        title: const Text('Stop Arrival Geofence', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                        subtitle: const Text('Auto-alert when entering within 350m of a stop', style: TextStyle(fontSize: 11, color: Colors.grey)),
                         value: alertService.stoppageAlertsEnabled,
                         onChanged: (val) => alertService.toggleStoppageAlerts(val),
                       ),
@@ -363,7 +423,7 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                           ),
                           const SizedBox(height: 4),
                           const Text(
-                            'Proximity alerts and pitstop arrivals will appear here automatically.',
+                            'Proximity alerts and stop arrivals will appear here automatically.',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: Colors.grey, fontSize: 12),
                           ),
@@ -406,80 +466,118 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
   }
 
   Widget _buildAlertCard(BuildContext context, ProximityAlertService service, ProximityAlert alert, bool isDark) {
-    final urgencyColor = _getUrgencyColor(alert.urgency);
+    final urgencyColor = _getUrgencyColor(alert.urgency, alert.type);
     final icon = _getTypeIcon(alert.type);
+    final currentUser = UserService.getCurrentUser();
+    final displayMessage = NotificationFormatter.formatMessage(
+      alert,
+      currentUserId: currentUser.id,
+      currentUserName: currentUser.displayName,
+      currentUserEmail: currentUser.email,
+      currentUsername: currentUser.username,
+    );
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: Material(
-        color: isDark
-            ? (alert.isRead ? AppTheme.surfaceMutedDark : const Color(0xFF1E293B))
-            : (alert.isRead ? const Color(0xFFF8FAFC) : Colors.white),
-        elevation: alert.isRead ? 0 : 1.5,
-        shadowColor: urgencyColor.withAlpha(isDark ? 45 : 20),
-        borderRadius: BorderRadius.circular(14),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: () {
-            if (!alert.isRead) {
-              service.markAsRead(alert.id);
-            }
-          },
+    return Dismissible(
+      key: ValueKey('sheet_alert_${alert.id}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 18),
+        decoration: BoxDecoration(
+          color: Colors.red.shade700,
           borderRadius: BorderRadius.circular(14),
-          splashColor: urgencyColor.withAlpha(25),
-          highlightColor: urgencyColor.withAlpha(15),
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: alert.isRead
-                    ? (isDark ? AppTheme.borderDark : AppTheme.borderLight)
-                    : urgencyColor.withAlpha(120),
-                width: alert.isRead ? 1 : 1.5,
-              ),
-            ),
-            child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              padding: const EdgeInsets.all(8),
+            Icon(Icons.delete_outline_rounded, color: Colors.white, size: 20),
+            SizedBox(width: 4),
+            Text('Dismiss', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+          ],
+        ),
+      ),
+      onDismissed: (_) {
+        service.deleteAlert(alert.id);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Alert dismissed'),
+            duration: Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        child: Material(
+          color: isDark
+              ? (alert.isRead ? AppTheme.surfaceMutedDark : const Color(0xFF1E293B))
+              : (alert.isRead ? const Color(0xFFF8FAFC) : Colors.white),
+          elevation: alert.isRead ? 0 : 1.5,
+          shadowColor: urgencyColor.withAlpha(isDark ? 45 : 20),
+          borderRadius: BorderRadius.circular(14),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () {
+              if (!alert.isRead) {
+                service.markAsRead(alert.id);
+              }
+            },
+            borderRadius: BorderRadius.circular(14),
+            splashColor: urgencyColor.withAlpha(25),
+            highlightColor: urgencyColor.withAlpha(15),
+            child: Container(
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: urgencyColor.withAlpha(25),
-                shape: BoxShape.circle,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: alert.isRead
+                      ? (isDark ? AppTheme.borderDark : AppTheme.borderLight)
+                      : urgencyColor.withAlpha(120),
+                  width: alert.isRead ? 1 : 1.5,
+                ),
               ),
-              child: Icon(icon, color: urgencyColor, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          alert.title,
-                          style: TextStyle(
-                            fontWeight: alert.isRead ? FontWeight.w600 : FontWeight.bold,
-                            fontSize: 13,
+              child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: urgencyColor.withAlpha(25),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: urgencyColor, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            alert.title,
+                            style: TextStyle(
+                              fontWeight: alert.isRead ? FontWeight.w600 : FontWeight.bold,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
-                      ),
-                      Text(
-                        _formatTimestamp(alert.timestamp),
-                        style: const TextStyle(fontSize: 10.5, color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    alert.message,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: isDark ? Colors.grey[300] : const Color(0xFF475569),
+                        Text(
+                          _formatTimestamp(alert.timestamp),
+                          style: const TextStyle(fontSize: 10.5, color: Colors.grey),
+                        ),
+                      ],
                     ),
-                  ),
+                    const SizedBox(height: 3),
+                    Text(
+                      displayMessage,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.grey[300] : const Color(0xFF475569),
+                      ),
+                    ),
                   if (alert.latitude != null && alert.longitude != null) ...[
                     const SizedBox(height: 6),
                     Row(
@@ -513,6 +611,7 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
       ),
     ),
   ),
+),
 );
-}
+  }
 }

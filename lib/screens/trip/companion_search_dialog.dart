@@ -1,32 +1,48 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
+import '../../models/trip_invitation.dart';
 import '../../models/trip_member.dart';
 import '../../models/user_profile.dart';
 import '../../core/services/user_service.dart';
+import '../../providers/invitation_provider.dart';
 
 class CompanionSearchDialog extends ConsumerStatefulWidget {
+  final String? tripId;
   final List<TripMember> currentMembers;
   final Function(TripMember member) onCompanionSelected;
+  final Function(UserProfile user)? onUserSelected;
+  final String actionLabel;
 
   const CompanionSearchDialog({
     super.key,
+    this.tripId,
     required this.currentMembers,
     required this.onCompanionSelected,
+    this.onUserSelected,
+    this.actionLabel = 'Invite',
   });
 
   static Future<TripMember?> show(
     BuildContext context, {
+    String? tripId,
     required List<TripMember> currentMembers,
     required Function(TripMember member) onCompanionSelected,
+    Function(UserProfile user)? onUserSelected,
+    String actionLabel = 'Invite',
   }) {
     return showModalBottomSheet<TripMember>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => CompanionSearchDialog(
+        tripId: tripId,
         currentMembers: currentMembers,
         onCompanionSelected: onCompanionSelected,
+        onUserSelected: onUserSelected,
+        actionLabel: actionLabel,
       ),
     );
   }
@@ -38,17 +54,42 @@ class CompanionSearchDialog extends ConsumerStatefulWidget {
 class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
   final TextEditingController _searchController = TextEditingController();
   String _query = '';
+  final Set<String> _locallyInvitedIds = {};
+  Timer? _debounceTimer;
+  bool _isSearching = false;
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
   bool _isAlreadyMember(UserProfile user) {
     return widget.currentMembers.any(
-      (m) => m.id == user.id || m.name.toLowerCase() == user.displayName.toLowerCase(),
+      (m) =>
+          m.id == user.id ||
+          (user.email != null &&
+              m.email != null &&
+              m.email!.trim().toLowerCase() == user.email!.trim().toLowerCase()) ||
+          m.name.toLowerCase().trim() == user.displayName.toLowerCase().trim(),
     );
+  }
+
+  bool _hasPendingInvitation(UserProfile user, List<TripInvitation> sentInvitations) {
+    if (_locallyInvitedIds.contains(user.id)) return true;
+    return sentInvitations.any((inv) {
+      if (inv.status != InvitationStatus.pending) return false;
+      if (widget.tripId != null && inv.tripId != widget.tripId) return false;
+
+      final matchId = inv.inviteeId != null && inv.inviteeId == user.id;
+      final matchEmail = user.email != null &&
+          inv.inviteeEmail != null &&
+          inv.inviteeEmail!.trim().toLowerCase() == user.email!.trim().toLowerCase();
+      final matchUsername = inv.inviteeUsername.trim().toLowerCase() == user.username.trim().toLowerCase();
+
+      return matchId || matchEmail || matchUsername;
+    });
   }
 
   @override
@@ -102,6 +143,7 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
                         'Find Travel Companions',
                         style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, letterSpacing: -0.3),
                       ),
+                      const SizedBox(height: 5),
                       Text(
                         'Search by @username, name, email, or mobile',
                         style: TextStyle(fontSize: 11.5, color: isDark ? Colors.grey[400] : AppTheme.textMutedLight),
@@ -110,8 +152,16 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close_rounded),
                   onPressed: () => Navigator.of(context).pop(),
+                  tooltip: 'Close',
+                  icon: Container(
+                    padding: const EdgeInsets.all(5),
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white12 : Colors.grey.withAlpha(35),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.close_rounded, size: 18, color: isDark ? Colors.white70 : Colors.black87),
+                  ),
                 ),
               ],
             ),
@@ -119,23 +169,47 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
 
           // Search Field
           Padding(
-            padding: const EdgeInsets.fromLTRB(18, 4, 18, 12),
+            padding: const EdgeInsets.fromLTRB(18, 4, 18, 8),
             child: TextField(
               controller: _searchController,
               autofocus: true,
-              onChanged: (val) => setState(() => _query = val),
+              onChanged: (val) {
+                _debounceTimer?.cancel();
+                setState(() => _isSearching = true);
+                _debounceTimer = Timer(const Duration(milliseconds: 320), () {
+                  if (mounted) {
+                    setState(() {
+                      _query = val;
+                      _isSearching = false;
+                    });
+                  }
+                });
+              },
               decoration: InputDecoration(
-                hintText: 'Search @sarah, 9876543210, Mike...',
+                hintText: 'Search by username, email, or mobile',
                 prefixIcon: const Icon(Icons.search_rounded, size: 20, color: AppTheme.primary),
-                suffixIcon: _query.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear_rounded, size: 18),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() => _query = '');
-                        },
+                suffixIcon: _isSearching
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary),
+                        ),
                       )
-                    : null,
+                    : (_searchController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 18),
+                            onPressed: () {
+                              _debounceTimer?.cancel();
+                              _searchController.clear();
+                              setState(() {
+                                _query = '';
+                                _isSearching = false;
+                              });
+                            },
+                          )
+                        : null),
                 filled: true,
                 fillColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -147,13 +221,59 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
             ),
           ),
 
-          const Divider(height: 1),
+          if (_isSearching || searchResultsAsync.isLoading)
+            const LinearProgressIndicator(
+              minHeight: 2.5,
+              color: AppTheme.primary,
+              backgroundColor: Colors.transparent,
+            )
+          else
+            const Divider(height: 1),
 
           // Results List
           Expanded(
             child: searchResultsAsync.when(
-              data: (users) {
-                if (users.isEmpty && _query.isNotEmpty) {
+              data: (rawUsers) {
+                final currentProfile = UserService.getCurrentUser();
+                final users = rawUsers.where((u) {
+                  if (u.id == currentProfile.id) return false;
+                  if (currentProfile.email != null &&
+                      u.email != null &&
+                      u.email!.toLowerCase().trim() == currentProfile.email!.toLowerCase().trim()) {
+                    return false;
+                  }
+                  if (u.username.toLowerCase().trim() == currentProfile.username.toLowerCase().trim()) {
+                    return false;
+                  }
+                  return true;
+                }).toList();
+
+                if (_query.trim().length < 2) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(28),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.person_search_rounded, size: 52, color: isDark ? Colors.grey[600] : Colors.grey[400]),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Search Companions',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Type at least 2 characters to search registered users by @username, name, email, or mobile number.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 13, color: isDark ? Colors.grey[400] : AppTheme.textMutedLight),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+
+                if (users.isEmpty) {
                   return Center(
                     child: Padding(
                       padding: const EdgeInsets.all(24),
@@ -175,14 +295,27 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
                           const SizedBox(height: 14),
                           FilledButton.icon(
                             onPressed: () {
+                              final customName = _query.replaceAll('@', '').trim();
                               final newMember = TripMember(
                                 id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
-                                name: _query.replaceAll('@', '').trim(),
+                                name: customName,
                                 isCurrentUser: false,
                                 colorHex: '0xFFF97316',
                               );
                               widget.onCompanionSelected(newMember);
-                              Navigator.of(context).pop(newMember);
+                              setState(() {
+                                _locallyInvitedIds.add(newMember.id);
+                                _searchController.clear();
+                                _query = '';
+                              });
+                              HapticFeedback.lightImpact();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Added "$customName" to companions'),
+                                  duration: const Duration(seconds: 2),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
                             },
                             icon: const Icon(Icons.person_add_rounded, size: 16),
                             label: Text('Add "${_query.replaceAll('@', '').trim()}"'),
@@ -198,12 +331,15 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
                 }
 
                 return ListView.separated(
+                  physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   itemCount: users.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (context, index) {
                     final user = users[index];
                     final isMember = _isAlreadyMember(user);
+                    final sentInvitations = ref.watch(sentInvitationsProvider);
+                    final isInvited = !isMember && _hasPendingInvitation(user, sentInvitations);
                     final colorInt = int.tryParse(user.colorHex ?? '0xFF0D9488') ?? 0xFF0D9488;
                     final color = Color(colorInt);
 
@@ -214,7 +350,9 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
                         border: Border.all(
                           color: isMember
                               ? Colors.green.withAlpha(80)
-                              : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                              : (isInvited
+                                  ? Colors.amber.withAlpha(80)
+                                  : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0))),
                           width: 1.2,
                         ),
                       ),
@@ -295,41 +433,83 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
                                     Icon(Icons.check_circle_rounded, size: 14, color: Colors.green),
                                     SizedBox(width: 4),
                                     Text(
-                                      'Added',
+                                      'Joined',
                                       style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 11.5),
                                     ),
                                   ],
                                 ),
                               )
-                            : FilledButton(
-                                onPressed: () {
-                                  final newMember = TripMember(
-                                    id: user.id,
-                                    name: user.displayName,
-                                    isCurrentUser: false,
-                                    colorHex: user.colorHex,
-                                    latitude: user.latitude,
-                                    longitude: user.longitude,
-                                    lastSeen: user.lastSeen ?? DateTime.now(),
-                                  );
-                                  widget.onCompanionSelected(newMember);
-                                  Navigator.of(context).pop(newMember);
-                                },
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: AppTheme.primary,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                ),
-                                child: const Text('Add', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                              ),
+                            : (isInvited
+                                ? Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.amber.withAlpha(25),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.mark_email_read_rounded, size: 14, color: Colors.amber[800]),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'Invited',
+                                          style: TextStyle(color: Colors.amber[800], fontWeight: FontWeight.bold, fontSize: 11.5),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                 : FilledButton.icon(
+                                     onPressed: () {
+                                       final newMember = TripMember(
+                                         id: user.id,
+                                         name: user.displayName,
+                                         email: user.email,
+                                         isCurrentUser: false,
+                                         colorHex: user.colorHex,
+                                         latitude: user.latitude,
+                                         longitude: user.longitude,
+                                         lastSeen: user.lastSeen ?? DateTime.now(),
+                                       );
+                                       if (widget.onUserSelected != null) {
+                                         widget.onUserSelected!(user);
+                                       } else {
+                                         widget.onCompanionSelected(newMember);
+                                       }
+                                       setState(() {
+                                         _locallyInvitedIds.add(user.id);
+                                         _searchController.clear();
+                                         _query = '';
+                                         _isSearching = false;
+                                       });
+                                       HapticFeedback.lightImpact();
+                                     },
+
+                                     style: FilledButton.styleFrom(
+                                       backgroundColor: AppTheme.primary,
+                                       foregroundColor: Colors.white,
+                                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                     ),
+                                     icon: const Icon(Icons.send_rounded, size: 14),
+                                     label: const Text('Invite', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                   )),
                       ),
                     );
                   },
                 );
               },
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (err, _) => Center(child: Text('Error: $err')),
+              loading: () => const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(32),
+                  child: CircularProgressIndicator(strokeWidth: 2.5, color: AppTheme.primary),
+                ),
+              ),
+              error: (err, _) => Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text('Error loading users: $err', style: const TextStyle(fontSize: 12, color: Colors.red)),
+                ),
+              ),
             ),
           ),
         ],

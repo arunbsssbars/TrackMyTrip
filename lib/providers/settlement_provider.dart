@@ -7,25 +7,47 @@ import '../models/settlement.dart';
 import 'expense_provider.dart';
 import 'trip_provider.dart';
 
+import '../models/proximity_alert.dart';
+import '../core/services/proximity_alert_service.dart';
+
 class SettlementNotifier extends StateNotifier<List<Settlement>> {
   final LocalStorageService _storage;
+  final Ref _ref;
 
-  SettlementNotifier(this._storage) : super([]) {
+  SettlementNotifier(this._storage, this._ref) : super([]) {
     _loadAllSettlements();
   }
 
   void _loadAllSettlements() {
-    state = _storage.getAllSettlements();
+    final trips = _storage.getTrips();
+    final userTripIds = trips.map((t) => t.id).toSet();
+    state = _storage.getAllSettlements().where((s) => userTripIds.contains(s.tripId)).toList();
   }
 
   void reload() {
     _loadAllSettlements();
   }
 
+  void reset() {
+    state = [];
+  }
+
   Future<void> addSettlement(Settlement settlement) async {
     state = [settlement, ...state];
     await _storage.saveAllSettlements(state);
     _syncToCloud(settlement.tripId);
+    try {
+      final trips = _storage.getTrips();
+      final trip = trips.where((t) => t.id == settlement.tripId).firstOrNull;
+      final payerName = trip?.getMember(settlement.payerMemberId)?.name ?? 'Member';
+      final payeeName = trip?.getMember(settlement.receiverMemberId)?.name ?? 'Member';
+      _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
+        tripId: settlement.tripId,
+        type: AlertType.settlementRecorded,
+        title: 'Settlement Payment Recorded',
+        message: '$payerName paid $payeeName ${settlement.currency} ${settlement.amount.toStringAsFixed(0)} to settle balance',
+      );
+    } catch (_) {}
   }
 
   Future<void> updateSettlement(Settlement updated) async {
@@ -59,7 +81,7 @@ class SettlementNotifier extends StateNotifier<List<Settlement>> {
 
 final allSettlementsProvider = StateNotifierProvider<SettlementNotifier, List<Settlement>>((ref) {
   final storage = ref.watch(localStorageServiceProvider);
-  return SettlementNotifier(storage);
+  return SettlementNotifier(storage, ref);
 });
 
 final currentTripSettlementsProvider = Provider<List<Settlement>>((ref) {

@@ -1,14 +1,21 @@
 import 'package:flutter/material.dart';
 import '../../models/proximity_alert.dart';
+import '../../core/services/user_service.dart';
+import '../../core/utils/notification_formatter.dart';
 
 class InAppNotificationBanner {
-  static void show(BuildContext context, ProximityAlert alert) {
+  static void show(
+    BuildContext context,
+    ProximityAlert alert, {
+    VoidCallback? onMuteBanners,
+  }) {
     final overlay = Overlay.of(context);
     late OverlayEntry entry;
 
     entry = OverlayEntry(
       builder: (ctx) => _BannerWidget(
         alert: alert,
+        onMuteBanners: onMuteBanners,
         onDismiss: () {
           entry.remove();
         },
@@ -22,8 +29,13 @@ class InAppNotificationBanner {
 class _BannerWidget extends StatefulWidget {
   final ProximityAlert alert;
   final VoidCallback onDismiss;
+  final VoidCallback? onMuteBanners;
 
-  const _BannerWidget({required this.alert, required this.onDismiss});
+  const _BannerWidget({
+    required this.alert,
+    required this.onDismiss,
+    this.onMuteBanners,
+  });
 
   @override
   State<_BannerWidget> createState() => _BannerWidgetState();
@@ -32,6 +44,7 @@ class _BannerWidget extends StatefulWidget {
 class _BannerWidgetState extends State<_BannerWidget> with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<Offset> _offsetAnimation;
+  bool _isDismissed = false;
 
   @override
   void initState() {
@@ -51,7 +64,7 @@ class _BannerWidgetState extends State<_BannerWidget> with SingleTickerProviderS
     // Auto dismiss after 5 seconds (unless critical SOS)
     if (widget.alert.urgency != AlertUrgency.critical) {
       Future.delayed(const Duration(seconds: 5), () {
-        if (mounted) {
+        if (mounted && !_isDismissed) {
           _dismiss();
         }
       });
@@ -59,12 +72,47 @@ class _BannerWidgetState extends State<_BannerWidget> with SingleTickerProviderS
   }
 
   void _dismiss() {
+    if (_isDismissed) return;
+    _isDismissed = true;
     _controller.reverse().then((_) {
-      widget.onDismiss();
+      if (mounted) {
+        widget.onDismiss();
+      }
     });
   }
 
   Color _getBgColor() {
+    if (widget.alert.urgency == AlertUrgency.critical) return const Color(0xFFDC2626);
+    switch (widget.alert.type) {
+      case AlertType.sosEmergency:
+        return const Color(0xFFDC2626);
+      case AlertType.companionStray:
+        return const Color(0xFFEA580C);
+      case AlertType.invitation:
+        return const Color(0xFF0D9488);
+      case AlertType.invitationAccepted:
+        return const Color(0xFF10B981);
+      case AlertType.invitationRejected:
+        return const Color(0xFFEF4444);
+      case AlertType.memberJoined:
+        return const Color(0xFF0D9488);
+      case AlertType.memberLeft:
+        return const Color(0xFFF97316);
+      case AlertType.billAdded:
+        return const Color(0xFF4F46E5);
+      case AlertType.settlementRecorded:
+        return const Color(0xFF10B981);
+      case AlertType.memoryAdded:
+        return const Color(0xFF9333EA);
+      case AlertType.stoppageAdded:
+      case AlertType.stoppageArrival:
+      case AlertType.stoppageDeparture:
+        return const Color(0xFFD97706);
+      case AlertType.locationShared:
+        return const Color(0xFF2563EB);
+      default:
+        break;
+    }
     switch (widget.alert.urgency) {
       case AlertUrgency.critical:
         return const Color(0xFFDC2626); // Red
@@ -87,6 +135,26 @@ class _BannerWidgetState extends State<_BannerWidget> with SingleTickerProviderS
         return Icons.pin_drop_rounded;
       case AlertType.stoppageDeparture:
         return Icons.directions_walk_rounded;
+      case AlertType.invitation:
+        return Icons.mail_outline_rounded;
+      case AlertType.invitationAccepted:
+        return Icons.how_to_reg_rounded;
+      case AlertType.invitationRejected:
+        return Icons.person_off_rounded;
+      case AlertType.memberJoined:
+        return Icons.person_add_alt_1_rounded;
+      case AlertType.memberLeft:
+        return Icons.exit_to_app_rounded;
+      case AlertType.billAdded:
+        return Icons.receipt_long_rounded;
+      case AlertType.settlementRecorded:
+        return Icons.payments_rounded;
+      case AlertType.memoryAdded:
+        return Icons.photo_camera_rounded;
+      case AlertType.stoppageAdded:
+        return Icons.add_location_alt_rounded;
+      case AlertType.locationShared:
+        return Icons.my_location_rounded;
       default:
         return Icons.notifications_active_rounded;
     }
@@ -100,93 +168,145 @@ class _BannerWidgetState extends State<_BannerWidget> with SingleTickerProviderS
 
   @override
   Widget build(BuildContext context) {
+    final currentUser = UserService.getCurrentUser();
+    final displayMessage = NotificationFormatter.formatMessage(
+      widget.alert,
+      currentUserId: currentUser.id,
+      currentUserName: currentUser.displayName,
+      currentUserEmail: currentUser.email,
+      currentUsername: currentUser.username,
+    );
+
     return Positioned(
       top: MediaQuery.of(context).padding.top + 10,
       left: 14,
       right: 14,
       child: SlideTransition(
         position: _offsetAnimation,
-        child: Material(
-          color: Colors.transparent,
+        child: Dismissible(
+          key: ValueKey('banner_${widget.alert.id}'),
+          direction: DismissDirection.horizontal,
+          onDismissed: (_) {
+            _isDismissed = true;
+            widget.onDismiss();
+          },
           child: GestureDetector(
+            onVerticalDragEnd: (details) {
+              if (details.primaryVelocity != null && details.primaryVelocity! < -100) {
+                _dismiss();
+              }
+            },
             onTap: _dismiss,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: _getBgColor(),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withAlpha(80),
-                    blurRadius: 16,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withAlpha(40),
-                      shape: BoxShape.circle,
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: _getBgColor(),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withAlpha(80),
+                      blurRadius: 16,
+                      offset: const Offset(0, 6),
                     ),
-                    child: Icon(_getIcon(), color: Colors.white, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                widget.alert.title,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withAlpha(40),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(_getIcon(), color: Colors.white, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  widget.alert.title,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                               ),
-                            ),
-                            Text(
-                              widget.alert.urgency == AlertUrgency.critical
-                                  ? 'SOS'
-                                  : 'PROXIMITY',
-                              style: TextStyle(
-                                color: Colors.white.withAlpha(200),
-                                fontSize: 9.5,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.5,
+                              Text(
+                                widget.alert.urgency == AlertUrgency.critical
+                                    ? 'SOS'
+                                    : 'ALERT',
+                                style: TextStyle(
+                                  color: Colors.white.withAlpha(200),
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.5,
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          widget.alert.message,
-                          style: TextStyle(
-                            color: Colors.white.withAlpha(230),
-                            fontSize: 12,
+                            ],
                           ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
+                          const SizedBox(height: 2),
+                          Text(
+                            displayMessage,
+                            style: TextStyle(
+                              color: Colors.white.withAlpha(230),
+                              fontSize: 12,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 18),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    onPressed: _dismiss,
-                  ),
-                ],
+                    const SizedBox(width: 4),
+                    if (widget.onMuteBanners != null && widget.alert.urgency != AlertUrgency.critical)
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert_rounded, color: Colors.white70, size: 18),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: 'Banner options',
+                        onSelected: (val) {
+                          if (val == 'mute') {
+                            widget.onMuteBanners?.call();
+                            _dismiss();
+                          }
+                        },
+                        itemBuilder: (ctx) => [
+                          const PopupMenuItem(
+                            value: 'mute',
+                            height: 38,
+                            child: Row(
+                              children: [
+                                Icon(Icons.notifications_off_rounded, size: 16, color: Colors.deepOrange),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Turn off banners',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 18),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      tooltip: 'Dismiss',
+                      onPressed: _dismiss,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

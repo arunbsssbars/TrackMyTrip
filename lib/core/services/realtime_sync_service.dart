@@ -14,11 +14,13 @@ import '../../providers/audit_log_provider.dart';
 import '../../models/proximity_alert.dart';
 import 'live_companion_tracker_service.dart';
 import 'proximity_alert_service.dart';
+import 'user_service.dart';
 
 class RealtimeSyncService {
   final Ref ref;
   String? _connectedTripId;
   StreamSubscription<DatabaseEvent>? _subscription;
+  StreamSubscription<DatabaseEvent>? _locationSubscription;
   bool _isDisposed = false;
   final FirebaseDatabase _database = FirebaseDatabase.instance;
 
@@ -32,7 +34,7 @@ class RealtimeSyncService {
   void connectTripRoom(String tripId) {
     if (_connectedTripId == tripId) return;
 
-    _disconnect();
+    disconnect();
     _connectedTripId = tripId;
     _establishConnection(tripId);
   }
@@ -50,7 +52,7 @@ class RealtimeSyncService {
     });
     
     // Listen for live location updates specifically
-    _database.ref('trips/$tripId/locations').onValue.listen((event) {
+    _locationSubscription = _database.ref('trips/$tripId/locations').onValue.listen((event) {
         if (event.snapshot.value != null) {
            final data = Map<String, dynamic>.from(event.snapshot.value as Map);
            data.forEach((memberId, locationData) {
@@ -67,6 +69,9 @@ class RealtimeSyncService {
   }
 
   void _processLocationUpdate(String memberId, double lat, double lng, double speedKmh, double heading) {
+     final currentUserId = UserService.getCurrentUser().id;
+     if (memberId == currentUserId) return;
+
      if (_connectedTripId != null) {
         ref.read(liveCompanionTrackerProvider.notifier).onRemoteLocationUpdate(
           memberId,
@@ -115,6 +120,15 @@ class RealtimeSyncService {
 
       if (type == null) return;
 
+      // DATA ISOLATION GUARD: Verify that the current user actually belongs to this trip
+      final tripId = payload['tripId'] as String?;
+      if (tripId != null) {
+        final userTrips = ref.read(tripListProvider);
+        if (!userTrips.any((t) => t.id == tripId)) {
+          return; // Ignore foreign trip events
+        }
+      }
+
       switch (type) {
         case 'STOPPAGE_ADDED':
           final stoppage = Stoppage.fromJson(payload);
@@ -135,6 +149,20 @@ class RealtimeSyncService {
         case 'PROXIMITY_ALERT':
           final alert = ProximityAlert.fromJson(payload);
           ref.read(proximityAlertServiceProvider).ingestRemoteAlert(alert);
+          break;
+        case 'TRIP_DELETED':
+          final deletedTripId = payload['tripId'] as String?;
+          if (deletedTripId != null) {
+            disconnect();
+            ref.read(tripListProvider.notifier).deleteTripLocally(deletedTripId);
+          }
+          break;
+        case 'MEMBER_LEFT':
+          final targetTripId = payload['tripId'] as String?;
+          final memberId = payload['memberId'] as String?;
+          if (targetTripId != null && memberId != null) {
+            ref.read(tripListProvider.notifier).removeMemberFromTrip(targetTripId, memberId);
+          }
           break;
       }
     } catch (_) {}
@@ -227,19 +255,41 @@ class RealtimeSyncService {
     });
   }
 
+  void broadcastTripDeleted(String tripId) {
+    _sendMessage({
+      'type': 'TRIP_DELETED',
+      'payload': {'tripId': tripId},
+    });
+  }
+
+  void broadcastMemberLeft(String tripId, String memberId, String memberName) {
+    _sendMessage({
+      'type': 'MEMBER_LEFT',
+      'payload': {
+        'tripId': tripId,
+        'memberId': memberId,
+        'memberName': memberName,
+      },
+    });
+  }
+
   void _sendMessage(Map<String, dynamic> message) {
     if (_connectedTripId != null && !_isDisposed) {
       _database.ref('trips/$_connectedTripId/events').push().set(message);
     }
   }
 
-  void _disconnect() {
+  void disconnect() {
     _subscription?.cancel();
+    _subscription = null;
+    _locationSubscription?.cancel();
+    _locationSubscription = null;
+    _connectedTripId = null;
   }
 
   void dispose() {
     _isDisposed = true;
-    _disconnect();
+    disconnect();
   }
 }
 

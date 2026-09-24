@@ -8,6 +8,7 @@ class Settlement {
   final DateTime settledAt;
   final String? notes;
   final String paymentMethod; // Cash, UPI, Venmo, PayPal, Bank Transfer
+  final bool isAdvance; // True if this is an advance contribution to the trip pool
 
   const Settlement({
     required this.id,
@@ -19,6 +20,7 @@ class Settlement {
     required this.settledAt,
     this.notes,
     this.paymentMethod = 'Cash',
+    this.isAdvance = false,
   });
 
   Settlement copyWith({
@@ -31,6 +33,7 @@ class Settlement {
     DateTime? settledAt,
     String? notes,
     String? paymentMethod,
+    bool? isAdvance,
   }) {
     return Settlement(
       id: id ?? this.id,
@@ -42,6 +45,7 @@ class Settlement {
       settledAt: settledAt ?? this.settledAt,
       notes: notes ?? this.notes,
       paymentMethod: paymentMethod ?? this.paymentMethod,
+      isAdvance: isAdvance ?? this.isAdvance,
     );
   }
 
@@ -56,6 +60,7 @@ class Settlement {
       'settledAt': settledAt.toIso8601String(),
       'notes': notes,
       'paymentMethod': paymentMethod,
+      'isAdvance': isAdvance,
     };
   }
 
@@ -70,6 +75,7 @@ class Settlement {
       settledAt: DateTime.parse(json['settledAt'] as String),
       notes: json['notes'] as String?,
       paymentMethod: json['paymentMethod'] as String? ?? 'Cash',
+      isAdvance: json['isAdvance'] as bool? ?? false,
     );
   }
 }

@@ -710,30 +710,37 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'TOTAL EXPENDITURE',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.8,
-                            color: isDark ? Colors.grey[400] : AppTheme.textMutedLight,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'TOTAL EXPENDITURE',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.8,
+                              color: isDark ? Colors.grey[400] : AppTheme.textMutedLight,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency),
-                          style: const TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.5,
-                            color: AppTheme.primary,
+                          const SizedBox(height: 2),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency),
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.5,
+                                color: AppTheme.primary,
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
+                    const SizedBox(width: 10),
                     FilledButton.icon(
                       onPressed: () => _openAddExpenseScreen(context),
                       icon: const Icon(Icons.add_rounded, size: 18),
@@ -754,18 +761,27 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'Budget: ${CurrencyFormatter.format(budget, currency: trip.defaultCurrency)}',
-                        style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : Colors.grey[600], fontWeight: FontWeight.bold),
+                      Flexible(
+                        child: Text(
+                          'Budget: ${CurrencyFormatter.format(budget, currency: trip.defaultCurrency)}',
+                          style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : Colors.grey[600], fontWeight: FontWeight.bold),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                      Text(
-                        totalSpent > budget
-                            ? 'Over by ${CurrencyFormatter.format(totalSpent - budget, currency: trip.defaultCurrency)}'
-                            : 'Remaining: ${CurrencyFormatter.format(budget - totalSpent, currency: trip.defaultCurrency)}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: totalSpent > budget ? Colors.red : Colors.green,
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          totalSpent > budget
+                              ? 'Over by ${CurrencyFormatter.format(totalSpent - budget, currency: trip.defaultCurrency)}'
+                              : 'Remaining: ${CurrencyFormatter.format(budget - totalSpent, currency: trip.defaultCurrency)}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: totalSpent > budget ? Colors.red : Colors.green,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
@@ -797,15 +813,18 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                         borderRadius: BorderRadius.circular(8),
                         splashColor: AppTheme.primary.withAlpha(30),
                         child: const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                           child: Row(
-                            mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(Icons.add_circle_outline_rounded, size: 14, color: AppTheme.primary),
                               SizedBox(width: 6),
-                              Text(
-                                'Set a trip budget target to track remaining balance',
-                                style: TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.bold),
+                              Expanded(
+                                child: Text(
+                                  'Set a trip budget target to track remaining balance',
+                                  style: TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.bold),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             ],
                           ),

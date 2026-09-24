@@ -1,13 +1,17 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-import '../core/services/push_notification_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../core/theme/app_theme.dart';
+import '../core/services/push_notification_service.dart';
+import 'activity/activity_hub_tab.dart';
+import 'common/universal_bottom_bar.dart';
 import 'home/home_screen.dart';
+import 'memories/global_memories_tab.dart';
+import 'notifications/in_app_notification_banner.dart';
 import 'profile/profile_tab.dart';
+import 'trip/current_trip_tab.dart';
+import '../core/services/proximity_alert_service.dart';
 
-import 'expenses/expenses_tab.dart';
-
-import 'map/global_map_tab.dart';
+final activeMainTabProvider = StateProvider<int>((ref) => 0);
 
 class MainScaffold extends ConsumerStatefulWidget {
   const MainScaffold({super.key});
@@ -17,7 +21,7 @@ class MainScaffold extends ConsumerStatefulWidget {
 }
 
 class _MainScaffoldState extends ConsumerState<MainScaffold> {
-  int _currentIndex = 0;
+  StreamSubscription? _bannerSubscription;
 
   @override
   void initState() {
@@ -25,55 +29,50 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
     // Delay slightly to ensure ProviderScope is fully mounted
     Future.microtask(() {
       ref.read(pushNotificationServiceProvider).init();
+      ref.read(activeMainTabProvider.notifier).state = 0;
     });
+
+    _bannerSubscription = ref.read(proximityAlertServiceProvider).bannerStream.listen((alert) {
+      if (mounted) {
+        InAppNotificationBanner.show(
+          context,
+          alert,
+          onMuteBanners: () {
+            ref.read(proximityAlertServiceProvider).toggleInAppBanners(false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Banner alerts turned off. Notifications will appear silently under Activity tab.'),
+                behavior: SnackBarBehavior.floating,
+                duration: Duration(seconds: 3),
+              ),
+            );
+          },
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _bannerSubscription?.cancel();
+    super.dispose();
   }
 
   final List<Widget> _tabs = const [
     HomeScreen(),
-    GlobalMapTab(),
-    ExpensesTab(),
+    CurrentTripTab(),
+    ActivityHubTab(),
+    GlobalMemoriesTab(),
     ProfileTab(),
   ];
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final currentIndex = ref.watch(activeMainTabProvider);
 
     return Scaffold(
-      body: _tabs[_currentIndex],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
-        backgroundColor: isDark ? AppTheme.surfaceDark : Colors.white,
-        elevation: 8,
-        indicatorColor: AppTheme.primary.withAlpha(40),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.explore_outlined),
-            selectedIcon: Icon(Icons.explore_rounded, color: AppTheme.primary),
-            label: 'Journeys',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.map_outlined),
-            selectedIcon: Icon(Icons.map_rounded, color: AppTheme.primary),
-            label: 'Map',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.receipt_long_outlined),
-            selectedIcon: Icon(Icons.receipt_long_rounded, color: AppTheme.primary),
-            label: 'Expenses',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.account_circle_outlined),
-            selectedIcon: Icon(Icons.account_circle_rounded, color: AppTheme.primary),
-            label: 'Profile',
-          ),
-        ],
-      ),
+      body: _tabs[currentIndex],
+      bottomNavigationBar: const UniversalBottomBar(),
     );
   }
 }

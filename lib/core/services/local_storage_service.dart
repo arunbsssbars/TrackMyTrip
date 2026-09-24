@@ -1,12 +1,10 @@
-
+import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:uuid/uuid.dart';
 import '../database/app_database.dart';
 import '../../models/trip.dart';
 import '../../models/trip_member.dart';
 import '../../models/stoppage.dart';
 import '../../models/expense.dart';
-import '../../models/expense_split.dart';
 import '../../models/memory.dart';
 import '../../models/settlement.dart';
 import '../../models/trip_audit_log.dart';
@@ -14,13 +12,16 @@ import '../../models/sync_mutation.dart';
 import '../../models/proximity_alert.dart';
 import '../../models/auth_user.dart';
 import '../../models/trip_invitation.dart';
+import 'security_service.dart';
 import 'trip_share_service.dart';
 
 class LocalStorageService {
   static const String _initializedKey = 'app_seeded_v1';
+  static const String _migratedToSqliteKey = 'sqlite_migrated_v1';
 
   final SharedPreferences _prefs;
-  final AppDatabase _db;
+  AppDatabase _db;
+  String? _currentUserId;
 
   // In-memory caches to keep synchronous provider getters 100% responsive and synchronous
   List<Trip> _cachedTrips = [];
@@ -35,20 +36,85 @@ class LocalStorageService {
   List<Map<String, dynamic>> _cachedRegisteredUsers = [];
   AuthUser? _cachedAuthUser;
 
-  LocalStorageService(this._prefs, this._db);
+  LocalStorageService._(this._prefs, this._db);
 
   AppDatabase get db => _db;
+  String? get currentUserId => _currentUserId;
 
-  static Future<LocalStorageService> init({AppDatabase? database, SharedPreferences? prefs}) async {
+  static Future<LocalStorageService> init({
+    SharedPreferences? prefs,
+    AppDatabase? database,
+    String? initialUserId,
+  }) async {
     final effectivePrefs = prefs ?? await SharedPreferences.getInstance();
-    AppDatabase effectiveDb = database ?? await AppDatabase.open();
-
-    final service = LocalStorageService(effectivePrefs, effectiveDb);
+    AppDatabase effectiveDb;
+    if (database != null) {
+      effectiveDb = database;
+    } else {
+      final security = SecurityService(prefs: effectivePrefs);
+      final encKey = await security.getDatabaseEncryptionKey();
+      effectiveDb = await AppDatabase.open(
+        password: encKey,
+        userId: initialUserId,
+      );
+    }
+    final service = LocalStorageService._(effectivePrefs, effectiveDb);
+    service._currentUserId = initialUserId;
     await service._initDatabase();
     return service;
   }
 
-  Future<void> _initDatabase() async {
+  /// Switches active SQLite database to an isolated per-user database file
+  Future<void> switchUser(String? userId) async {
+    final cleanUserId = userId?.trim().isEmpty == true ? null : userId?.trim();
+    if (cleanUserId == _currentUserId && cleanUserId != null) {
+      return;
+    }
+
+    _currentUserId = cleanUserId;
+
+    // Check if running on in-memory / mock test database
+    final dbPath = _db.database.path;
+    final isSpecialDb = dbPath == ':memory:' || dbPath.isEmpty || !dbPath.contains('.db');
+
+    if (isSpecialDb) {
+      if (cleanUserId == null) {
+        _clearMemoryCaches();
+      } else {
+        await _reloadAllCaches();
+      }
+      return;
+    }
+
+    try {
+      await _db.close();
+    } catch (_) {}
+
+    final security = SecurityService(prefs: _prefs);
+    final encKey = await security.getDatabaseEncryptionKey();
+    _db = await AppDatabase.openForUser(cleanUserId, password: encKey);
+
+    if (cleanUserId == null) {
+      _clearMemoryCaches();
+    } else {
+      await _reloadAllCaches();
+    }
+  }
+
+  void _clearMemoryCaches() {
+    _cachedTrips = [];
+    _cachedStoppages = [];
+    _cachedExpenses = [];
+    _cachedMemories = [];
+    _cachedSettlements = [];
+    _cachedAuditLogs = [];
+    _cachedMutations = [];
+    _cachedAlerts = [];
+    _cachedInvitations = [];
+    _cachedAuthUser = null;
+  }
+
+  Future<void> _reloadAllCaches() async {
     // Populate memory cache from SQLite
     _cachedTrips = await _db.getTrips();
     _cachedStoppages = await _db.getAllStoppages();
@@ -62,13 +128,38 @@ class LocalStorageService {
     _cachedRegisteredUsers = await _db.getRegisteredUsers();
     _cachedInvitations = await _db.getAllInvitations();
 
-    if (_cachedTrips.isEmpty && _prefs.getBool(_initializedKey) != true) {
-      await _seedInitialDataIfEmpty();
+    await _purgeDummyData();
+  }
+
+  Future<void> _initDatabase() async {
+    if (_prefs.getBool(_migratedToSqliteKey) != true) {
+      final legacyTripsStr = _prefs.getString('trips_data_v1');
+      if (legacyTripsStr != null) {
+        try {
+          final List<dynamic> list = jsonDecode(legacyTripsStr);
+          final trips = list.map((e) => Trip.fromJson(e as Map<String, dynamic>)).toList();
+          for (final t in trips) {
+            await _db.saveTrip(t);
+          }
+        } catch (_) {}
+      }
+      final legacyStopsStr = _prefs.getString('stoppages_data_v1');
+      if (legacyStopsStr != null) {
+        try {
+          final List<dynamic> list = jsonDecode(legacyStopsStr);
+          final stops = list.map((e) => Stoppage.fromJson(e as Map<String, dynamic>)).toList();
+          await _db.saveAllStoppages(stops);
+        } catch (_) {}
+      }
+      await _prefs.setBool(_migratedToSqliteKey, true);
     }
+    await _reloadAllCaches();
   }
 
   // --- TRIPS ---
   List<Trip> getTrips() => List.from(_cachedTrips);
+
+  Trip? getTrip(String tripId) => _cachedTrips.where((t) => t.id == tripId).firstOrNull;
 
   Future<List<Trip>> getTripsAsync() async {
       _cachedTrips = await _db.getTrips();
@@ -119,12 +210,31 @@ class LocalStorageService {
 
     final effectiveActiveMemberId = activeMemberId ?? existingTrip?.currentUserMember?.id;
 
-    List<TripMember> membersToSave = package.trip.members.map((m) {
+    // Merge members: retain existing local members and combine with incoming package members
+    final Map<String, TripMember> memberMap = {};
+    if (existingTrip != null) {
+      for (final m in existingTrip.members) {
+        memberMap[m.id] = m;
+      }
+    }
+    for (final m in package.trip.members) {
+      memberMap[m.id] = m;
+    }
+
+    List<TripMember> membersToSave = memberMap.values.map((m) {
       if (effectiveActiveMemberId != null) {
         return m.copyWith(isCurrentUser: m.id == effectiveActiveMemberId);
       }
       return m;
     }).toList();
+
+    // Critical: If active member is not present in incoming package, preserve from existing local trip
+    if (effectiveActiveMemberId != null && !membersToSave.any((m) => m.id == effectiveActiveMemberId)) {
+      final existingActiveMember = existingTrip?.members.where((m) => m.id == effectiveActiveMemberId).firstOrNull;
+      if (existingActiveMember != null) {
+        membersToSave.add(existingActiveMember.copyWith(isCurrentUser: true));
+      }
+    }
 
     final preservedShareCode = package.trip.shareCode ?? existingTrip?.shareCode;
     final tripToSave = package.trip.copyWith(
@@ -415,9 +525,23 @@ class LocalStorageService {
     }
   }
 
+  Future<void> deleteAlert(String alertId) async {
+    final list = List<ProximityAlert>.from(_cachedAlerts);
+    list.removeWhere((a) => a.id == alertId);
+    _cachedAlerts = list;
+    await _db.deleteAlert(alertId);
+  }
+
   Future<void> clearAllAlerts() async {
     _cachedAlerts = [];
-      await _db.clearAllAlerts();
+    await _db.clearAllAlerts();
+  }
+
+  // --- IN-APP BANNER PREFERENCES ---
+  bool getInAppBannersEnabled() => _prefs.getBool('in_app_banners_enabled') ?? true;
+
+  Future<void> setInAppBannersEnabled(bool enabled) async {
+    await _prefs.setBool('in_app_banners_enabled', enabled);
   }
 
   // --- AUTH SESSION & REGISTERED ACCOUNTS ---
@@ -473,8 +597,50 @@ class LocalStorageService {
     return getAllInvitations();
   }
 
-  List<TripInvitation> getPendingInvitations() {
-    return _cachedInvitations.where((inv) => inv.status == InvitationStatus.pending).toList();
+  List<TripInvitation> getPendingInvitations({
+    String? currentUserId,
+    String? currentUserEmail,
+    String? currentUsername,
+  }) {
+    final effectiveUid = currentUserId ??
+        (currentUserEmail == null && currentUsername == null
+            ? (_currentUserId ?? _cachedAuthUser?.id)
+            : null);
+    final effectiveEmail = currentUserEmail?.trim().toLowerCase() ?? _cachedAuthUser?.email.trim().toLowerCase();
+    final effectiveUsername = currentUsername?.trim().toLowerCase() ?? _cachedAuthUser?.username.trim().toLowerCase();
+
+    return _cachedInvitations.where((inv) {
+      if (inv.status != InvitationStatus.pending) return false;
+
+      // 1. Never show outgoing invitations sent by the current user to themselves
+      if (effectiveUid != null && inv.inviterId == effectiveUid) {
+        return false;
+      }
+
+      // 2. If user identity is specified, ensure invitation is addressed to them
+      if (effectiveUid != null || effectiveEmail != null || effectiveUsername != null) {
+        final matchesId = effectiveUid != null && inv.inviteeId != null && inv.inviteeId == effectiveUid;
+        final matchesEmail = effectiveEmail != null &&
+            inv.inviteeEmail != null &&
+            inv.inviteeEmail!.trim().toLowerCase() == effectiveEmail;
+        final matchesUsername = effectiveUsername != null &&
+            inv.inviteeUsername.trim().toLowerCase() == effectiveUsername;
+        return matchesId || matchesEmail || matchesUsername;
+      }
+
+      // 3. Fallback: If no parameters given, do not return invitations sent by database owner
+      if (_currentUserId != null && inv.inviterId == _currentUserId) {
+        return false;
+      }
+
+      return true;
+    }).toList();
+  }
+
+  List<TripInvitation> getSentInvitations({String? currentUserId}) {
+    final effectiveUid = currentUserId ?? _currentUserId ?? _cachedAuthUser?.id;
+    if (effectiveUid == null) return [];
+    return _cachedInvitations.where((inv) => inv.inviterId == effectiveUid).toList();
   }
 
   Future<void> saveInvitation(TripInvitation invitation) async {
@@ -502,167 +668,32 @@ class LocalStorageService {
       await _db.deleteInvitation(invitationId);
   }
 
-  // --- SEED SAMPLE ROAD TRIP ---
-  Future<void> _seedInitialDataIfEmpty() async {
-    if (_prefs.getBool(_initializedKey) == true) return;
-
-    const uuid = Uuid();
-    final tripId = uuid.v4();
-    const memberAlex = TripMember(id: 'member_alex', name: 'Alex (You)', isCurrentUser: true, colorHex: '0xFF0F766E');
-    const memberSarah = TripMember(id: 'member_sarah', name: 'Sarah', colorHex: '0xFFF97316');
-    const memberDavid = TripMember(id: 'member_david', name: 'David', colorHex: '0xFF3B82F6');
-    const memberMaya = TripMember(id: 'member_maya', name: 'Maya', colorHex: '0xFFEC4899');
-
-    final sampleTrip = Trip(
-      id: tripId,
-      title: 'Pacific Coast Highway Getaway',
-      description: 'Scenic road trip from San Francisco to Big Sur with friends!',
-      startDate: DateTime.now().subtract(const Duration(days: 2)),
-      endDate: DateTime.now().add(const Duration(days: 3)),
-      defaultCurrency: 'USD',
-      members: [memberAlex, memberSarah, memberDavid, memberMaya],
-      createdByMemberId: memberAlex.id,
-      createdAt: DateTime.now().subtract(const Duration(days: 2)),
-    );
-
-    // Stoppages
-    final stop1Id = uuid.v4();
-    final stop2Id = uuid.v4();
-    final stop3Id = uuid.v4();
-
-    final now = DateTime.now();
-    final stop1 = Stoppage(
-      id: stop1Id,
-      tripId: tripId,
-      name: 'Half Moon Bay Bakery & Cafe',
-      latitude: 37.4636,
-      longitude: -122.4286,
-      address: 'Main St, Half Moon Bay, CA',
-      category: 'Food & Cafe',
-      arrivedAt: now.subtract(const Duration(days: 1, hours: 8)),
-      departedAt: now.subtract(const Duration(days: 1, hours: 7)),
-      notes: 'Delicious warm croissants and espresso before the coastal drive.',
-      createdBy: memberAlex.id,
-      orderIndex: 0,
-    );
-
-    final stop2 = Stoppage(
-      id: stop2Id,
-      tripId: tripId,
-      name: 'Chevron Coastal Fuel Station',
-      latitude: 36.9741,
-      longitude: -122.0308,
-      address: 'Santa Cruz, CA',
-      category: 'Gas / Fuel Station',
-      arrivedAt: now.subtract(const Duration(days: 1, hours: 4)),
-      departedAt: now.subtract(const Duration(days: 1, hours: 3, minutes: 40)),
-      notes: 'Full tank refuel and wind-shield wipe.',
-      createdBy: memberDavid.id,
-      orderIndex: 1,
-    );
-
-    final stop3 = Stoppage(
-      id: stop3Id,
-      tripId: tripId,
-      name: 'Bixby Creek Bridge Viewpoint',
-      latitude: 36.3714,
-      longitude: -121.9018,
-      address: 'Cabillo Hwy, Big Sur, CA',
-      category: 'Viewpoint',
-      arrivedAt: now.subtract(const Duration(hours: 3)),
-      departedAt: null, // Currently active / ongoing stop!
-      notes: 'Breathtaking ocean cliff views and sea breeze sunset.',
-      createdBy: memberSarah.id,
-      orderIndex: 2,
-    );
-
-    // Expenses attached to stoppages
-    final expense1 = Expense(
-      id: uuid.v4(),
-      tripId: tripId,
-      stoppageId: stop1Id,
-      title: 'Breakfast & Artisanal Coffee',
-      totalAmount: 64.0,
-      currency: 'USD',
-      category: 'Food & Drinks',
-      paidByMemberId: memberAlex.id,
-      splitType: SplitType.equal,
-      splits: [
-        ExpenseSplit(memberId: memberAlex.id, allocatedAmount: 16.0),
-        ExpenseSplit(memberId: memberSarah.id, allocatedAmount: 16.0),
-        ExpenseSplit(memberId: memberDavid.id, allocatedAmount: 16.0),
-        ExpenseSplit(memberId: memberMaya.id, allocatedAmount: 16.0),
-      ],
-      createdAt: now.subtract(const Duration(days: 1, hours: 7, minutes: 30)),
-    );
-
-    final expense2 = Expense(
-      id: uuid.v4(),
-      tripId: tripId,
-      stoppageId: stop2Id,
-      title: 'Full Tank Premium Gas',
-      totalAmount: 72.50,
-      currency: 'USD',
-      category: 'Fuel / Gas',
-      paidByMemberId: memberDavid.id,
-      splitType: SplitType.equal,
-      splits: [
-        ExpenseSplit(memberId: memberAlex.id, allocatedAmount: 18.125),
-        ExpenseSplit(memberId: memberSarah.id, allocatedAmount: 18.125),
-        ExpenseSplit(memberId: memberDavid.id, allocatedAmount: 18.125),
-        ExpenseSplit(memberId: memberMaya.id, allocatedAmount: 18.125),
-      ],
-      createdAt: now.subtract(const Duration(days: 1, hours: 3, minutes: 45)),
-    );
-
-    final expense3 = Expense(
-      id: uuid.v4(),
-      tripId: tripId,
-      stoppageId: stop3Id,
-      title: 'Big Sur State Park Entry Passes',
-      totalAmount: 40.0,
-      currency: 'USD',
-      category: 'Activities & Tickets',
-      paidByMemberId: memberSarah.id,
-      splitType: SplitType.equal,
-      splits: [
-        ExpenseSplit(memberId: memberAlex.id, allocatedAmount: 10.0),
-        ExpenseSplit(memberId: memberSarah.id, allocatedAmount: 10.0),
-        ExpenseSplit(memberId: memberDavid.id, allocatedAmount: 10.0),
-        ExpenseSplit(memberId: memberMaya.id, allocatedAmount: 10.0),
-      ],
-      createdAt: now.subtract(const Duration(hours: 2, minutes: 40)),
-    );
-
-    // Memories
-    final memory1 = Memory(
-      id: uuid.v4(),
-      tripId: tripId,
-      stoppageId: stop1Id,
-      uploadedByMemberId: memberSarah.id,
-      mediaPath: 'assets/sample_croissant.png',
-      caption: 'Best almond croissants on the coast!',
-      createdAt: now.subtract(const Duration(days: 1, hours: 7, minutes: 20)),
-      likedByMemberIds: [memberAlex.id, memberDavid.id],
-    );
-
-    final memory2 = Memory(
-      id: uuid.v4(),
-      tripId: tripId,
-      stoppageId: stop3Id,
-      uploadedByMemberId: memberAlex.id,
-      mediaPath: 'assets/sample_bixby.png',
-      caption: 'The bridge looks majestic under the afternoon golden light!',
-      createdAt: now.subtract(const Duration(hours: 2, minutes: 15)),
-      likedByMemberIds: [memberSarah.id, memberMaya.id, memberDavid.id],
-    );
-
-    await saveTrips([sampleTrip]);
-    await saveAllStoppages([stop1, stop2, stop3]);
-    await saveAllExpenses([expense1, expense2, expense3]);
-    await saveAllMemories([memory1, memory2]);
-    await saveAllSettlements([]);
-
+  Future<void> _purgeDummyData() async {
+    final dummyTrips = _cachedTrips.where((t) =>
+        t.title == 'Pacific Coast Highway Getaway' ||
+        t.title.toLowerCase().contains('sample') ||
+        t.title.toLowerCase().contains('mock') ||
+        t.createdByMemberId == 'usr_me' ||
+        t.createdByMemberId == 'mock_user' ||
+        t.createdByMemberId.isEmpty,
+    ).toList();
+    for (final dt in dummyTrips) {
+      await deleteTrip(dt.id);
+    }
+    _cachedStoppages.removeWhere((s) =>
+        s.name.contains('Half Moon Bay') ||
+        s.name.contains('Chevron Coastal') ||
+        s.name.contains('Bixby Creek'));
+    _cachedExpenses.removeWhere((e) =>
+        e.title.contains('Artisanal Coffee') ||
+        e.title.contains('Full Tank') ||
+        e.title.contains('Big Sur State Park'));
+    _cachedMemories.removeWhere((m) =>
+        m.caption?.contains('croissant') == true ||
+        m.caption?.contains('majestic') == true);
+    await _db.saveAllStoppages(_cachedStoppages);
+    await _db.saveAllExpenses(_cachedExpenses);
+    await _db.saveAllMemories(_cachedMemories);
     await _prefs.setBool(_initializedKey, true);
   }
 }

@@ -15,6 +15,7 @@ class Trip {
   final String createdByMemberId;
   final DateTime createdAt;
   final bool isCompleted;
+  final String status; // 'active', 'completed', 'deleted'
   final double? rating;
   final String? experienceReview;
   final DateTime? completedAt;
@@ -34,6 +35,7 @@ class Trip {
     required this.createdByMemberId,
     required this.createdAt,
     this.isCompleted = false,
+    this.status = 'active',
     this.rating,
     this.experienceReview,
     this.completedAt,
@@ -43,7 +45,8 @@ class Trip {
   bool get isFamily => tripType == 'family';
   bool get isGroup => tripType == 'group' && !isSolo;
   bool get hasSettlements => isGroup;
-  bool get isRunning => !isCompleted;
+  bool get isRunning => !isCompleted && !isDeleted;
+  bool get isDeleted => status == 'deleted';
 
   TripMember? get currentUserMember {
     for (final m in members) {
@@ -63,6 +66,23 @@ class Trip {
     return getMember(memberId)?.name ?? 'Unknown Member';
   }
 
+  bool isCreator(String? userId) {
+    if (userId == null || userId.isEmpty) return false;
+    if (createdByMemberId == userId) return true;
+    final member = getMember(userId);
+    if (member != null && member.id == createdByMemberId) return true;
+    return false;
+  }
+
+  bool hasMember(String? userId, [String? userEmail]) {
+    if (userId == null && userEmail == null) return false;
+    return members.any((m) =>
+      (userId != null && m.id == userId) ||
+      (userEmail != null && userEmail.isNotEmpty && m.email != null && m.email!.trim().toLowerCase() == userEmail.trim().toLowerCase())
+    );
+  }
+
+
   Trip copyWith({
     String? id,
     String? title,
@@ -78,6 +98,7 @@ class Trip {
     String? createdByMemberId,
     DateTime? createdAt,
     bool? isCompleted,
+    String? status,
     double? rating,
     String? experienceReview,
     DateTime? completedAt,
@@ -97,6 +118,7 @@ class Trip {
       createdByMemberId: createdByMemberId ?? this.createdByMemberId,
       createdAt: createdAt ?? this.createdAt,
       isCompleted: isCompleted ?? this.isCompleted,
+      status: status ?? this.status,
       rating: rating ?? this.rating,
       experienceReview: experienceReview ?? this.experienceReview,
       completedAt: completedAt ?? this.completedAt,
@@ -117,8 +139,12 @@ class Trip {
       'tripType': tripType,
       'members': members.map((m) => m.toJson()).toList(),
       'createdByMemberId': createdByMemberId,
+      'creatorId': createdByMemberId,
+      'memberIds': members.map((m) => m.id).toList(),
+      'memberEmails': members.map((m) => m.email).where((e) => e != null && e.isNotEmpty).cast<String>().toList(),
       'createdAt': createdAt.toIso8601String(),
       'isCompleted': isCompleted,
+      'status': status,
       'rating': rating,
       'experienceReview': experienceReview,
       'completedAt': completedAt?.toIso8601String(),
@@ -126,6 +152,7 @@ class Trip {
   }
 
   factory Trip.fromJson(Map<String, dynamic> json) {
+    final isCompletedVal = json['isCompleted'] as bool? ?? false;
     return Trip(
       id: json['id'] as String,
       title: json['title'] as String,
@@ -141,11 +168,14 @@ class Trip {
               ?.map((e) => TripMember.fromJson(e as Map<String, dynamic>))
               .toList() ??
           [],
-      createdByMemberId: json['createdByMemberId'] as String? ?? '',
+      createdByMemberId: (json['createdByMemberId'] as String?) ??
+          (json['creatorId'] as String?) ??
+          '',
       createdAt: json['createdAt'] != null
           ? DateTime.parse(json['createdAt'] as String)
           : DateTime.now(),
-      isCompleted: json['isCompleted'] as bool? ?? false,
+      isCompleted: isCompletedVal,
+      status: (json['status'] as String?) ?? (isCompletedVal ? 'completed' : 'active'),
       rating: (json['rating'] as num?)?.toDouble(),
       experienceReview: json['experienceReview'] as String?,
       completedAt: json['completedAt'] != null

@@ -8,6 +8,8 @@ import '../../models/stoppage.dart';
 import '../../models/trip_member.dart';
 import 'local_storage_service.dart';
 import 'realtime_sync_service.dart';
+import 'firestore_sync_service.dart';
+import 'user_service.dart';
 import '../../providers/trip_provider.dart';
 
 class ProximityAlertService extends ChangeNotifier {
@@ -19,6 +21,7 @@ class ProximityAlertService extends ChangeNotifier {
   final double _stoppageArrivalRadiusMeters = 350.0; // Default 350 m
   bool _strayAlertsEnabled = true;
   bool _stoppageAlertsEnabled = true;
+  bool _inAppBannersEnabled = true;
 
   // Debounce duplicate alerts (key -> last time triggered)
   final Map<String, DateTime> _debounceTimestamps = {};
@@ -36,10 +39,18 @@ class ProximityAlertService extends ChangeNotifier {
   double get stoppageArrivalRadiusMeters => _stoppageArrivalRadiusMeters;
   bool get strayAlertsEnabled => _strayAlertsEnabled;
   bool get stoppageAlertsEnabled => _stoppageAlertsEnabled;
+  bool get inAppBannersEnabled => _inAppBannersEnabled;
   Stream<ProximityAlert> get bannerStream => _bannerController.stream;
 
   void _loadAlerts() {
     _alerts = _storage.getAllAlerts();
+    _inAppBannersEnabled = _storage.getInAppBannersEnabled();
+    notifyListeners();
+  }
+
+  void toggleInAppBanners(bool enabled) {
+    _inAppBannersEnabled = enabled;
+    _storage.setInAppBannersEnabled(enabled);
     notifyListeners();
   }
 
@@ -137,7 +148,7 @@ class ProximityAlertService extends ChangeNotifier {
             id: 'alert_${const Uuid().v4().substring(0, 8)}',
             tripId: tripId,
             type: AlertType.stoppageArrival,
-            title: 'Arrived at Pitstop',
+            title: 'Arrived at Stop',
             message: '$myName has arrived at ${stop.name}.',
             senderMemberId: myMemberId,
             senderName: myName,
@@ -182,25 +193,120 @@ class ProximityAlertService extends ChangeNotifier {
     await _recordAndBroadcastAlert(alert);
   }
 
-  /// Ingests an incoming alert received from a companion over WebSocket
+  /// Records a local alert strictly in this user's workspace without remote broadcasting
+  Future<void> addLocalAlert(ProximityAlert alert) async {
+    if (_alerts.any((a) => a.id == alert.id)) return;
+    _alerts.insert(0, alert);
+    await _storage.addAlert(alert);
+    if (_inAppBannersEnabled || alert.urgency == AlertUrgency.critical) {
+      _bannerController.add(alert);
+    }
+    notifyListeners();
+  }
+
+  /// Ingests an incoming alert received from a companion over WebSocket or Firestore
   Future<void> ingestRemoteAlert(ProximityAlert alert) async {
     if (_alerts.any((a) => a.id == alert.id)) return; // Prevent duplicate
 
+    final currentUser = UserService.getCurrentUser();
+    // Do not re-ingest self-sent alerts
+    if (alert.senderMemberId == currentUser.id) return;
+
+    // Audience relevance check (Requirements 4, 5, 6):
+    // Shared trip events must ONLY be shown to verified trip members
+    if (alert.type != AlertType.sosEmergency && alert.type != AlertType.invitation) {
+      final userTrips = _ref.read(tripListProvider);
+      final isTripMember = userTrips.any((t) =>
+        t.id == alert.tripId && (t.isCreator(currentUser.id) || t.hasMember(currentUser.id, currentUser.email))
+      );
+      if (!isTripMember) {
+        return; // Non-trip user or unaccepted companion
+      }
+    }
+
     _alerts.insert(0, alert);
     await _storage.addAlert(alert);
-    _bannerController.add(alert);
+    if (_inAppBannersEnabled || alert.urgency == AlertUrgency.critical) {
+      _bannerController.add(alert);
+    }
     notifyListeners();
+  }
+
+  /// Returns alerts relevant to the current user (filtering out unaccepted foreign trip events)
+  List<ProximityAlert> getRelevantAlerts() {
+    final currentUser = UserService.getCurrentUser();
+    final userTrips = _ref.read(tripListProvider);
+
+    return _alerts.where((alert) {
+      if (alert.type == AlertType.sosEmergency) return true;
+      if (alert.recipientId != null && alert.recipientId == currentUser.id) return true;
+      if (alert.type == AlertType.invitation) return true;
+
+      if (alert.tripId.isNotEmpty && alert.tripId != 'trip_general') {
+        final trip = userTrips.where((t) => t.id == alert.tripId).firstOrNull;
+        if (trip == null) return false;
+        final isMember = trip.isCreator(currentUser.id) || trip.hasMember(currentUser.id, currentUser.email);
+        if (!isMember) return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  /// Broadcasts an activity notification to all trip members (bills, memories, stops, settlements, invites, joins, leaves)
+  Future<void> broadcastActivityAlert({
+    required String tripId,
+    required AlertType type,
+    required String title,
+    required String message,
+    AlertUrgency urgency = AlertUrgency.normal,
+    String? senderMemberId,
+    String? senderName,
+  }) async {
+    final currentUser = UserService.getCurrentUser();
+    final alert = ProximityAlert(
+      id: 'act_${const Uuid().v4().substring(0, 8)}',
+      tripId: tripId,
+      type: type,
+      title: title,
+      message: message,
+      senderMemberId: senderMemberId ?? currentUser.id,
+      senderName: senderName ?? currentUser.displayName,
+      timestamp: DateTime.now(),
+      urgency: urgency,
+    );
+
+    await _recordAndBroadcastAlert(alert);
   }
 
   Future<void> _recordAndBroadcastAlert(ProximityAlert alert) async {
     _alerts.insert(0, alert);
     await _storage.addAlert(alert);
-    _bannerController.add(alert);
+    if (_inAppBannersEnabled || alert.urgency == AlertUrgency.critical) {
+      _bannerController.add(alert);
+    }
     notifyListeners();
 
     try {
       _ref.read(realtimeSyncServiceProvider).broadcastProximityAlert(alert);
     } catch (_) {}
+    try {
+      _ref.read(firestoreSyncServiceProvider).pushProximityAlert(alert);
+    } catch (_) {}
+  }
+
+  Future<void> updateAlert(ProximityAlert updatedAlert) async {
+    final idx = _alerts.indexWhere((a) => a.id == updatedAlert.id);
+    if (idx != -1) {
+      _alerts[idx] = updatedAlert;
+      await _storage.saveAllAlerts(_alerts);
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteAlert(String alertId) async {
+    _alerts.removeWhere((a) => a.id == alertId);
+    await _storage.deleteAlert(alertId);
+    notifyListeners();
   }
 
   Future<void> markAsRead(String alertId) async {

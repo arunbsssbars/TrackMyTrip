@@ -23,6 +23,10 @@ class TripMember {
 
   bool get hasLocation => latitude != null && longitude != null;
 
+  String get initials => name.trim().isNotEmpty
+      ? name.trim().split(' ').where((w) => w.isNotEmpty).map((w) => w[0]).take(2).join().toUpperCase()
+      : '?';
+
   TripMember copyWith({
     String? id,
     String? name,

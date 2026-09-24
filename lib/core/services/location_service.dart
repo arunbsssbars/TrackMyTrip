@@ -28,8 +28,10 @@ class LocationDetails {
 }
 
 class LocationService {
-  /// Fast synchronous detection of currency using device system locale
-  static String detectLocalCurrencyFast() {
+  static String currentDetectedCurrency = _initialLocaleCurrency();
+  static final ValueNotifier<String> currencyNotifier = ValueNotifier<String>(_initialLocaleCurrency());
+
+  static String _initialLocaleCurrency() {
     try {
       final countryCode = WidgetsBinding.instance.platformDispatcher.locale.countryCode;
       if (countryCode != null && countryCode.isNotEmpty) {
@@ -39,14 +41,47 @@ class LocationService {
     return 'INR';
   }
 
+  /// Updates cached and reactive currency whenever a valid country code is resolved from GPS
+  static void updateCurrencyFromCountryCode(String? countryCode) {
+    if (countryCode != null && countryCode.isNotEmpty) {
+      final cur = getCurrencyForCountryCode(countryCode);
+      if (cur != currentDetectedCurrency) {
+        currentDetectedCurrency = cur;
+        currencyNotifier.value = cur;
+      }
+    }
+  }
+
+  static void _detectAndCacheCurrencyFromPosition(double lat, double lng) {
+    // Instant geographic bounding box detection (offline-resilient)
+    if (lat >= 6.5 && lat <= 37.5 && lng >= 68.0 && lng <= 97.5) {
+      updateCurrencyFromCountryCode('IN');
+    }
+    reverseGeocode(lat, lng).then((details) {
+      if (details.countryCode != null && details.countryCode!.isNotEmpty) {
+        updateCurrencyFromCountryCode(details.countryCode);
+      }
+    }).catchError((_) {});
+  }
+
+  /// Fast synchronous detection of currency using device system locale or cached GPS country
+  static String detectLocalCurrencyFast() {
+    return currentDetectedCurrency;
+  }
+
   /// Asynchronous detection combining GPS coordinates reverse geocoding with locale fallback
   static Future<String> detectLocalCurrency() async {
     try {
       final pos = await getCurrentPosition();
       if (pos != null) {
+        if (pos.latitude >= 6.5 && pos.latitude <= 37.5 && pos.longitude >= 68.0 && pos.longitude <= 97.5) {
+          updateCurrencyFromCountryCode('IN');
+          return 'INR';
+        }
         final details = await reverseGeocode(pos.latitude, pos.longitude);
         if (details.countryCode != null && details.countryCode!.isNotEmpty) {
-          return getCurrencyForCountryCode(details.countryCode!);
+          updateCurrencyFromCountryCode(details.countryCode);
+          return currentDetectedCurrency;
         }
       }
     } catch (_) {}
@@ -172,18 +207,24 @@ class LocationService {
     try {
       final hasPermission = await requestPermission();
       if (!hasPermission) {
-        return await Geolocator.getLastKnownPosition();
+        final last = await Geolocator.getLastKnownPosition();
+        if (last != null) _detectAndCacheCurrencyFromPosition(last.latitude, last.longitude);
+        return last;
       }
 
-      return await Geolocator.getCurrentPosition(
+      final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
           timeLimit: Duration(seconds: 5),
         ),
       );
+      _detectAndCacheCurrencyFromPosition(pos.latitude, pos.longitude);
+      return pos;
     } catch (_) {
       try {
-        return await Geolocator.getLastKnownPosition();
+        final last = await Geolocator.getLastKnownPosition();
+        if (last != null) _detectAndCacheCurrencyFromPosition(last.latitude, last.longitude);
+        return last;
       } catch (_) {
         return null;
       }
@@ -228,6 +269,9 @@ class LocationService {
         final state = addressObj?['state'] as String?;
         countryCode = addressObj?['country_code'] as String?;
         country = addressObj?['country'] as String?;
+        if (countryCode != null && countryCode.isNotEmpty) {
+          updateCurrencyFromCountryCode(countryCode);
+        }
 
         // 1. Direct explicit name
         if (rawName != null && rawName.trim().isNotEmpty) {

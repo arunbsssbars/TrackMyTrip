@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/services/user_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/auth_provider.dart';
+import 'email_verification_screen.dart';
 
 class SignUpScreen extends ConsumerStatefulWidget {
   const SignUpScreen({super.key});
@@ -15,20 +18,68 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   final _nameController = TextEditingController();
   final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
-  final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
 
   bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
   bool _isLoading = false;
   String? _errorMessage;
 
+  Timer? _debounceTimer;
+  bool _isCheckingUsername = false;
+  bool? _isUsernameAvailable;
+  String? _usernameFeedback;
+
+  @override
+  void initState() {
+    super.initState();
+    _usernameController.addListener(_onUsernameChanged);
+  }
+
+  void _onUsernameChanged() {
+    final raw = _usernameController.text.trim().replaceAll('@', '').toLowerCase();
+    _debounceTimer?.cancel();
+    if (raw.isEmpty) {
+      setState(() {
+        _isCheckingUsername = false;
+        _isUsernameAvailable = null;
+        _usernameFeedback = null;
+      });
+      return;
+    }
+    if (raw.length < 3) {
+      setState(() {
+        _isCheckingUsername = false;
+        _isUsernameAvailable = false;
+        _usernameFeedback = 'Handle must be at least 3 characters';
+      });
+      return;
+    }
+
+    setState(() {
+      _isCheckingUsername = true;
+      _usernameFeedback = 'Checking availability...';
+    });
+
+    _debounceTimer = Timer(const Duration(milliseconds: 350), () async {
+      final available = await UserService.isUsernameAvailable(raw);
+      if (mounted && _usernameController.text.trim().replaceAll('@', '').toLowerCase() == raw) {
+        setState(() {
+          _isCheckingUsername = false;
+          _isUsernameAvailable = available;
+          _usernameFeedback = available ? '✓ Handle is available' : '✗ Handle is already taken';
+        });
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _nameController.dispose();
     _usernameController.dispose();
     _emailController.dispose();
-    _phoneController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
@@ -42,22 +93,36 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       return;
     }
 
+    final rawUsername = _usernameController.text.trim().replaceAll('@', '');
+    if (rawUsername.isNotEmpty) {
+      final isAvailable = await UserService.isUsernameAvailable(rawUsername);
+      if (!isAvailable) {
+        setState(() => _errorMessage = 'The handle @$rawUsername is already taken. Please choose another.');
+        return;
+      }
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
     try {
+      final email = _emailController.text.trim();
       await ref.read(authNotifierProvider.notifier).signUp(
-        name: _nameController.text.trim(),
-        username: _usernameController.text.trim(),
-        email: _emailController.text.trim(),
-        phone: _phoneController.text.trim(),
+        email: email,
         password: _passwordController.text,
+        name: _nameController.text.trim().isNotEmpty ? _nameController.text.trim() : null,
+        username: rawUsername.isNotEmpty ? rawUsername : null,
       );
 
       if (mounted) {
-        Navigator.of(context).pop(); // Go to home / back
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => EmailVerificationScreen(email: email),
+          ),
+          (route) => false,
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -86,26 +151,27 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
             child: Form(
               key: _formKey,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Icon badge
+                  // App Branding Icon
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 50,
+                    height: 50,
                     decoration: BoxDecoration(
                       color: AppTheme.primary.withAlpha(25),
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(15),
+                      border: Border.all(color: AppTheme.primary.withAlpha(50)),
                     ),
                     child: const Icon(Icons.person_add_alt_1_rounded, color: AppTheme.primary, size: 26),
                   ),
                   const SizedBox(height: 16),
 
                   const Text(
-                    'Create an Account',
+                    'Create Account',
                     style: TextStyle(
                       fontSize: 26,
                       fontWeight: FontWeight.w900,
@@ -114,9 +180,9 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Start tracking routes, sharing split bills, and saving photo memories with your group.',
+                    'Sign up to track routes, stops, and split expenses.',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: 13.5,
                       color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                     ),
                   ),
@@ -153,63 +219,64 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                     textCapitalization: TextCapitalization.words,
                     decoration: const InputDecoration(
                       labelText: 'Full Name',
-                      hintText: 'e.g. Arun V',
-                      prefixIcon: Icon(Icons.badge_outlined),
+                      hintText: 'Enter your full name',
+                      prefixIcon: Icon(Icons.badge_rounded),
                     ),
-                    validator: (val) {
-                      if (val == null || val.trim().isEmpty) return 'Please enter your name';
-                      return null;
-                    },
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 16),
 
-                  // Username
+                  // Username / Handle with real-time uniqueness validation
                   TextFormField(
                     controller: _usernameController,
                     autocorrect: false,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Username Handle',
-                      hintText: 'e.g. arun_explorer',
-                      prefixIcon: Icon(Icons.alternate_email_rounded),
+                      hintText: 'Choose a unique username handle',
+                      prefixIcon: const Icon(Icons.alternate_email_rounded),
                       prefixText: '@',
+                      suffixIcon: _isCheckingUsername
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            )
+                          : (_isUsernameAvailable == true
+                              ? const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 20)
+                              : (_isUsernameAvailable == false
+                                  ? const Icon(Icons.cancel_rounded, color: Colors.red, size: 20)
+                                  : null)),
+                      helperText: _usernameFeedback,
+                      helperStyle: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: _isUsernameAvailable == true
+                            ? const Color(0xFF10B981)
+                            : (_isUsernameAvailable == false ? Colors.red : Colors.grey),
+                      ),
                     ),
-                    validator: (val) {
-                      if (val == null || val.trim().isEmpty) return 'Please choose a username';
-                      if (val.trim().length < 3) return 'Username must be at least 3 characters';
-                      return null;
-                    },
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 16),
 
-                  // Email
+                  // Email Address
                   TextFormField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
                     autocorrect: false,
                     decoration: const InputDecoration(
                       labelText: 'Email Address',
-                      hintText: 'name@example.com',
+                      hintText: 'Enter your email',
                       prefixIcon: Icon(Icons.email_outlined),
                     ),
                     validator: (val) {
                       if (val == null || val.trim().isEmpty) return 'Please enter your email';
-                      if (!val.contains('@')) return 'Enter a valid email address';
+                      if (!val.contains('@') || !val.contains('.')) return 'Enter a valid email address';
                       return null;
                     },
                   ),
-                  const SizedBox(height: 14),
-
-                  // Mobile Number (Optional)
-                  TextFormField(
-                    controller: _phoneController,
-                    keyboardType: TextInputType.phone,
-                    decoration: const InputDecoration(
-                      labelText: 'Mobile Phone Number',
-                      hintText: '+91 98765 43210',
-                      prefixIcon: Icon(Icons.phone_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 16),
 
                   // Password
                   TextFormField(
@@ -217,7 +284,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                     obscureText: _obscurePassword,
                     decoration: InputDecoration(
                       labelText: 'Password',
-                      hintText: 'At least 6 characters',
+                      hintText: 'Enter password (at least 6 characters)',
                       prefixIcon: const Icon(Icons.lock_outline_rounded),
                       suffixIcon: IconButton(
                         icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
@@ -229,15 +296,20 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                       return null;
                     },
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 16),
 
                   // Confirm Password
                   TextFormField(
                     controller: _confirmPasswordController,
-                    obscureText: _obscurePassword,
-                    decoration: const InputDecoration(
+                    obscureText: _obscureConfirmPassword,
+                    decoration: InputDecoration(
                       labelText: 'Confirm Password',
-                      prefixIcon: Icon(Icons.lock_clock_outlined),
+                      hintText: 'Re-enter your password',
+                      prefixIcon: const Icon(Icons.lock_clock_outlined),
+                      suffixIcon: IconButton(
+                        icon: Icon(_obscureConfirmPassword ? Icons.visibility_off : Icons.visibility),
+                        onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+                      ),
                     ),
                     validator: (val) {
                       if (val == null || val.isEmpty) return 'Please confirm your password';
@@ -246,7 +318,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // Create Account Button
+                  // Create Account Button (Clean, overflow-safe, professional)
                   SizedBox(
                     width: double.infinity,
                     height: 50,
@@ -269,7 +341,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                     ),
                   ),
 
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 22),
 
                   // Already have account
                   Center(
@@ -279,7 +351,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                         Text(
                           'Already have an account? ',
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: 13.5,
                             color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                           ),
                         ),
@@ -288,7 +360,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                           child: const Text(
                             'Sign In',
                             style: TextStyle(
-                              fontSize: 13,
+                              fontSize: 13.5,
                               fontWeight: FontWeight.bold,
                               color: AppTheme.primary,
                             ),

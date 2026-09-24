@@ -376,7 +376,12 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (trip == null) {
-      return const Scaffold(body: Center(child: Text('Trip not found')));
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        }
+      });
+      return const Scaffold(body: Center(child: CircularProgressIndicator(strokeWidth: 2)));
     }
 
     _initMemberSplits(trip.members);
@@ -409,17 +414,17 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                 children: [
                   const Row(
                     children: [
-                      Icon(Icons.pin_drop_rounded, color: AppTheme.primary, size: 18),
+                      Icon(Icons.link_rounded, size: 16, color: AppTheme.primary),
                       SizedBox(width: 6),
                       Text(
-                        'Anchor to Stoppage:',
+                        'Anchor to Stop:',
                         style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primary),
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String?>(
-                    value: _selectedStoppageId,
+                    value: (stoppages.any((s) => s.id == _selectedStoppageId)) ? _selectedStoppageId : null,
                     isExpanded: true,
                     decoration: const InputDecoration(
                       fillColor: Colors.white,
@@ -431,7 +436,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                         value: null,
                         child: Text('General Trip Expense (No stop)', overflow: TextOverflow.ellipsis),
                       ),
-                      ...stoppages.map((s) {
+                      ...Map.fromEntries(stoppages.map((s) => MapEntry(s.id, s))).values.map((s) {
                         return DropdownMenuItem<String?>(
                           value: s.id,
                           child: Text('📍 ${s.name} (${s.category})', overflow: TextOverflow.ellipsis),
@@ -450,7 +455,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
               controller: _titleController,
               decoration: const InputDecoration(
                 labelText: 'Expense Title *',
-                hintText: 'e.g. Seafood Dinner, Fuel at Station, Toll Pass',
+                hintText: 'Enter expense title',
                 prefixIcon: Icon(Icons.shopping_bag_outlined),
               ),
               validator: (val) => val == null || val.trim().isEmpty ? 'Please enter a description' : null,
@@ -468,6 +473,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                     style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     decoration: InputDecoration(
                       labelText: 'Total Amount *',
+                      hintText: '0.00',
                       prefixText: '${CurrencyFormatter.getCurrencySymbol(trip.defaultCurrency)} ',
                       prefixStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
@@ -480,7 +486,9 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                 Expanded(
                   flex: 5,
                   child: DropdownButtonFormField<String>(
-                    value: _selectedCategory,
+                    value: AppConstants.expenseCategories.contains(_selectedCategory)
+                        ? _selectedCategory
+                        : AppConstants.expenseCategories.first,
                     isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: 'Category',
@@ -874,7 +882,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
               controller: _notesController,
               decoration: const InputDecoration(
                 labelText: 'Notes / Invoice Details (Optional)',
-                hintText: 'Additional details or invoice note',
+                hintText: 'Add invoice notes or details (optional)',
                 prefixIcon: Icon(Icons.notes_rounded),
               ),
               maxLines: 2,

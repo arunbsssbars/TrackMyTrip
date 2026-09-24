@@ -6,8 +6,10 @@ import '../models/expense.dart';
 import 'trip_provider.dart';
 
 import '../models/sync_mutation.dart';
+import '../models/proximity_alert.dart';
 import '../core/services/offline_sync_engine.dart';
 import '../core/services/realtime_sync_service.dart';
+import '../core/services/proximity_alert_service.dart';
 
 class ExpenseNotifier extends StateNotifier<List<Expense>> {
   final LocalStorageService _storage;
@@ -18,21 +20,44 @@ class ExpenseNotifier extends StateNotifier<List<Expense>> {
   }
 
   void _loadAllExpenses() {
-    state = _storage.getAllExpenses();
+    final trips = _storage.getTrips();
+    final userTripIds = trips.map((t) => t.id).toSet();
+    state = _storage.getAllExpenses().where((e) => userTripIds.contains(e.tripId)).toList();
   }
 
   void reload() {
     _loadAllExpenses();
   }
 
+  void reset() {
+    state = [];
+  }
+
   Future<void> addExpense(Expense expense, {bool broadcast = true}) async {
-    state = [expense, ...state];
+    final trips = _storage.getTrips();
+    final trip = trips.where((t) => t.id == expense.tripId).firstOrNull;
+    if (trip == null || trip.isDeleted) {
+      return;
+    }
+
+    state = [expense, ...state.where((e) => e.id != expense.id)];
     await _storage.saveAllExpenses(state);
     _syncToCloud(expense.tripId);
 
     if (broadcast) {
       try {
         _ref.read(realtimeSyncServiceProvider).broadcastNewExpense(expense);
+      } catch (_) {}
+      try {
+        final payerName = trip.getMember(expense.paidByMemberId)?.name ?? 'A companion';
+        _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
+          tripId: expense.tripId,
+          type: AlertType.billAdded,
+          title: 'New Bill Added',
+          message: '$payerName added "${expense.title}" (${expense.currency} ${expense.totalAmount.toStringAsFixed(0)})',
+          senderMemberId: expense.paidByMemberId,
+          senderName: payerName,
+        );
       } catch (_) {}
     }
 
@@ -48,6 +73,12 @@ class ExpenseNotifier extends StateNotifier<List<Expense>> {
   }
 
   Future<void> updateExpense(Expense updatedExpense) async {
+    final trips = _storage.getTrips();
+    final trip = trips.where((t) => t.id == updatedExpense.tripId).firstOrNull;
+    if (trip == null || trip.isDeleted) {
+      return;
+    }
+
     state = [
       for (final e in state)
         if (e.id == updatedExpense.id) updatedExpense else e
@@ -86,7 +117,10 @@ class ExpenseNotifier extends StateNotifier<List<Expense>> {
   void _syncToCloud(String tripId) {
     try {
       final trips = _storage.getTrips();
-      final trip = trips.firstWhere((t) => t.id == tripId);
+      final trip = trips.where((t) => t.id == tripId).firstOrNull;
+      if (trip == null || trip.isDeleted) {
+        return; // Guard against resurrecting deleted or orphaned trips in Firestore
+      }
       final package = TripPackage(
         trip: trip,
         stoppages: _storage.getAllStoppages().where((s) => s.tripId == tripId).toList(),
@@ -131,4 +165,16 @@ final expensesByCategoryProvider = Provider<Map<String, double>>((ref) {
     categoryTotals[expense.category] = (categoryTotals[expense.category] ?? 0) + expense.totalAmount;
   }
   return categoryTotals;
+});
+
+final userScopedExpensesProvider = Provider<List<Expense>>((ref) {
+  final trips = ref.watch(tripListProvider);
+  final userTripIds = trips.map((t) => t.id).toSet();
+  final allExpenses = ref.watch(allExpensesProvider);
+  return allExpenses.where((e) => userTripIds.contains(e.tripId)).toList();
+});
+
+final userScopedTotalSpentProvider = Provider<double>((ref) {
+  final expenses = ref.watch(userScopedExpensesProvider);
+  return expenses.fold<double>(0.0, (sum, e) => sum + e.totalAmount);
 });

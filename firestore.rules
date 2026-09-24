@@ -2,17 +2,113 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Rooms collection
-    match /rooms/{roomCode} {
-      // Anyone can read a room if they have the code (since document ID is the code)
-      allow read: if true;
-      // Only authenticated users (even anonymous) can create/update
-      allow write: if request.auth != null;
+
+    // Helper functions for Role-Based Access Control (RBAC)
+    function isAuthenticated() {
+      return request.auth != null;
     }
-    
-    // Mutations collection (deprecated but keeping for backwards compat if needed)
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isTripMember(tripData) {
+      return isAuthenticated() && (
+        tripData.creatorId == request.auth.uid ||
+        tripData.createdByMemberId == request.auth.uid ||
+        (tripData.memberIds != null && request.auth.uid in tripData.memberIds) ||
+        (tripData.memberEmails != null && request.auth.token.email != null && (
+          request.auth.token.email in tripData.memberEmails ||
+          request.auth.token.email.lower() in tripData.memberEmails
+        ))
+      );
+    }
+
+    function isTripCreator(tripData) {
+      return isAuthenticated() && (
+        tripData.creatorId == request.auth.uid ||
+        tripData.createdByMemberId == request.auth.uid
+      );
+    }
+
+    // 1. Rooms collection (for 6-character room codes)
+    match /rooms/{roomCode} {
+      allow read: if true;
+      allow create, update: if isAuthenticated();
+      allow delete: if false;
+    }
+
+    // 2. Users collection (user profiles)
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if isOwner(userId);
+    }
+
+    // 3. Trips collection & Subcollections (Strict RBAC)
+    match /trips/{tripId} {
+      // Any authenticated user can create a trip with themselves as creator
+      allow create: if isAuthenticated() && (
+        request.resource.data.creatorId == request.auth.uid ||
+        request.resource.data.createdByMemberId == request.auth.uid
+      );
+
+      // Allow read for authenticated users (members or users with tripId)
+      allow read: if isAuthenticated();
+
+      // Members can update trip data; newly joining members can append themselves
+      allow update: if isAuthenticated() && (
+        isTripMember(resource.data) ||
+        (request.resource.data.memberIds != null && request.auth.uid in request.resource.data.memberIds)
+      );
+
+      // Only the trip creator can permanently delete the trip
+      allow delete: if isAuthenticated() && isTripCreator(resource.data);
+
+      // Subcollections: stoppages, expenses, memories, audit_logs
+      match /{subcollection}/{document=**} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+
+    // 4. Invitations collection (Private to sender & recipient)
+    match /invitations/{invitationId} {
+      allow create: if isAuthenticated() && request.resource.data.inviterId == request.auth.uid;
+      allow read: if isAuthenticated() && (
+        resource.data.inviterId == request.auth.uid ||
+        resource.data.inviteeId == request.auth.uid ||
+        (resource.data.inviteeEmail != null && (
+          resource.data.inviteeEmail == request.auth.token.email ||
+          resource.data.inviteeEmail == request.auth.token.email.lower()
+        )) ||
+        (resource.data.inviteeUsername != null)
+      );
+      allow update: if isAuthenticated() && (
+        resource.data.inviterId == request.auth.uid ||
+        resource.data.inviteeId == request.auth.uid ||
+        (resource.data.inviteeEmail != null && (
+          resource.data.inviteeEmail == request.auth.token.email ||
+          resource.data.inviteeEmail == request.auth.token.email.lower()
+        ))
+      );
+      allow delete: if isAuthenticated() && resource.data.inviterId == request.auth.uid;
+    }
+
+    // 5. Proximity & Emergency SOS Alerts
+    match /proximity_alerts/{alertId} {
+      allow create: if isAuthenticated() && (
+        request.resource.data.senderMemberId == request.auth.uid ||
+        request.resource.data.senderId == request.auth.uid
+      );
+      allow read: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && (
+        resource.data.senderMemberId == request.auth.uid ||
+        resource.data.senderId == request.auth.uid
+      );
+    }
+
+    // 6. Sync Mutations Outbox
     match /mutations/{mutationId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isAuthenticated();
     }
   }
 }

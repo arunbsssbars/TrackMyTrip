@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
@@ -9,6 +8,11 @@ import '../../models/stoppage.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
 import 'realtime_sync_service.dart';
+import 'firestore_sync_service.dart';
+import 'security_service.dart';
+import 'user_service.dart';
+import 'proximity_alert_service.dart';
+import '../../models/proximity_alert.dart';
 
 class LiveTrackingState {
   final bool isTracking;
@@ -23,6 +27,7 @@ class LiveTrackingState {
   final String? statusMessage;
   final Duration? broadcastDuration;
   final DateTime? broadcastExpiresAt;
+  final bool privacyFuzzing;
 
   const LiveTrackingState({
     this.isTracking = false,
@@ -37,6 +42,7 @@ class LiveTrackingState {
     this.statusMessage,
     this.broadcastDuration,
     this.broadcastExpiresAt,
+    this.privacyFuzzing = false,
   });
 
   bool get isBroadcasting =>
@@ -64,6 +70,7 @@ class LiveTrackingState {
     String? statusMessage,
     Duration? broadcastDuration,
     DateTime? broadcastExpiresAt,
+    bool? privacyFuzzing,
     bool clearBroadcast = false,
   }) {
     return LiveTrackingState(
@@ -79,6 +86,7 @@ class LiveTrackingState {
       statusMessage: statusMessage ?? this.statusMessage,
       broadcastDuration: clearBroadcast ? null : (broadcastDuration ?? this.broadcastDuration),
       broadcastExpiresAt: clearBroadcast ? null : (broadcastExpiresAt ?? this.broadcastExpiresAt),
+      privacyFuzzing: privacyFuzzing ?? this.privacyFuzzing,
     );
   }
 }
@@ -86,7 +94,6 @@ class LiveTrackingState {
 class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
   final Ref _ref;
   StreamSubscription<Position>? _positionStreamSub;
-  Timer? _simulatedDriveTimer;
   Timer? _broadcastExpiryTimer;
   String? _activeTripId;
 
@@ -95,7 +102,6 @@ class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
   @override
   void dispose() {
     _positionStreamSub?.cancel();
-    _simulatedDriveTimer?.cancel();
     _broadcastExpiryTimer?.cancel();
     super.dispose();
   }
@@ -115,6 +121,18 @@ class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
       startTracking(tripId);
     }
 
+    try {
+      final currentUser = UserService.getCurrentUser();
+      _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
+        tripId: tripId,
+        type: AlertType.locationShared,
+        title: 'Live Location Shared',
+        message: '${currentUser.displayName} is sharing live convoy location (${_formatDurationLabel(duration)})',
+        senderMemberId: currentUser.id,
+        senderName: currentUser.displayName,
+      );
+    } catch (_) {}
+
     _broadcastExpiryTimer = Timer(duration, () {
       stopLocationBroadcast(expired: true);
     });
@@ -129,6 +147,11 @@ class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
           ? 'Live broadcast expired. Location is now private.'
           : 'Live broadcast stopped.',
     );
+  }
+
+  /// Toggles location coordinate fuzzing for MASVS-PRIVACY compliance
+  void setPrivacyFuzzing(bool enabled) {
+    state = state.copyWith(privacyFuzzing: enabled);
   }
 
   static String _formatDurationLabel(Duration duration) {
@@ -168,29 +191,27 @@ class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
     }
   }
 
-  Future<void> startTracking(String tripId, {bool simulateIfUnavailable = true}) async {
+  Future<void> startTracking(String tripId, {bool simulateIfUnavailable = false}) async {
     _activeTripId = tripId;
-    _simulatedDriveTimer?.cancel();
 
     final hasPerm = await requestPermission();
-    if (!hasPerm && !simulateIfUnavailable) {
+    if (!hasPerm) {
+      state = state.copyWith(statusMessage: 'Location permission required for live tracking.');
       return;
     }
 
     Position? initialPos;
-    if (hasPerm) {
+    try {
+      initialPos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 6),
+        ),
+      );
+    } catch (e) {
       try {
-        initialPos = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.high,
-            timeLimit: Duration(seconds: 6),
-          ),
-        );
-      } catch (e) {
-        try {
-          initialPos = await Geolocator.getLastKnownPosition();
-        } catch (_) {}
-      }
+        initialPos = await Geolocator.getLastKnownPosition();
+      } catch (_) {}
     }
 
     if (initialPos != null) {
@@ -201,137 +222,51 @@ class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
         currentPosition: initialPos,
         routePoints: [initLatLng],
         trackingStartedAt: DateTime.now(),
-        statusMessage: '🛰️ Live GPS Active',
+        broadcastDuration: const Duration(hours: 24),
+        broadcastExpiresAt: DateTime.now().add(const Duration(hours: 24)),
+        statusMessage: '🛰️ Live GPS Active • Broadcasting',
       );
-
-      _positionStreamSub?.cancel();
-      LocationSettings locationSettings;
-      if (defaultTargetPlatform == TargetPlatform.android) {
-        locationSettings = AndroidSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 10,
-          forceLocationManager: false,
-          intervalDuration: const Duration(seconds: 4),
-          foregroundNotificationConfig: const ForegroundNotificationConfig(
-            notificationTitle: 'Trip Live Route Tracking',
-            notificationText: 'Battery-optimized travel route recording active.',
-            enableWakeLock: false,
-            setOngoing: true,
-          ),
-        );
-      } else {
-        locationSettings = const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 10,
-        );
-      }
-
-      _positionStreamSub = Geolocator.getPositionStream(
-        locationSettings: locationSettings,
-      ).listen(
-        _onNewPosition,
-        onError: (err) {
-          state = state.copyWith(statusMessage: 'GPS Stream: $err');
-        },
-      );
-    } else if (simulateIfUnavailable) {
-      // Start Simulated Drive along trip area
-      _startSimulatedTracking(tripId);
     } else {
-      state = state.copyWith(statusMessage: 'Could not acquire GPS coordinates.');
+      state = LiveTrackingState(
+        isTracking: true,
+        isSimulated: false,
+        trackingStartedAt: DateTime.now(),
+        broadcastDuration: const Duration(hours: 24),
+        broadcastExpiresAt: DateTime.now().add(const Duration(hours: 24)),
+        statusMessage: '🛰️ Searching for GPS signal...',
+      );
     }
-  }
 
-  void _startSimulatedTracking(String tripId) {
     _positionStreamSub?.cancel();
-    _simulatedDriveTimer?.cancel();
-
-    final stoppages = _ref.read(allStoppagesProvider).where((s) => s.tripId == tripId).toList();
-    double startLat = 37.7749;
-    double startLng = -122.4194;
-
-    if (stoppages.isNotEmpty) {
-      startLat = stoppages.first.latitude;
-      startLng = stoppages.first.longitude;
+    LocationSettings locationSettings;
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      locationSettings = AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
+        forceLocationManager: false,
+        intervalDuration: const Duration(seconds: 4),
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: 'Trip Live Route Tracking',
+          notificationText: 'Battery-optimized travel route recording active.',
+          enableWakeLock: false,
+          setOngoing: true,
+        ),
+      );
+    } else {
+      locationSettings = const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
+      );
     }
 
-    final initialPos = Position(
-      latitude: startLat,
-      longitude: startLng,
-      timestamp: DateTime.now(),
-      accuracy: 5.0,
-      altitude: 10.0,
-      altitudeAccuracy: 1.0,
-      heading: 45.0,
-      headingAccuracy: 1.0,
-      speed: 12.5, // ~45 km/h
-      speedAccuracy: 1.0,
+    _positionStreamSub = Geolocator.getPositionStream(
+      locationSettings: locationSettings,
+    ).listen(
+      _onNewPosition,
+      onError: (err) {
+        state = state.copyWith(statusMessage: 'GPS Stream: $err');
+      },
     );
-
-    final initLatLng = LatLng(startLat, startLng);
-    state = LiveTrackingState(
-      isTracking: true,
-      isSimulated: true,
-      currentPosition: initialPos,
-      routePoints: [initLatLng],
-      currentSpeedKmh: 45.0,
-      trackingStartedAt: DateTime.now(),
-      statusMessage: '🚗 Auto Tracking Active (Road Mode)',
-    );
-
-    int step = 0;
-    _simulatedDriveTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
-      if (!state.isTracking) {
-        timer.cancel();
-        return;
-      }
-
-      step++;
-      final lastPos = state.currentPosition ?? initialPos;
-      // Advance coordinates along a realistic road trajectory
-      final deltaLat = (math.sin(step * 0.2) * 0.0015) + 0.001;
-      final deltaLng = (math.cos(step * 0.2) * 0.0015) - 0.001;
-      final newLat = lastPos.latitude + deltaLat;
-      final newLng = lastPos.longitude + deltaLng;
-      final speedKmh = 40.0 + (step % 5) * 4.0;
-
-      final updatedPos = Position(
-        latitude: newLat,
-        longitude: newLng,
-        timestamp: DateTime.now(),
-        accuracy: 5.0,
-        altitude: 15.0,
-        altitudeAccuracy: 1.0,
-        heading: 90.0,
-        headingAccuracy: 1.0,
-        speed: speedKmh / 3.6,
-        speedAccuracy: 1.0,
-      );
-
-      final newPoint = LatLng(newLat, newLng);
-      final updatedPoints = [...state.routePoints, newPoint];
-      final addedDistKm = Geolocator.distanceBetween(
-        lastPos.latitude,
-        lastPos.longitude,
-        newLat,
-        newLng,
-      ) / 1000.0;
-
-      state = state.copyWith(
-        currentPosition: updatedPos,
-        routePoints: updatedPoints,
-        totalDistanceKm: state.totalDistanceKm + addedDistKm,
-        currentSpeedKmh: speedKmh,
-        statusMessage: '🚗 Live Tracking • ${speedKmh.toStringAsFixed(0)} km/h',
-      );
-
-      if (_activeTripId != null && state.isBroadcasting) {
-        final currentTrip = _ref.read(currentTripProvider);
-        final creatorId = currentTrip?.currentUserMember?.id ?? currentTrip?.members.firstOrNull?.id ?? 'User';
-        _ref.read(tripListProvider.notifier).updateMemberLocation(_activeTripId!, creatorId, newLat, newLng);
-        _ref.read(realtimeSyncServiceProvider).broadcastLocation(creatorId, newLat, newLng, speedKmh: speedKmh, heading: 90.0);
-      }
-    });
   }
 
   void _onNewPosition(Position pos) {
@@ -373,44 +308,31 @@ class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
     if (_activeTripId != null && state.isBroadcasting) {
       final currentTrip = _ref.read(currentTripProvider);
       final creatorId = currentTrip?.currentUserMember?.id ?? currentTrip?.members.firstOrNull?.id ?? 'User';
-      _ref.read(tripListProvider.notifier).updateMemberLocation(_activeTripId!, creatorId, pos.latitude, pos.longitude);
-      _ref.read(realtimeSyncServiceProvider).broadcastLocation(creatorId, pos.latitude, pos.longitude, speedKmh: speedKmh, heading: pos.heading);
+      
+      double broadcastLat = pos.latitude;
+      double broadcastLng = pos.longitude;
+      if (state.privacyFuzzing) {
+        final fuzzed = SecurityService.fuzzCoordinates(pos.latitude, pos.longitude);
+        broadcastLat = fuzzed.latitude;
+        broadcastLng = fuzzed.longitude;
+      }
+
+      _ref.read(tripListProvider.notifier).updateMemberLocation(_activeTripId!, creatorId, broadcastLat, broadcastLng);
+      _ref.read(realtimeSyncServiceProvider).broadcastLocation(creatorId, broadcastLat, broadcastLng, speedKmh: speedKmh, heading: pos.heading);
+      _ref.read(firestoreSyncServiceProvider).broadcastLocation(
+        _activeTripId!,
+        creatorId,
+        broadcastLat,
+        broadcastLng,
+        speedKmh: speedKmh,
+        heading: pos.heading,
+      );
     }
 
-    if (stationarySince != null &&
-        now.difference(stationarySince).inMinutes >= 3 &&
-        state.activeStoppageId == null &&
-        _activeTripId != null) {
-      _autoCreateStoppage(pos, stationarySince);
-    }
+    // Auto-stoppages are disabled per user requirements. Stoppages are added intentionally by the user.
   }
 
-  void _autoCreateStoppage(Position pos, DateTime arrivedAt) {
-    if (_activeTripId == null) return;
 
-    final currentTrip = _ref.read(currentTripProvider);
-    final creatorId = currentTrip?.currentUserMember?.id ?? currentTrip?.members.firstOrNull?.id ?? 'User';
-
-    final stoppageIndex = _ref.read(allStoppagesProvider).where((s) => s.tripId == _activeTripId).length + 1;
-    final autoStop = Stoppage(
-      id: const Uuid().v4(),
-      tripId: _activeTripId!,
-      name: 'Auto Pitstop #$stoppageIndex',
-      category: 'Rest Stop',
-      latitude: pos.latitude,
-      longitude: pos.longitude,
-      arrivedAt: arrivedAt,
-      createdBy: creatorId,
-      orderIndex: stoppageIndex,
-      address: 'GPS: ${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}',
-    );
-
-    _ref.read(allStoppagesProvider.notifier).addStoppage(autoStop);
-    state = state.copyWith(
-      activeStoppageId: autoStop.id,
-      statusMessage: '📍 Auto-detected Pitstop #$stoppageIndex',
-    );
-  }
 
   Future<Stoppage?> tagCurrentLocationAsStoppage({
     required String tripId,
@@ -431,8 +353,8 @@ class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
       } catch (_) {}
     }
 
-    final double lat = pos?.latitude ?? fallbackLat ?? 37.7749;
-    final double lng = pos?.longitude ?? fallbackLng ?? -122.4194;
+    final double lat = pos?.latitude ?? fallbackLat ?? 28.6139;
+    final double lng = pos?.longitude ?? fallbackLng ?? 77.2090;
 
     final currentTrip = _ref.read(currentTripProvider);
     final creatorId = currentTrip?.currentUserMember?.id ?? currentTrip?.members.firstOrNull?.id ?? 'User';
@@ -462,8 +384,6 @@ class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
   void stopTracking() {
     _positionStreamSub?.cancel();
     _positionStreamSub = null;
-    _simulatedDriveTimer?.cancel();
-    _simulatedDriveTimer = null;
     state = state.copyWith(
       isTracking: false,
       statusMessage: 'Tracking paused',

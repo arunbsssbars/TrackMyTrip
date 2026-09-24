@@ -546,26 +546,30 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                           Expanded(
                             child: Row(
                               children: [
-                                Text(
-                                  _formatDateHeading(firstDate, dayIndex),
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 13,
-                                    letterSpacing: -0.2,
-                                    color: isToday ? AppTheme.primary : (isDark ? Colors.white : AppTheme.textMainLight),
+                                Expanded(
+                                  child: Text(
+                                    _formatDateHeading(firstDate, dayIndex),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 12.5,
+                                      letterSpacing: -0.2,
+                                      color: isToday ? AppTheme.primary : (isDark ? Colors.white : AppTheme.textMainLight),
+                                    ),
                                   ),
                                 ),
                                 if (isToday) ...[
-                                  const SizedBox(width: 6),
+                                  const SizedBox(width: 5),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                                     decoration: BoxDecoration(
                                       color: Colors.green.withAlpha(25),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: const Text(
                                       'Active Day',
-                                      style: TextStyle(color: Colors.green, fontSize: 9.5, fontWeight: FontWeight.bold),
+                                      style: TextStyle(color: Colors.green, fontSize: 9, fontWeight: FontWeight.bold),
                                     ),
                                   ),
                                 ],
@@ -1017,6 +1021,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                       ],
                     ),
                   ),
+                  const SizedBox(width: 12),
                   Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(

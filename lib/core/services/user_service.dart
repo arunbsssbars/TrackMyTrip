@@ -1,122 +1,422 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../database/app_database.dart';
 import '../../models/user_profile.dart';
 
 class UserService {
-  // Pre-populated directory of mock companion users for local & cloud testing
-  static final List<UserProfile> _mockDirectory = [
-    const UserProfile(
-      id: 'usr_sarah_101',
-      username: 'sarah_travels',
-      displayName: 'Sarah Jenkins',
-      email: 'sarah.j@example.com',
-      phone: '+1 (555) 234-5678',
-      colorHex: '0xFFEC4899', // Pink
-      bio: 'Mountain hiker, road trip enthusiast & amateur photographer 🏔️',
-      latitude: 37.7749,
-      longitude: -122.4194,
-    ),
-    const UserProfile(
-      id: 'usr_mike_102',
-      username: 'mike_trekker',
-      displayName: 'Mike Chen',
-      email: 'mike.chen@example.com',
-      phone: '+1 (555) 345-6789',
-      colorHex: '0xFF3B82F6', // Blue
-      bio: 'Always seeking the next scenic route and best local coffee ☕',
-      latitude: 37.7849,
-      longitude: -122.4094,
-    ),
-    const UserProfile(
-      id: 'usr_elena_103',
-      username: 'elena_hikes',
-      displayName: 'Elena Rostova',
-      email: 'elena.r@example.com',
-      phone: '+1 (555) 456-7890',
-      colorHex: '0xFF10B981', // Emerald
-      bio: 'Campfire storyteller, navigator, foodie ⛺',
-      latitude: 37.7649,
-      longitude: -122.4294,
-    ),
-    const UserProfile(
-      id: 'usr_alex_104',
-      username: 'alex_explorer',
-      displayName: 'Alex Morgan',
-      email: 'alex.m@example.com',
-      phone: '+1 (555) 567-8901',
-      colorHex: '0xFFF59E0B', // Amber
-      bio: 'National Parks explorer & drone videographer 🚁',
-      latitude: 37.7949,
-      longitude: -122.4394,
-    ),
-    const UserProfile(
-      id: 'usr_priya_105',
-      username: 'priya_wanderer',
-      displayName: 'Priya Sharma',
-      email: 'priya.s@example.com',
-      phone: '+1 (555) 678-9012',
-      colorHex: '0xFF8B5CF6', // Purple
-      bio: 'Weekend road-tripper & budget master 🚗💨',
-      latitude: 37.7549,
-      longitude: -122.3994,
-    ),
-  ];
+  static FirebaseFirestore? _customDb;
+  static set customDb(FirebaseFirestore? db) => _customDb = db;
+  static FirebaseFirestore? get _firestore {
+    if (_customDb != null) return _customDb;
+    try {
+      return FirebaseFirestore.instance;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Real registered users and companions in the current app session
+  static final List<UserProfile> _registeredUsers = [];
 
   static UserProfile _currentUser = const UserProfile(
-    id: 'usr_me_001',
-    username: 'traveler_me',
-    displayName: 'You (Trip Lead)',
-    email: 'me@triptracker.app',
-    colorHex: '0xFF0D9488', // Teal
-    bio: 'Explorer & Trip Planner',
+    id: 'usr_me',
+    username: 'traveler',
+    displayName: 'Traveler',
+    email: null,
+    colorHex: '0xFF0D9488',
+    bio: null,
   );
+
+  // Cache of user profiles resolved across app sessions and searches
+  static final Map<String, UserProfile> _cachedUsers = {};
 
   static UserProfile getCurrentUser() => _currentUser;
 
+  static UserProfile? getUserById(String id) {
+    if (_currentUser.id == id) return _currentUser;
+    return _cachedUsers[id] ?? _registeredUsers.where((u) => u.id == id).firstOrNull;
+  }
+
+  static Future<UserProfile?> fetchUserProfile(String id) async {
+    final local = getUserById(id);
+    if (local != null && local.displayName != 'Traveler') return local;
+    try {
+      final fs = _firestore;
+      if (fs != null) {
+        final doc = await fs.collection('users').doc(id).get();
+        if (doc.exists && doc.data() != null) {
+          final data = doc.data()!;
+          final username = (data['username'] as String? ?? 'user').trim();
+          final displayName = (data['displayName'] as String? ?? data['name'] as String? ?? username).trim();
+          final profile = UserProfile(
+            id: id,
+            username: username.isNotEmpty ? username : 'user',
+            displayName: displayName.isNotEmpty ? displayName : 'Traveler',
+            email: data['email'] as String?,
+            phone: data['phone'] as String?,
+            colorHex: data['colorHex'] as String? ?? '0xFF3B82F6',
+            bio: (data['bio'] as String?)?.trim().isNotEmpty == true ? (data['bio'] as String).trim() : null,
+            avatarUrl: data['avatarUrl'] as String?,
+          );
+          _cachedUsers[id] = profile;
+          return profile;
+        }
+      }
+    } catch (_) {}
+    return local;
+  }
+
   static void updateCurrentUser(UserProfile updated) {
     _currentUser = updated;
+    _cachedUsers[updated.id] = updated;
+    if (!_registeredUsers.any((u) => u.id == updated.id)) {
+      _registeredUsers.add(updated);
+    }
+  }
+
+  static void resetCurrentUser() {
+    _currentUser = const UserProfile(
+      id: 'usr_me',
+      username: 'traveler',
+      displayName: 'Traveler',
+      email: null,
+      colorHex: '0xFF0D9488',
+      bio: null,
+    );
+    _registeredUsers.clear();
+    _cachedUsers.clear();
+  }
+
+  /// Generates full tokens and partial prefixes for flexible matching
+  static Set<String> generateSearchTokens({
+    required String username,
+    required String displayName,
+    required String? email,
+    String? phone,
+  }) {
+    final tokens = <String>{};
+    final inputs = <String>[
+      username.toLowerCase().trim(),
+      displayName.toLowerCase().trim(),
+      if (email != null) email.toLowerCase().trim(),
+      if (email != null) email.split('@').first.toLowerCase().trim(),
+      if (phone != null) phone.replaceAll(RegExp(r'\D'), ''),
+    ];
+
+    for (final word in displayName.toLowerCase().split(' ')) {
+      if (word.trim().isNotEmpty) inputs.add(word.trim());
+    }
+
+    for (final str in inputs) {
+      if (str.isEmpty) continue;
+      tokens.add(str);
+      for (int i = 2; i <= str.length && i <= 20; i++) {
+        tokens.add(str.substring(0, i));
+      }
+    }
+    return tokens;
   }
 
   /// Searches for companions matching a query by @username, display name, email, or mobile number
   static Future<List<UserProfile>> searchUsers(String query) async {
     final cleanQuery = query.trim().toLowerCase().replaceAll('@', '');
-    if (cleanQuery.isEmpty) {
-      return List.unmodifiable(_mockDirectory);
+    if (cleanQuery.length < 2) {
+      return <UserProfile>[];
     }
 
-    // Extract digits for phone number matching
+    final currentUserId = _currentUser.id;
+    String? fbUid;
+    String? fbEmail;
+    try {
+      fbUid = FirebaseAuth.instance.currentUser?.uid;
+      fbEmail = FirebaseAuth.instance.currentUser?.email;
+    } catch (_) {}
+    final currentUserEmail = (_currentUser.email ?? fbEmail)?.toLowerCase().trim();
+    final currentUsername = _currentUser.username.toLowerCase().trim();
+
+    final Map<String, UserProfile> combined = {};
+
+    void parseUserDocs(QuerySnapshot<Map<String, dynamic>> snap) {
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        final id = doc.id;
+        final email = (data['email'] as String?)?.toLowerCase().trim();
+        final username = (data['username'] as String? ?? '').toLowerCase().trim();
+        final displayName = (data['displayName'] as String? ?? data['name'] as String? ?? username).trim();
+
+        // Never show own account in search results
+        if (id == currentUserId || (fbUid != null && id == fbUid) || (currentUserEmail != null && email == currentUserEmail) || (currentUsername.isNotEmpty && username == currentUsername)) {
+          continue;
+        }
+
+        final profile = UserProfile(
+          id: id,
+          username: username.isNotEmpty ? username : 'user',
+          displayName: displayName.isNotEmpty ? displayName : 'Traveler',
+          email: data['email'] as String?,
+          phone: data['phone'] as String?,
+          colorHex: data['colorHex'] as String? ?? '0xFF3B82F6',
+          bio: (data['bio'] as String?)?.trim().isNotEmpty == true ? (data['bio'] as String).trim() : null,
+          avatarUrl: data['avatarUrl'] as String?,
+        );
+        combined[id] = profile;
+        _cachedUsers[id] = profile;
+      }
+
+    }
+
     final digitsQuery = cleanQuery.replaceAll(RegExp(r'\D'), '');
 
-    // Simulate fast local network search
-    await Future.delayed(const Duration(milliseconds: 60));
+    // 1. Fetch from Firestore users collection
+    final fs = _firestore;
+    if (fs != null) {
+      final usersRef = fs.collection('users');
+      try {
+        final snap = await usersRef.where('searchTokens', arrayContains: cleanQuery).limit(25).get();
+        parseUserDocs(snap);
+      } catch (_) {}
 
-    return _mockDirectory.where((user) {
-      final matchUsername = user.username.toLowerCase().contains(cleanQuery);
-      final matchName = user.displayName.toLowerCase().contains(cleanQuery);
-      final matchEmail = user.email?.toLowerCase().contains(cleanQuery) ?? false;
+        try {
+          final snap = await usersRef
+              .where('username', isGreaterThanOrEqualTo: cleanQuery)
+              .where('username', isLessThan: '$cleanQuery\uf8ff')
+              .limit(15)
+              .get();
+          parseUserDocs(snap);
+        } catch (_) {}
 
-      final cleanPhone = user.phone?.replaceAll(RegExp(r'\D'), '') ?? '';
-      final matchPhone = (user.phone != null && user.phone!.toLowerCase().contains(cleanQuery)) ||
+        try {
+          final snap = await usersRef
+              .where('email', isGreaterThanOrEqualTo: cleanQuery)
+              .where('email', isLessThan: '$cleanQuery\uf8ff')
+              .limit(15)
+              .get();
+          parseUserDocs(snap);
+        } catch (_) {}
+
+        try {
+          final broadSnap = await usersRef.limit(100).get();
+          for (final doc in broadSnap.docs) {
+            final data = doc.data();
+            final id = doc.id;
+            final email = (data['email'] as String?)?.toLowerCase().trim();
+            final username = (data['username'] as String? ?? '').toLowerCase().trim();
+            final displayName = (data['displayName'] as String? ?? data['name'] as String? ?? username).trim();
+            final phone = (data['phone'] as String? ?? '').replaceAll(RegExp(r'\D'), '');
+
+            if (id == currentUserId || (fbUid != null && id == fbUid) || (currentUserEmail != null && email == currentUserEmail) || (currentUsername.isNotEmpty && username == currentUsername)) {
+              continue;
+            }
+
+            final matchName = displayName.toLowerCase().contains(cleanQuery);
+            final matchUser = username.contains(cleanQuery);
+            final matchEmail = email != null && email.contains(cleanQuery);
+            final matchPhone = digitsQuery.length >= 3 && phone.contains(digitsQuery);
+
+            if (matchName || matchUser || matchEmail || matchPhone) {
+              final profile = UserProfile(
+                id: id,
+                username: username.isNotEmpty ? username : 'user',
+                displayName: displayName.isNotEmpty ? displayName : 'Traveler',
+                email: data['email'] as String?,
+                phone: data['phone'] as String?,
+                colorHex: data['colorHex'] as String? ?? '0xFF3B82F6',
+                bio: (data['bio'] as String?)?.trim().isNotEmpty == true ? (data['bio'] as String).trim() : null,
+                avatarUrl: data['avatarUrl'] as String?,
+              );
+              combined[id] = profile;
+              _cachedUsers[id] = profile;
+            }
+          }
+        } catch (_) {}
+      }
+
+    // 2. Fetch locally registered accounts from SQLite database
+    try {
+      final db = AppDatabase.instance;
+      if (db != null) {
+        final localDbUsers = await db.getRegisteredUsers();
+        for (final rec in localDbUsers) {
+          final id = rec['id'] as String? ?? rec['email'] as String? ?? '';
+          final email = (rec['email'] as String?)?.toLowerCase().trim();
+          final username = (rec['username'] as String? ?? '').toLowerCase().trim();
+          final displayName = (rec['name'] as String? ?? rec['displayName'] as String? ?? username).trim();
+          final phone = (rec['phone'] as String?)?.replaceAll(RegExp(r'\D'), '');
+
+          if (id.isEmpty || id == currentUserId || (currentUserEmail != null && email == currentUserEmail) || (currentUsername.isNotEmpty && username == currentUsername)) {
+            continue;
+          }
+
+          final matchName = displayName.toLowerCase().contains(cleanQuery);
+          final matchUser = username.contains(cleanQuery);
+          final matchEmail = email != null && email.contains(cleanQuery);
+          final matchPhone = digitsQuery.length >= 3 && phone != null && phone.contains(digitsQuery);
+
+          if (matchName || matchUser || matchEmail || matchPhone) {
+            combined[id] = UserProfile(
+              id: id,
+              username: username.isNotEmpty ? username : 'user',
+              displayName: displayName.isNotEmpty ? displayName : 'Traveler',
+              email: email,
+              phone: rec['phone'] as String?,
+              colorHex: rec['colorHex'] as String? ?? '0xFF10B981',
+              bio: (rec['bio'] as String?)?.trim().isNotEmpty == true ? (rec['bio'] as String).trim() : null,
+              avatarUrl: rec['avatarUrl'] as String?,
+            );
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 3. Harvest members from existing local trips in SQLite
+    try {
+      final db = AppDatabase.instance;
+      if (db != null) {
+        final trips = await db.getTrips();
+        for (final trip in trips) {
+          for (final m in trip.members) {
+            final id = m.id;
+            final name = m.name.trim();
+            final email = m.email?.toLowerCase().trim();
+            final username = name.toLowerCase().replaceAll(' ', '_');
+
+            if (id == currentUserId || (currentUserEmail != null && email == currentUserEmail) || (currentUsername.isNotEmpty && username == currentUsername)) {
+              continue;
+            }
+
+            final matchName = name.toLowerCase().contains(cleanQuery);
+            final matchEmail = email != null && email.contains(cleanQuery);
+            final matchUser = username.contains(cleanQuery);
+
+            if (matchName || matchEmail || matchUser) {
+              combined.putIfAbsent(
+                id,
+                () => UserProfile(
+                  id: id,
+                  username: username,
+                  displayName: name.isNotEmpty ? name : 'Traveler',
+                  email: email,
+                  colorHex: m.colorHex ?? '0xFF0D9488',
+                  bio: 'Trip member in ${trip.title}',
+                  avatarUrl: m.avatarUrl,
+                ),
+              );
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 4. Include any in-memory directory users
+    for (final local in _registeredUsers) {
+      if (local.id == currentUserId ||
+          (currentUserEmail != null && local.email?.toLowerCase().trim() == currentUserEmail) ||
+          (currentUsername.isNotEmpty && local.username.toLowerCase().trim() == currentUsername)) {
+        continue;
+      }
+      final matchUsername = local.username.toLowerCase().contains(cleanQuery);
+      final matchName = local.displayName.toLowerCase().contains(cleanQuery);
+      final matchEmail = local.email?.toLowerCase().contains(cleanQuery) ?? false;
+      final cleanPhone = local.phone?.replaceAll(RegExp(r'\D'), '') ?? '';
+      final matchPhone = (local.phone != null && local.phone!.toLowerCase().contains(cleanQuery)) ||
           (digitsQuery.length >= 3 && cleanPhone.contains(digitsQuery));
 
-      return matchUsername || matchName || matchEmail || matchPhone;
-    }).toList();
+      if (matchUsername || matchName || matchEmail || matchPhone) {
+        combined.putIfAbsent(local.id, () => local);
+      }
+    }
+
+    return combined.values.toList();
   }
 
   /// Finds a specific user by their ID
   static UserProfile? findUserById(String id) {
     if (id == _currentUser.id) return _currentUser;
     try {
-      return _mockDirectory.firstWhere((u) => u.id == id);
+      return _registeredUsers.firstWhere((u) => u.id == id);
     } catch (_) {
       return null;
     }
   }
 
-  /// Adds a newly created custom companion user to the local directory
-  static void registerUser(UserProfile newUser) {
-    if (!_mockDirectory.any((u) => u.id == newUser.id || u.username == newUser.username)) {
-      _mockDirectory.add(newUser);
+  /// Checks if a username handle is uniquely available in SQLite and Cloud Firestore
+  static Future<bool> isUsernameAvailable(String username, {String? excludeUserId}) async {
+    final clean = username.trim().toLowerCase().replaceAll('@', '');
+    if (clean.length < 3) return false;
+
+    // Disallow reserved handles
+    if (clean == 'admin' || clean == 'traveler' || clean == 'support') return false;
+
+    // 1. Check local registered users in SQLite
+    try {
+      final db = AppDatabase.instance;
+      if (db != null) {
+        final localUsers = await db.getRegisteredUsers();
+        for (final u in localUsers) {
+          final id = u['id'] as String? ?? u['email'] as String? ?? '';
+          final un = (u['username'] as String? ?? '').toLowerCase().trim();
+          if (id != excludeUserId && un == clean) {
+            return false;
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 2. Check in-memory session registry
+    for (final u in _registeredUsers) {
+      if (u.id != excludeUserId && u.username.toLowerCase().trim() == clean) {
+        return false;
+      }
     }
+
+    // 3. Check Cloud Firestore users collection
+    final fs = _firestore;
+    if (fs != null) {
+      try {
+        final snap = await fs
+            .collection('users')
+            .where('username', isEqualTo: clean)
+            .limit(3)
+            .get();
+        for (final doc in snap.docs) {
+          if (doc.id != excludeUserId) {
+            return false;
+          }
+        }
+      } catch (_) {}
+    }
+
+    return true;
+  }
+
+  /// Adds a newly created custom companion user to the local directory and Firestore
+  static void registerUser(UserProfile newUser) {
+    if (!_registeredUsers.any((u) => u.id == newUser.id || u.username == newUser.username)) {
+      _registeredUsers.add(newUser);
+    }
+    try {
+      final fs = _firestore;
+      if (fs != null) {
+        final searchTokens = generateSearchTokens(
+          username: newUser.username,
+          displayName: newUser.displayName,
+          email: newUser.email,
+          phone: newUser.phone,
+        );
+        fs.collection('users').doc(newUser.id).set({
+          'id': newUser.id,
+          'username': newUser.username.toLowerCase(),
+          'displayName': newUser.displayName,
+          'email': newUser.email?.toLowerCase(),
+          'phone': newUser.phone,
+          'bio': newUser.bio,
+          'colorHex': newUser.colorHex,
+          'searchTokens': searchTokens.toList(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+    } catch (_) {}
   }
 }
 

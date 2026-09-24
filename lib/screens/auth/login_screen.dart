@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
+import '../../models/auth_user.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/trip_provider.dart';
+import '../common/google_logo.dart';
+import '../main_scaffold.dart';
+import 'email_verification_screen.dart';
 import 'forgot_password_sheet.dart';
 import 'signup_screen.dart';
 
@@ -13,10 +18,11 @@ class LoginScreen extends ConsumerStatefulWidget {
 }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
-  final _identifierController = TextEditingController(text: 'arun_explorer');
-  final _passwordController = TextEditingController(text: 'password123');
+  final _identifierController = TextEditingController();
+  final _passwordController = TextEditingController();
   bool _obscurePassword = true;
-  bool _isLoading = false;
+  bool _isEmailLoading = false;
+  bool _isGoogleLoading = false;
   String? _errorMessage;
 
   @override
@@ -31,12 +37,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final password = _passwordController.text;
 
     if (identifier.isEmpty || password.isEmpty) {
-      setState(() => _errorMessage = 'Please enter your email/@username and password');
+      setState(() {
+        _errorMessage = 'Please enter your email/username and password';
+      });
       return;
     }
 
     setState(() {
-      _isLoading = true;
+      _isEmailLoading = true;
       _errorMessage = null;
     });
 
@@ -45,11 +53,38 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         emailOrUsername: identifier,
         password: password,
       );
+
+      final authService = ref.read(authServiceProvider);
+      final currentUser = authService.currentSession;
+      if (currentUser != null && !authService.isEmailVerified && mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => EmailVerificationScreen(email: currentUser.email),
+          ),
+        );
+      } else if (mounted) {
+        try {
+          await ref.read(tripListProvider.notifier).syncUserTripsFromCloud();
+        } catch (_) {}
+        if (!mounted) return;
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        } else {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const MainScaffold()),
+          );
+        }
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _isLoading = false;
           _errorMessage = e.toString().replaceAll('Exception: ', '');
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isEmailLoading = false;
         });
       }
     }
@@ -57,35 +92,35 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   void _handleGoogleSignIn() async {
     setState(() {
-      _isLoading = true;
+      _isGoogleLoading = true;
       _errorMessage = null;
     });
 
     try {
       await ref.read(authNotifierProvider.notifier).loginWithGoogle();
+      if (mounted) {
+        try {
+          await ref.read(tripListProvider.notifier).syncUserTripsFromCloud();
+        } catch (_) {}
+        if (!mounted) return;
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        } else {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const MainScaffold()),
+          );
+        }
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _isLoading = false;
           _errorMessage = e.toString().replaceAll('Exception: ', '');
         });
       }
-    }
-  }
-
-  void _handleGuestSignIn() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      await ref.read(authNotifierProvider.notifier).loginAsGuest();
-    } catch (e) {
+    } finally {
       if (mounted) {
         setState(() {
-          _isLoading = false;
-          _errorMessage = e.toString().replaceAll('Exception: ', '');
+          _isGoogleLoading = false;
         });
       }
     }
@@ -93,6 +128,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<AsyncValue<AuthUser?>>(authNotifierProvider, (previous, next) {
+      final user = next.valueOrNull;
+      if (user != null && mounted) {
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        } else {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const MainScaffold()),
+          );
+        }
+      }
+    });
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
@@ -100,6 +148,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -131,7 +180,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                       const SizedBox(height: 16),
                       const Text(
-                        'Trip Tracker',
+                        'Track My Trip',
                         style: TextStyle(
                           fontSize: 28,
                           fontWeight: FontWeight.w900,
@@ -140,7 +189,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Sign in to sync road trips, pitstops & split bills',
+                        'Sign in to sync road trips, stops & split bills',
                         style: TextStyle(
                           fontSize: 13,
                           color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
@@ -177,13 +226,76 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   const SizedBox(height: 16),
                 ],
 
+                // 1. Google (Gmail) Button (First Place)
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: OutlinedButton(
+                    onPressed: (_isEmailLoading || _isGoogleLoading) ? null : _handleGoogleSignIn,
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: isDark ? AppTheme.surfaceMutedDark : Colors.white,
+                      side: BorderSide(color: isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1), width: 1.2),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      elevation: 0,
+                    ),
+                    child: _isGoogleLoading
+                        ? SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.2,
+                              color: isDark ? Colors.white : AppTheme.primary,
+                            ),
+                          )
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const GoogleLogo(size: 22),
+                              const SizedBox(width: 12),
+                              Text(
+                                'Continue with Google (Gmail)',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: isDark ? Colors.white : const Color(0xFF1E293B),
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Divider OR
+                Row(
+                  children: [
+                    Expanded(child: Divider(color: isDark ? AppTheme.borderDark : AppTheme.borderLight)),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text(
+                        'OR CONTINUE WITH EMAIL',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.8,
+                          color: isDark ? Colors.grey[500] : const Color(0xFF94A3B8),
+                        ),
+                      ),
+                    ),
+                    Expanded(child: Divider(color: isDark ? AppTheme.borderDark : AppTheme.borderLight)),
+                  ],
+                ),
+
+                const SizedBox(height: 20),
+
                 // Email / Username
                 TextField(
                   controller: _identifierController,
                   autocorrect: false,
                   decoration: const InputDecoration(
                     labelText: 'Email or @username',
-                    hintText: 'e.g. arun_explorer or arun@example.com',
+                    hintText: 'Enter your email or username',
                     prefixIcon: Icon(Icons.person_outline_rounded),
                   ),
                 ),
@@ -195,6 +307,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   obscureText: _obscurePassword,
                   decoration: InputDecoration(
                     labelText: 'Password',
+                    hintText: 'Enter your password',
                     prefixIcon: const Icon(Icons.lock_outline_rounded),
                     suffixIcon: IconButton(
                       icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
@@ -225,12 +338,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   width: double.infinity,
                   height: 50,
                   child: FilledButton(
-                    onPressed: _isLoading ? null : _handleLogin,
+                    onPressed: (_isEmailLoading || _isGoogleLoading) ? null : _handleLogin,
                     style: FilledButton.styleFrom(
                       backgroundColor: AppTheme.primary,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
-                    child: _isLoading
+                    child: _isEmailLoading
                         ? const SizedBox(
                             width: 20,
                             height: 20,
@@ -240,95 +353,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             'Sign In',
                             style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                           ),
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // Divider OR
-                Row(
-                  children: [
-                    Expanded(child: Divider(color: isDark ? AppTheme.borderDark : AppTheme.borderLight)),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text(
-                        'OR CONTINUE WITH',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.8,
-                          color: isDark ? Colors.grey[500] : const Color(0xFF94A3B8),
-                        ),
-                      ),
-                    ),
-                    Expanded(child: Divider(color: isDark ? AppTheme.borderDark : AppTheme.borderLight)),
-                  ],
-                ),
-
-                const SizedBox(height: 20),
-
-                // Google (Gmail) Button
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: OutlinedButton(
-                    onPressed: _isLoading ? null : _handleGoogleSignIn,
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: isDark ? AppTheme.surfaceMutedDark : Colors.white,
-                      side: BorderSide(color: isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1)),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        // Google 'G' Colorful Icon representation
-                        Container(
-                          width: 22,
-                          height: 22,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Center(
-                            child: Text(
-                              'G',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w900,
-                                color: Color(0xFF4285F4),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          'Continue with Google (Gmail)',
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w700,
-                            color: isDark ? Colors.white : const Color(0xFF1E293B),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                // Guest Mode Button
-                SizedBox(
-                  width: double.infinity,
-                  height: 44,
-                  child: TextButton(
-                    onPressed: _isLoading ? null : _handleGuestSignIn,
-                    child: Text(
-                      'Explore as Guest',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
-                      ),
-                    ),
                   ),
                 ),
 

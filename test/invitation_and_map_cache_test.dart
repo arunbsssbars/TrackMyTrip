@@ -1,28 +1,40 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:trip_tracker_app/core/services/push_notification_service.dart';
-
-class MockPushNotificationService extends PushNotificationService {
-  @override
-  Future<String?> getToken() async => 'mock_token';
-  
-  @override
-  Future<void> init() async {}
-}
-import 'package:trip_tracker_app/core/database/app_database.dart';
-import 'package:trip_tracker_app/core/services/auth_service.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trip_tracker_app/core/database/app_database.dart';
 import 'package:trip_tracker_app/core/services/local_storage_service.dart';
 import 'package:trip_tracker_app/core/services/map_tile_cache_service.dart';
 import 'package:trip_tracker_app/core/services/user_service.dart';
 import 'package:trip_tracker_app/models/trip_invitation.dart';
+import 'package:trip_tracker_app/models/user_profile.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('Mobile Number & User Search Tests', () {
     test('UserService searches companions by formatted phone number and raw digits', () async {
+      UserService.registerUser(const UserProfile(
+        id: 'usr_mike_test',
+        username: 'mike_trekker',
+        displayName: 'Mike Chen',
+        email: 'mike.chen@example.com',
+        phone: '+1 (555) 345-6789',
+      ));
+      UserService.registerUser(const UserProfile(
+        id: 'usr_alex_test',
+        username: 'alex_explorer',
+        displayName: 'Alex Morgan',
+        email: 'alex.m@example.com',
+        phone: '+1 (555) 567-8901',
+      ));
+      UserService.registerUser(const UserProfile(
+        id: 'usr_elena_test',
+        username: 'elena_hikes',
+        displayName: 'Elena Rostova',
+        email: 'elena.r@example.com',
+      ));
+
       // Search by formatted phone
       final results1 = await UserService.searchUsers('+1 (555) 345-6789');
       expect(results1.isNotEmpty, isTrue);
@@ -45,7 +57,6 @@ void main() {
 
   group('TripInvitation Model & Storage Tests', () {
     late LocalStorageService storage;
-    late AuthService authService;
     late AppDatabase appDb;
 
     setUp(() async {
@@ -55,8 +66,6 @@ void main() {
       databaseFactory = databaseFactoryFfi;
       appDb = await AppDatabase.open(customPath: inMemoryDatabasePath);
       storage = await LocalStorageService.init(prefs: prefs, database: appDb);
-      final mockPushService = MockPushNotificationService();
-      authService = AuthService(storage, mockPushService);
     });
 
     tearDown(() {

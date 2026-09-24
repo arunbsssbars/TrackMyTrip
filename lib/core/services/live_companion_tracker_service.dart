@@ -1,11 +1,8 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import '../../models/stoppage.dart';
 import '../../models/trip_member.dart';
-import '../../providers/trip_provider.dart';
 
 class CompanionLivePosition {
   final String memberId;
@@ -52,17 +49,35 @@ class CompanionLivePosition {
 }
 
 class LiveCompanionTrackerNotifier extends StateNotifier<Map<String, CompanionLivePosition>> {
-  final Ref _ref;
   Timer? _convoyTicker;
-  String? _activeTripId;
-  List<LatLng> _routePoints = [];
+  Timer? _ttlCleanupTimer;
 
-  LiveCompanionTrackerNotifier(this._ref) : super({});
+  LiveCompanionTrackerNotifier(Ref _) : super({}) {
+    _ttlCleanupTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      purgeStaleLocations();
+    });
+  }
 
   @override
   void dispose() {
     _convoyTicker?.cancel();
+    _ttlCleanupTimer?.cancel();
     super.dispose();
+  }
+
+  /// Purges GPS coordinates older than [ttl] (default 2 hours) to comply with MASVS-PRIVACY
+  void purgeStaleLocations({Duration ttl = const Duration(hours: 2)}) {
+    final cutoff = DateTime.now().subtract(ttl);
+    final filtered = Map<String, CompanionLivePosition>.from(state)
+      ..removeWhere((_, pos) => pos.lastUpdated.isBefore(cutoff));
+    if (filtered.length != state.length) {
+      state = filtered;
+    }
+  }
+
+  /// Manually clears all cached companion locations upon logout or privacy request
+  void clearAllCompanionLocations() {
+    state = {};
   }
 
   /// Ingests live location broadcast from a real remote companion device over WebSocket
@@ -95,8 +110,8 @@ class LiveCompanionTrackerNotifier extends StateNotifier<Map<String, CompanionLi
     };
   }
 
-  /// Starts realistic road movement for companions along the route.
-  /// Battery-efficient: Only runs while MapTab is in foreground; stopped on dispose.
+  /// Synchronizes companions from real reported member data.
+  /// No fake sinusoidal simulated routes or artificial speeds.
   void startConvoySimulation({
     required String tripId,
     required List<TripMember> companions,
@@ -104,120 +119,31 @@ class LiveCompanionTrackerNotifier extends StateNotifier<Map<String, CompanionLi
     List<Stoppage> stoppages = const [],
     LatLng? userPos,
   }) {
-    _activeTripId = tripId;
-    _routePoints = roadRoute;
-
     if (companions.isEmpty) return;
 
-    // Initialize positions if not already present
     final newState = Map<String, CompanionLivePosition>.from(state);
-    final basePos = userPos ?? (stoppages.isNotEmpty ? LatLng(stoppages.first.latitude, stoppages.first.longitude) : const LatLng(37.7749, -122.4194));
 
-    for (int i = 0; i < companions.length; i++) {
-      final m = companions[i];
-      if (!newState.containsKey(m.id)) {
-        double initLat = m.latitude ?? basePos.latitude;
-        double initLng = m.longitude ?? basePos.longitude;
-        int initialWp = 0;
+    for (final m in companions) {
+      // If companion already has a live network position, preserve it
+      if (newState.containsKey(m.id)) continue;
 
-        if (roadRoute.isNotEmpty) {
-          // Spread companions slightly along the route (e.g. 5 to 15 waypoints apart)
-          initialWp = (i * 8) % roadRoute.length;
-          initLat = roadRoute[initialWp].latitude;
-          initLng = roadRoute[initialWp].longitude;
-        } else if (stoppages.isNotEmpty) {
-          final s = stoppages[i % stoppages.length];
-          // Slight realistic offset (200m - 500m)
-          final angle = (i * 1.5) + 0.5;
-          initLat = s.latitude + (math.sin(angle) * 0.003);
-          initLng = s.longitude + (math.cos(angle) * 0.003);
-        }
-
+      // Only populate if companion has an actual reported coordinate
+      if (m.latitude != null && m.longitude != null) {
         newState[m.id] = CompanionLivePosition(
           memberId: m.id,
-          latitude: initLat,
-          longitude: initLng,
-          speedKmh: 42.0 + (i * 6.5),
-          heading: 45.0,
-          lastUpdated: DateTime.now(),
+          latitude: m.latitude!,
+          longitude: m.longitude!,
+          speedKmh: 0.0,
+          heading: 0.0,
+          lastUpdated: m.lastSeen ?? DateTime.now(),
           isLiveNetwork: false,
-          waypointIndex: initialWp,
         );
       }
     }
     state = newState;
-
-    _convoyTicker?.cancel();
-    // 3-second tick: smooth enough for map navigation while preserving 95% CPU/battery
-    _convoyTicker = Timer.periodic(const Duration(seconds: 3), (_) {
-      _tickConvoyMovement(companions, stoppages);
-    });
   }
 
-  void _tickConvoyMovement(List<TripMember> companions, List<Stoppage> stoppages) {
-    if (state.isEmpty) return;
-
-    final updated = Map<String, CompanionLivePosition>.from(state);
-    bool changed = false;
-
-    for (int i = 0; i < companions.length; i++) {
-      final companion = companions[i];
-      final current = updated[companion.id];
-      if (current == null) continue;
-
-      // Real network GPS overrides convoy simulation
-      if (current.isLiveNetwork) {
-        continue;
-      }
-
-      double newLat = current.latitude;
-      double newLng = current.longitude;
-      double newHeading = current.heading;
-      int nextWp = current.waypointIndex;
-
-      // Realistic speed variation (40 - 68 km/h)
-      final speedVariance = math.sin(DateTime.now().millisecondsSinceEpoch / 4000.0 + i) * 5.0;
-      final speedKmh = math.max(25.0, (48.0 + (i * 5.0)) + speedVariance);
-
-      if (_routePoints.length >= 2) {
-        // Move along the actual road route
-        nextWp = (current.waypointIndex + 1) % _routePoints.length;
-        final targetPoint = _routePoints[nextWp];
-        newHeading = Geolocator.bearingBetween(current.latitude, current.longitude, targetPoint.latitude, targetPoint.longitude);
-        newLat = targetPoint.latitude;
-        newLng = targetPoint.longitude;
-      } else {
-        // Smooth road-like trajectory simulation around base area
-        const deltaSec = 3.0;
-        final distMeters = (speedKmh * 1000.0 / 3600.0) * deltaSec; // distance traveled in 3 sec (~40m)
-        final angleRad = (i * 1.2) + (DateTime.now().millisecondsSinceEpoch / 10000.0);
-        newLat = current.latitude + (math.sin(angleRad) * (distMeters / 111320.0));
-        newLng = current.longitude + (math.cos(angleRad) * (distMeters / (111320.0 * math.cos(current.latitude * math.pi / 180.0))));
-        newHeading = (angleRad * 180.0 / math.pi) % 360.0;
-      }
-
-      updated[companion.id] = current.copyWith(
-        latitude: newLat,
-        longitude: newLng,
-        speedKmh: speedKmh,
-        heading: newHeading,
-        lastUpdated: DateTime.now(),
-        waypointIndex: nextWp,
-      );
-      changed = true;
-
-      // Update in tripListProvider so all listeners across tabs reflect the new coordinates
-      if (_activeTripId != null) {
-        _ref.read(tripListProvider.notifier).updateMemberLocation(_activeTripId!, companion.id, newLat, newLng);
-      }
-    }
-
-    if (changed) {
-      state = updated;
-    }
-  }
-
-  /// Completely stops companion simulation to save 100% battery when leaving Route tab
+  /// Stops any companion ticker
   void stopConvoySimulation() {
     _convoyTicker?.cancel();
     _convoyTicker = null;

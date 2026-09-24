@@ -1,20 +1,26 @@
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:trip_tracker_app/core/database/app_database.dart';
 import 'package:trip_tracker_app/core/services/firestore_sync_service.dart';
 import 'package:trip_tracker_app/core/services/local_storage_service.dart';
 import 'package:trip_tracker_app/core/services/offline_sync_engine.dart';
+import 'package:trip_tracker_app/core/services/cloud_trip_sync_service.dart';
+import 'package:trip_tracker_app/models/auth_user.dart';
+import 'package:trip_tracker_app/models/trip.dart';
 import 'package:trip_tracker_app/models/expense.dart';
 import 'package:trip_tracker_app/models/proximity_alert.dart';
 import 'package:trip_tracker_app/models/stoppage.dart';
 import 'package:trip_tracker_app/models/sync_mutation.dart';
-import 'package:trip_tracker_app/models/trip.dart';
 import 'package:trip_tracker_app/providers/trip_provider.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   setUpAll(() {
+    SharedPreferences.setMockInitialValues({});
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   });
@@ -97,7 +103,7 @@ void main() {
           .get();
 
       expect(expSnap.exists, isTrue);
-      expect(expSnap.data()!['title'], equals('Park Entrance Pass'));
+      expect(expSnap.data()!['title'], equals('National Park Pass'));
       expect(expSnap.data()!['totalAmount'], equals(35.0));
     });
 
@@ -107,14 +113,13 @@ void main() {
       final alert = ProximityAlert(
         id: 'alert_sos_001',
         tripId: 'trip_alpha_1',
-        type: ProximityAlertType.sosEmergency,
+        type: AlertType.sosEmergency,
         title: 'EMERGENCY SOS',
         message: 'Need immediate roadside assistance!',
         senderMemberId: 'usr_me_001',
         senderName: 'Arun',
         latitude: 0,
         longitude: 0,
-        alertType: AlertType.pitstopArrival,
         timestamp: DateTime.now(),
         urgency: AlertUrgency.critical,
       );
@@ -159,7 +164,32 @@ void main() {
     });
 
     test('OfflineSyncEngine flushes pending SQLite mutations to Firestore', () async {
+      CloudTripSyncService.customDb = fakeFirestore;
+
+      final trip = Trip(
+        id: 'trip_alpha_1',
+        title: 'Desert Route',
+        startDate: DateTime.now(),
+        endDate: DateTime.now().add(const Duration(days: 3)),
+        defaultCurrency: 'USD',
+        members: const [],
+        createdByMemberId: 'usr_1',
+        createdAt: DateTime.now(),
+      );
+      await storage.saveTrip(trip);
+      await storage.saveAuthSession(
+        AuthUser(
+          id: 'usr_1',
+          username: 'user_one',
+          displayName: 'User One',
+          email: 'user1@example.com',
+          provider: AuthProviderType.email,
+          createdAt: DateTime.now(),
+        ),
+      );
+
       final engine = OfflineSyncEngine(storage);
+      addTearDown(engine.dispose);
 
       // Enqueue a local offline mutation
       await engine.enqueueMutation(
@@ -174,6 +204,7 @@ void main() {
           'latitude': 35.1983,
           'longitude': -111.6513,
         },
+        syncImmediately: false,
       );
 
       expect(engine.pendingCount, equals(1));

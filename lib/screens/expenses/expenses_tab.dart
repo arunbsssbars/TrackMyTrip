@@ -10,6 +10,8 @@ import '../../providers/expense_provider.dart';
 import '../../providers/trip_provider.dart';
 import '../expense/add_expense_screen.dart';
 
+import '../../core/services/security_service.dart';
+
 class ExpensesTab extends ConsumerStatefulWidget {
   const ExpensesTab({super.key});
 
@@ -20,9 +22,25 @@ class ExpensesTab extends ConsumerStatefulWidget {
 class _ExpensesTabState extends ConsumerState<ExpensesTab> {
   bool _isProcessingOcr = false;
 
+  @override
+  void initState() {
+    super.initState();
+    // MASVS-RESILIENCE: Protect sensitive billing/expense data from screen capture
+    SecurityService.setSecureScreen(true);
+  }
+
+  @override
+  void dispose() {
+    SecurityService.setSecureScreen(false);
+    super.dispose();
+  }
+
   void _scanReceipt(BuildContext context, List<Trip> trips) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final nav = Navigator.of(context);
+
     if (trips.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         const SnackBar(content: Text('Create a trip first to add expenses!')),
       );
       return;
@@ -64,7 +82,7 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
         // Set current trip provider context so AddExpenseScreen knows which trip
         ref.read(selectedTripIdProvider.notifier).state = selectedTrip.id;
         
-        Navigator.of(context).push(
+        nav.push(
           MaterialPageRoute(
             builder: (ctx) => AddExpenseScreen(
               tripId: selectedTrip!.id,
@@ -80,7 +98,7 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
         setState(() {
           _isProcessingOcr = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.showSnackBar(
           SnackBar(content: Text('Failed to process receipt: $e')),
         );
       }
@@ -93,8 +111,12 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
     final trips = ref.watch(tripListProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    // Strictly filter to expenses belonging to the active user's trips
+    final validTripIds = trips.map((t) => t.id).toSet();
+    final validExpenses = allExpenses.where((e) => validTripIds.contains(e.tripId)).toList();
+
     // Sort expenses by date descending
-    final sortedExpenses = List.of(allExpenses)..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final sortedExpenses = List.of(validExpenses)..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
     return Scaffold(
       appBar: AppBar(
@@ -171,11 +193,49 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
             ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _isProcessingOcr ? null : () => _scanReceipt(context, trips),
-        backgroundColor: AppTheme.primary,
-        icon: const Icon(Icons.document_scanner_rounded, color: Colors.white),
-        label: const Text('Scan Receipt', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      floatingActionButton: Container(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF0D9488), Color(0xFF0F766E)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF0D9488).withAlpha(90),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+          border: Border.all(color: Colors.white.withAlpha(50), width: 1),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: _isProcessingOcr ? null : () => _scanReceipt(context, trips),
+            borderRadius: BorderRadius.circular(24),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 13, vertical: 8.5),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.document_scanner_rounded, color: Colors.white, size: 16),
+                  SizedBox(width: 5.5),
+                  Text(
+                    'Scan Receipt',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

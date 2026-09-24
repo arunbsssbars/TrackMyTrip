@@ -160,6 +160,7 @@ void main() {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
       final storage = await LocalStorageService.init(prefs: prefs, database: await AppDatabase.open(customPath: inMemoryDatabasePath));
+      await storage.clearAllAlerts();
       final container = ProviderContainer(
         overrides: [
           localStorageServiceProvider.overrideWithValue(storage),
@@ -206,7 +207,7 @@ void main() {
       expect(service.alerts.length, equals(1));
       final arrivalAlert = service.alerts.first;
       expect(arrivalAlert.type, equals(AlertType.stoppageArrival));
-      expect(arrivalAlert.title, equals('Arrived at Pitstop'));
+      expect(arrivalAlert.title, equals('Arrived at Stop'));
       expect(arrivalAlert.message, contains('Mall Road Viewpoint'));
     });
 
@@ -214,6 +215,7 @@ void main() {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
       final storage = await LocalStorageService.init(prefs: prefs, database: await AppDatabase.open(customPath: inMemoryDatabasePath));
+      await storage.clearAllAlerts();
       final container = ProviderContainer(
         overrides: [
           localStorageServiceProvider.overrideWithValue(storage),

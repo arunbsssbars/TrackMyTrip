@@ -4,6 +4,17 @@ enum AlertType {
   companionStray,
   sosEmergency,
   general,
+  // Activity notifications
+  invitation,
+  invitationAccepted,
+  invitationRejected,
+  memberJoined,
+  memberLeft,
+  billAdded,
+  settlementRecorded,
+  memoryAdded,
+  stoppageAdded,
+  locationShared,
 }
 
 enum AlertUrgency {
@@ -27,6 +38,8 @@ class ProximityAlert {
   final DateTime timestamp;
   final AlertUrgency urgency;
   final bool isRead;
+  final String? recipientId;
+  final bool isOutgoing;
 
   const ProximityAlert({
     required this.id,
@@ -42,6 +55,8 @@ class ProximityAlert {
     required this.timestamp,
     this.urgency = AlertUrgency.normal,
     this.isRead = false,
+    this.recipientId,
+    this.isOutgoing = false,
   });
 
   ProximityAlert copyWith({
@@ -58,6 +73,8 @@ class ProximityAlert {
     DateTime? timestamp,
     AlertUrgency? urgency,
     bool? isRead,
+    String? recipientId,
+    bool? isOutgoing,
   }) {
     return ProximityAlert(
       id: id ?? this.id,
@@ -73,6 +90,8 @@ class ProximityAlert {
       timestamp: timestamp ?? this.timestamp,
       urgency: urgency ?? this.urgency,
       isRead: isRead ?? this.isRead,
+      recipientId: recipientId ?? this.recipientId,
+      isOutgoing: isOutgoing ?? this.isOutgoing,
     );
   }
 
@@ -91,6 +110,8 @@ class ProximityAlert {
       'timestamp': timestamp.toIso8601String(),
       'urgency': urgency.name,
       'isRead': isRead,
+      if (recipientId != null) 'recipientId': recipientId,
+      'isOutgoing': isOutgoing,
     };
   }
 
@@ -115,6 +136,8 @@ class ProximityAlert {
         orElse: () => AlertUrgency.normal,
       ),
       isRead: json['isRead'] as bool? ?? false,
+      recipientId: json['recipientId'] as String?,
+      isOutgoing: json['isOutgoing'] as bool? ?? false,
     );
   }
 }

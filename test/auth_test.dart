@@ -1,8 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trip_tracker_app/core/database/app_database.dart';
-import 'package:firebase_core_platform_interface/firebase_core_platform_interface.dart';
+import 'package:trip_tracker_app/core/services/auth_service.dart';
+import 'package:trip_tracker_app/core/services/local_storage_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:trip_tracker_app/core/services/push_notification_service.dart';
+import 'package:trip_tracker_app/models/auth_user.dart';
+import 'package:trip_tracker_app/models/trip.dart';
+import 'package:trip_tracker_app/models/trip_member.dart';
+import 'package:trip_tracker_app/models/expense.dart';
+import 'package:trip_tracker_app/models/expense_split.dart';
+import 'package:trip_tracker_app/providers/auth_provider.dart';
+import 'package:trip_tracker_app/providers/trip_provider.dart';
+import 'package:trip_tracker_app/providers/expense_provider.dart';
 
 class MockPushNotificationService extends PushNotificationService {
   @override
@@ -12,13 +23,10 @@ class MockPushNotificationService extends PushNotificationService {
   Future<void> init() async {}
 }
 
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:trip_tracker_app/core/services/auth_service.dart';
-import 'package:trip_tracker_app/core/services/local_storage_service.dart';
-import 'package:trip_tracker_app/models/auth_user.dart';
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfi;
 
   group('AuthUser Model Tests', () {
     test('AuthUser serializes and deserializes correctly', () {
@@ -72,6 +80,18 @@ void main() {
       expect(user.email, equals('arun.k@example.com'));
       expect(authService.isAuthenticated, isTrue);
       expect(authService.currentSession?.email, equals('arun.k@example.com'));
+    });
+
+    test('Minimal sign up with email and password only derives friendly display name and handle', () async {
+      final user = await authService.signUpWithEmail(
+        email: 'priya.sharma@example.com',
+        password: 'safePassword789',
+      );
+
+      expect(user.displayName, equals('Priya Sharma'));
+      expect(user.username, startsWith('priya_sharma'));
+      expect(user.email, equals('priya.sharma@example.com'));
+      expect(authService.isAuthenticated, isTrue);
     });
 
     test('Sign up rejects invalid email or short password', () async {
@@ -237,6 +257,105 @@ void main() {
       );
       expect(user.username, equals('sarah_j'));
       expect(authService.isAuthenticated, isTrue);
+    });
+  });
+
+  group('Multi-User Privacy & Data Isolation Tests', () {
+    late LocalStorageService storage;
+    late AuthService authService;
+    late ProviderContainer container;
+
+    setUp(() async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      storage = await LocalStorageService.init(
+        prefs: prefs,
+        database: await AppDatabase.open(customPath: inMemoryDatabasePath),
+      );
+      final mockPushService = MockPushNotificationService();
+      authService = AuthService(storage, mockPushService);
+
+      container = ProviderContainer(
+        overrides: [
+          localStorageServiceProvider.overrideWithValue(storage),
+          authServiceProvider.overrideWithValue(authService),
+        ],
+      );
+    });
+
+    tearDown(() {
+      container.dispose();
+    });
+
+    test('User B logging in on same device cannot see User A unshared trip or expenses', () async {
+      // 1. User A ("Arun") signs up and logs in
+      await container.read(authNotifierProvider.notifier).signUp(
+        email: 'arun@example.com',
+        password: 'password123',
+        name: 'Arun',
+        username: 'arun_lead',
+      );
+      final userA = container.read(authNotifierProvider).valueOrNull!;
+
+      // 2. Arun creates Trip A with an expense of 250 Rs
+      final tripA = Trip(
+        id: 'trip_arun_101',
+        title: 'Arun Solo Expedition',
+        startDate: DateTime.now(),
+        endDate: DateTime.now().add(const Duration(days: 3)),
+        createdByMemberId: userA.id,
+        createdAt: DateTime.now(),
+        members: [
+          TripMember(
+            id: userA.id,
+            name: userA.displayName,
+            email: userA.email,
+            isCurrentUser: true,
+            colorHex: '0xFF0D9488',
+          ),
+        ],
+        defaultCurrency: 'INR',
+      );
+      await container.read(tripListProvider.notifier).addTrip(tripA);
+
+      final expenseA = Expense(
+        id: 'exp_arun_250',
+        tripId: tripA.id,
+        title: 'Fuel Refill',
+        totalAmount: 250.0,
+        currency: 'INR',
+        category: 'Transport',
+        paidByMemberId: userA.id,
+        splitType: SplitType.equal,
+        splits: [
+          ExpenseSplit(memberId: userA.id, allocatedAmount: 250.0),
+        ],
+        createdAt: DateTime.now(),
+      );
+      await container.read(allExpensesProvider.notifier).addExpense(expenseA);
+
+      // Verify Arun sees Trip A and 250 Rs
+      expect(container.read(tripListProvider).length, equals(1));
+      expect(container.read(userScopedTotalSpentProvider), equals(250.0));
+
+      // 3. Arun logs out
+      await container.read(authNotifierProvider.notifier).logout();
+      expect(container.read(tripListProvider), isEmpty);
+      expect(container.read(userScopedTotalSpentProvider), equals(0.0));
+
+      // 4. User B ("EMTD") signs up and logs in on the SAME device
+      await container.read(authNotifierProvider.notifier).signUp(
+        email: 'emtd@example.com',
+        password: 'password456',
+        name: 'EMTD',
+        username: 'emtd_user',
+      );
+
+      // 5. Verify EMTD sees ZERO trips and ZERO expenses (Strict isolation!)
+      expect(container.read(tripListProvider), isEmpty);
+      expect(container.read(userScopedTotalSpentProvider), equals(0.0));
+      expect(container.read(userScopedExpensesProvider), isEmpty);
     });
   });
 }

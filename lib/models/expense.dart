@@ -10,7 +10,7 @@ enum SplitType {
 class Expense {
   final String id;
   final String tripId;
-  final String? stoppageId; // Anchored to a stoppage / pitstop
+  final String? stoppageId; // Anchored to a stoppage / stop
   final String title;
   final double totalAmount;
   final String currency;
