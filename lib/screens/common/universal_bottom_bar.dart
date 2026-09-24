@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/proximity_alert_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -18,63 +19,194 @@ class UniversalBottomBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final activeTab = ref.watch(activeMainTabProvider);
-    final currentIndex = selectedIndexOverride ?? activeTab;
+    final currentIndex = (selectedIndexOverride ?? activeTab).clamp(0, 4);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final unreadAlerts = ref.watch(proximityAlertServiceProvider).unreadCount;
     final pendingInvites = ref.watch(invitationProvider).length;
     final totalActivityUnread = unreadAlerts + pendingInvites;
 
-    return NavigationBar(
-      selectedIndex: currentIndex.clamp(0, 4),
-      onDestinationSelected: (index) {
-        if (onDestinationSelected != null) {
-          onDestinationSelected!(index);
-        } else {
-          // If we are on a pushed sub-screen (e.g. TripDetailScreen), pop back to root scaffold first
-          if (Navigator.of(context).canPop()) {
-            Navigator.of(context).popUntil((route) => route.isFirst);
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.surfaceDark : Colors.white,
+        border: Border(
+          top: BorderSide(
+            color: isDark ? Colors.white.withAlpha(20) : const Color(0xFFE2E8F0),
+            width: 0.8,
+          ),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(isDark ? 50 : 15),
+            blurRadius: 12,
+            offset: const Offset(0, -3),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 60,
+          child: Row(
+            children: [
+              _buildNavItem(
+                context: context,
+                ref: ref,
+                index: 0,
+                selectedIndex: currentIndex,
+                label: 'Journeys',
+                selectedIcon: Icons.luggage_rounded,
+                unselectedIcon: Icons.luggage_outlined,
+                isDark: isDark,
+              ),
+              _buildNavItem(
+                context: context,
+                ref: ref,
+                index: 1,
+                selectedIndex: currentIndex,
+                label: 'Live Trip',
+                selectedIcon: Icons.route_rounded,
+                unselectedIcon: Icons.route_outlined,
+                isDark: isDark,
+              ),
+              _buildNavItem(
+                context: context,
+                ref: ref,
+                index: 2,
+                selectedIndex: currentIndex,
+                label: 'Activity',
+                selectedIcon: Icons.bolt_rounded,
+                unselectedIcon: Icons.bolt_outlined,
+                isDark: isDark,
+                badgeCount: totalActivityUnread,
+              ),
+              _buildNavItem(
+                context: context,
+                ref: ref,
+                index: 3,
+                selectedIndex: currentIndex,
+                label: 'Memories',
+                selectedIcon: Icons.photo_library_rounded,
+                unselectedIcon: Icons.photo_library_outlined,
+                isDark: isDark,
+              ),
+              _buildNavItem(
+                context: context,
+                ref: ref,
+                index: 4,
+                selectedIndex: currentIndex,
+                label: 'Profile',
+                selectedIcon: Icons.person_rounded,
+                unselectedIcon: Icons.person_outline_rounded,
+                isDark: isDark,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavItem({
+    required BuildContext context,
+    required WidgetRef ref,
+    required int index,
+    required int selectedIndex,
+    required String label,
+    required IconData selectedIcon,
+    required IconData unselectedIcon,
+    required bool isDark,
+    int badgeCount = 0,
+  }) {
+    final isSelected = index == selectedIndex;
+    const activeColor = AppTheme.primary;
+    final inactiveColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+
+    return Expanded(
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          if (onDestinationSelected != null) {
+            onDestinationSelected!(index);
+          } else {
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            }
+            ref.read(activeMainTabProvider.notifier).state = index;
           }
-          ref.read(activeMainTabProvider.notifier).state = index;
-        }
-      },
-      backgroundColor: isDark ? AppTheme.surfaceDark : Colors.white,
-      elevation: 8,
-      indicatorColor: AppTheme.primary.withAlpha(40),
-      destinations: [
-        const NavigationDestination(
-          icon: Icon(Icons.explore_outlined),
-          selectedIcon: Icon(Icons.explore_rounded, color: AppTheme.primary),
-          label: 'Journeys',
+        },
+        splashColor: activeColor.withAlpha(20),
+        highlightColor: Colors.transparent,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Icon with optional indicator pill & badge
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+              decoration: BoxDecoration(
+                color: isSelected ? activeColor.withAlpha(26) : Colors.transparent,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.center,
+                children: [
+                  Icon(
+                    isSelected ? selectedIcon : unselectedIcon,
+                    size: 22,
+                    color: isSelected ? activeColor : inactiveColor,
+                  ),
+                  if (badgeCount > 0)
+                    Positioned(
+                      top: -4,
+                      right: -8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE11D48),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isDark ? AppTheme.surfaceDark : Colors.white,
+                            width: 1.5,
+                          ),
+                        ),
+                        constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                        child: Text(
+                          badgeCount > 99 ? '99+' : '$badgeCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 8.5,
+                            fontWeight: FontWeight.w900,
+                            height: 1,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 2),
+            // Label
+            AnimatedDefaultTextStyle(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+                color: isSelected ? activeColor : inactiveColor,
+                letterSpacing: -0.2,
+              ),
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
         ),
-        const NavigationDestination(
-          icon: Icon(Icons.navigation_outlined),
-          selectedIcon: Icon(Icons.navigation_rounded, color: AppTheme.primary),
-          label: 'Current Trip',
-        ),
-        NavigationDestination(
-          icon: Badge(
-            isLabelVisible: totalActivityUnread > 0,
-            label: Text('$totalActivityUnread', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-            child: const Icon(Icons.notifications_outlined),
-          ),
-          selectedIcon: Badge(
-            isLabelVisible: totalActivityUnread > 0,
-            label: Text('$totalActivityUnread', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-            child: const Icon(Icons.notifications_rounded, color: AppTheme.primary),
-          ),
-          label: 'Activity',
-        ),
-        const NavigationDestination(
-          icon: Icon(Icons.photo_library_outlined),
-          selectedIcon: Icon(Icons.photo_library_rounded, color: AppTheme.primary),
-          label: 'Memories',
-        ),
-        const NavigationDestination(
-          icon: Icon(Icons.account_circle_outlined),
-          selectedIcon: Icon(Icons.account_circle_rounded, color: AppTheme.primary),
-          label: 'Profile',
-        ),
-      ],
+      ),
     );
   }
 }

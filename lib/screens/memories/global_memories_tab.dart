@@ -6,6 +6,7 @@ import '../../models/memory.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/trip_provider.dart';
 import '../trip_detail/trip_detail_screen.dart';
+import '../../core/utils/page_transitions.dart';
 
 class GlobalMemoriesTab extends ConsumerStatefulWidget {
   const GlobalMemoriesTab({super.key});
@@ -120,9 +121,7 @@ class _GlobalMemoriesTabState extends ConsumerState<GlobalMemoriesTab> {
     return GestureDetector(
       onTap: () {
         if (trip != null) {
-          Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => TripDetailScreen(tripId: trip.id, initialTabIndex: 5)),
-          );
+          AppNavigator.push(context, TripDetailScreen(tripId: trip.id, initialTabIndex: 5));
         }
       },
       child: Container(

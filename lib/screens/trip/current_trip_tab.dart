@@ -13,6 +13,7 @@ import '../home/create_trip_sheet.dart';
 import '../main_scaffold.dart';
 import '../notifications/notification_center_sheet.dart';
 import '../trip_detail/trip_detail_screen.dart';
+import '../../core/utils/page_transitions.dart';
 
 class CurrentTripTab extends ConsumerStatefulWidget {
   const CurrentTripTab({super.key});
@@ -24,12 +25,11 @@ class CurrentTripTab extends ConsumerStatefulWidget {
 class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
   void _navigateToTripDetail(Trip trip, {int initialTabIndex = 0}) {
     ref.read(selectedTripIdProvider.notifier).state = trip.id;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => TripDetailScreen(
-          tripId: trip.id,
-          initialTabIndex: initialTabIndex,
-        ),
+    AppNavigator.push(
+      context,
+      TripDetailScreen(
+        tripId: trip.id,
+        initialTabIndex: initialTabIndex,
       ),
     );
   }

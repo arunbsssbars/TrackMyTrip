@@ -22,6 +22,7 @@ import '../../providers/invitation_provider.dart';
 import 'widgets/trip_invitation_card.dart';
 import '../main_scaffold.dart';
 import '../../providers/auth_provider.dart';
+import '../../core/utils/page_transitions.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -115,9 +116,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _openQRScanner(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (context) => const QrScannerScreen()),
-    );
+    AppNavigator.push(context, const QrScannerScreen());
   }
 
   void _navigateToTripDetail(Trip trip, {int initialTabIndex = 0}) {
@@ -135,12 +134,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     ref.read(selectedTripIdProvider.notifier).state = trip.id;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => TripDetailScreen(
-          tripId: trip.id,
-          initialTabIndex: initialTabIndex,
-        ),
+    AppNavigator.push(
+      context,
+      TripDetailScreen(
+        tripId: trip.id,
+        initialTabIndex: initialTabIndex,
       ),
     );
   }

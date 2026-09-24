@@ -71,7 +71,10 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
     final currentIndex = ref.watch(activeMainTabProvider);
 
     return Scaffold(
-      body: _tabs[currentIndex],
+      body: IndexedStack(
+        index: currentIndex,
+        children: _tabs,
+      ),
       bottomNavigationBar: const UniversalBottomBar(),
     );
   }

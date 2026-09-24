@@ -43,7 +43,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('Trip Tracker'), findsWidgets);
+    expect(find.text('Track My Trip'), findsWidgets);
     expect(find.text('Sign In'), findsOneWidget);
     expect(find.text('Continue with Google (Gmail)'), findsOneWidget);
   });
@@ -81,7 +81,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('Trip Tracker'), findsWidgets);
+    expect(find.text('Track My Trip'), findsWidgets);
     expect(find.text('New Trip'), findsOneWidget);
   });
 }

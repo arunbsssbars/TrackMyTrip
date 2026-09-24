@@ -16,6 +16,7 @@ import '../expense/add_expense_screen.dart';
 import '../memory/add_memory_dialog.dart';
 import '../stats/trip_analytics_screen.dart';
 import '../stoppage/add_stoppage_dialog.dart';
+import '../../core/utils/page_transitions.dart';
 import 'edit_trip_dialog.dart';
 import 'share_trip_sheet.dart';
 import 'tabs/expenses_tab.dart';
@@ -26,7 +27,6 @@ import 'tabs/timeline_tab.dart';
 import 'tabs/members_tab.dart';
 import '../../core/services/firestore_sync_service.dart';
 import '../notifications/notification_center_sheet.dart';
-import '../common/universal_bottom_bar.dart';
 import '../common/sos_badge_icon.dart';
 
 class TripDetailScreen extends ConsumerStatefulWidget {
@@ -655,8 +655,9 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
               } else if (val == 'end_trip') {
                 _showEndTripExperienceDialog(trip);
               } else if (val == 'analytics') {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (context) => TripAnalyticsScreen(tripId: trip.id)),
+                AppNavigator.push(
+                  context,
+                  TripAnalyticsScreen(tripId: trip.id),
                 );
               } else if (val == 'pdf') {
                 _exportPdf();
@@ -1006,8 +1007,9 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
             icon = Icons.add_card_rounded;
             label = 'Add Bill';
             onPressed = () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (context) => AddExpenseScreen(tripId: trip.id)),
+              AppNavigator.push(
+                context,
+                AddExpenseScreen(tripId: trip.id),
               );
             };
           } else if (index == (_tabCount - 1)) {
@@ -1080,7 +1082,6 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
           );
         },
       ),
-      bottomNavigationBar: const UniversalBottomBar(selectedIndexOverride: 0),
     );
   }
 }

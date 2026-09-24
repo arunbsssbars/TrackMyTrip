@@ -13,6 +13,7 @@ import '../../providers/invitation_provider.dart';
 import '../../providers/trip_provider.dart';
 import '../common/sos_badge_icon.dart';
 import '../trip_detail/trip_detail_screen.dart';
+import '../../core/utils/page_transitions.dart';
 
 class ActivityHubTab extends ConsumerStatefulWidget {
   const ActivityHubTab({super.key});
@@ -770,9 +771,7 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
           if (alert.tripId.isNotEmpty && alert.tripId != 'trip_general') {
             final tripExists = ref.read(tripListProvider).any((t) => t.id == alert.tripId);
             if (tripExists) {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => TripDetailScreen(tripId: alert.tripId)),
-              );
+              AppNavigator.push(context, TripDetailScreen(tripId: alert.tripId));
             }
           }
         },
