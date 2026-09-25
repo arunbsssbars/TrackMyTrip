@@ -86,6 +86,40 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
                 color: isDark ? Colors.white : AppTheme.textMainLight,
               ),
             ),
+            Consumer(builder: (context, ref, _) {
+              final imbalance = ref.watch(ledgerImbalanceProvider);
+              final isZeroDrift = imbalance.abs() < 0.01;
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: isZeroDrift ? const Color(0xFF10B981).withAlpha(20) : Colors.orange.withAlpha(25),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isZeroDrift ? const Color(0xFF10B981).withAlpha(60) : Colors.orange.withAlpha(80),
+                    width: 0.9,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isZeroDrift ? Icons.verified_rounded : Icons.info_outline_rounded,
+                      size: 12,
+                      color: isZeroDrift ? const Color(0xFF10B981) : Colors.orange,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      isZeroDrift ? 'Ledger Balanced' : 'Drift: ${CurrencyFormatter.format(imbalance, currency: widget.trip.defaultCurrency)}',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.bold,
+                        color: isZeroDrift ? const Color(0xFF10B981) : Colors.orange,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
           ],
         ),
         const SizedBox(height: 8),

@@ -38,6 +38,12 @@ class Expense {
     required this.createdAt,
   });
 
+  String? get locationName {
+    if (notes == null) return null;
+    final match = RegExp(r'📍 Location:\s*([^\n]+)').firstMatch(notes!);
+    return match?.group(1)?.trim();
+  }
+
   Expense copyWith({
     String? id,
     String? tripId,

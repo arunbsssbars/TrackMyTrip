@@ -7,6 +7,7 @@ import '../../core/utils/currency_formatter.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
+import '../common/universal_bottom_bar.dart';
 
 class TripAnalyticsScreen extends ConsumerWidget {
   final String tripId;
@@ -298,6 +299,7 @@ class TripAnalyticsScreen extends ConsumerWidget {
                 const SizedBox(height: 40),
               ],
             ),
+      bottomNavigationBar: const UniversalBottomBar(),
     );
   }
 

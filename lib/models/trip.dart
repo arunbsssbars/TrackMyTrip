@@ -46,6 +46,7 @@ class Trip {
   bool get isGroup => tripType == 'group' && !isSolo;
   bool get hasSettlements => isGroup;
   bool get isRunning => !isCompleted && !isDeleted;
+  bool get isEnded => isCompleted || status == 'completed';
   bool get isDeleted => status == 'deleted';
 
   TripMember? get currentUserMember {

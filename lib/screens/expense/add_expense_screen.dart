@@ -1,11 +1,14 @@
+import 'package:geolocator/geolocator.dart';
 import 'dart:convert';
 import 'dart:io' show File;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/services/location_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../models/expense.dart';
@@ -16,6 +19,7 @@ import '../../providers/audit_log_provider.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
+import '../stoppage/map_location_picker_dialog.dart';
 
 class AddExpenseScreen extends ConsumerStatefulWidget {
   final String tripId;
@@ -51,17 +55,18 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
   SplitType _splitType = SplitType.equal;
   String? _receiptImagePath;
 
-  // Curated sample receipts for 1-tap testing
-  static const List<String> _sampleReceipts = [
-    'https://images.unsplash.com/photo-1554415707-9e49016a3e65?w=800&q=80',
-    'https://images.unsplash.com/photo-1559526324-4b87b5e36e44?w=800&q=80',
-    'https://images.unsplash.com/photo-1550547660-d9450f859349?w=800&q=80',
-  ];
+  // Location tagging state
+  bool _attachLocation = false;
+  String? _locationName;
+  double? _latitude;
+  double? _longitude;
+  bool _isDetectingLocation = false;
 
   // Split state per member
   final Map<String, bool> _equalIncluded = {};
   final Map<String, TextEditingController> _exactControllers = {};
   final Map<String, TextEditingController> _percentControllers = {};
+  final Map<String, TextEditingController> _sharesControllers = {};
 
   @override
   void initState() {
@@ -77,10 +82,23 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
       _splitType = exp.splitType;
       _receiptImagePath = exp.receiptImagePath;
 
+      // Restore tagged location if saved in notes
+      if (exp.notes != null) {
+        final match = RegExp(r'📍 Location:\s*([^\n]+)').firstMatch(exp.notes!);
+        if (match != null) {
+          _attachLocation = true;
+          _locationName = match.group(1)?.trim();
+          // Remove the location line from the raw notes text field so user doesn't see raw markup
+          final cleanedNotes = exp.notes!.replaceAll(RegExp(r'📍 Location:[^\n]*\n?'), '').trim();
+          _notesController.text = cleanedNotes;
+        }
+      }
+
       for (final s in exp.splits) {
         _equalIncluded[s.memberId] = s.isIncluded;
         _exactControllers[s.memberId] = TextEditingController(text: s.allocatedAmount.toStringAsFixed(2));
         _percentControllers[s.memberId] = TextEditingController(text: (s.percentage ?? 0).toStringAsFixed(1));
+        _sharesControllers[s.memberId] = TextEditingController(text: (s.shares ?? 1.0).toStringAsFixed(0));
       }
     } else {
       _selectedStoppageId = widget.initialStoppageId;
@@ -107,6 +125,9 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
     for (final c in _percentControllers.values) {
       c.dispose();
     }
+    for (final c in _sharesControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -129,56 +150,152 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
         member.id,
         () => TextEditingController(text: (100 / members.length).toStringAsFixed(1)),
       );
+      _sharesControllers.putIfAbsent(member.id, () => TextEditingController(text: '1'));
     }
   }
 
   List<ExpenseSplit> _buildSplits(double totalAmount, List<TripMember> members) {
     final List<ExpenseSplit> splits = [];
+    final totalCents = (totalAmount * 100).round();
 
     switch (_splitType) {
       case SplitType.equal:
-        final includedCount = _equalIncluded.values.where((v) => v).length;
-        final perPerson = includedCount > 0 ? (totalAmount / includedCount) : 0.0;
+        final includedMembers = members.where((m) => _equalIncluded[m.id] == true).toList();
+        final includedCount = includedMembers.length;
+        if (includedCount == 0) break;
+
+        final baseCents = totalCents ~/ includedCount;
+        final remainderCents = totalCents % includedCount;
+
+        int distributedRemainder = 0;
         for (final member in members) {
           final isInc = _equalIncluded[member.id] ?? false;
-          splits.add(
-            ExpenseSplit(
-              memberId: member.id,
-              allocatedAmount: isInc ? perPerson : 0.0,
-              isIncluded: isInc,
-            ),
-          );
+          if (isInc) {
+            final allocatedCents = baseCents + (distributedRemainder < remainderCents ? 1 : 0);
+            distributedRemainder++;
+            splits.add(
+              ExpenseSplit(
+                memberId: member.id,
+                allocatedAmount: allocatedCents / 100.0,
+                isIncluded: true,
+              ),
+            );
+          } else {
+            splits.add(
+              ExpenseSplit(
+                memberId: member.id,
+                allocatedAmount: 0.0,
+                isIncluded: false,
+              ),
+            );
+          }
         }
         break;
 
       case SplitType.exact:
         for (final member in members) {
-          final val = double.tryParse(_exactControllers[member.id]?.text ?? '0') ?? 0.0;
+          final rawVal = double.tryParse(_exactControllers[member.id]?.text ?? '0') ?? 0.0;
+          final roundedVal = (rawVal * 100).round() / 100.0;
           splits.add(
             ExpenseSplit(
               memberId: member.id,
-              allocatedAmount: val,
-              isIncluded: val > 0,
+              allocatedAmount: roundedVal,
+              isIncluded: roundedVal > 0,
             ),
           );
         }
         break;
 
       case SplitType.percentage:
+        int allocatedCentsTotal = 0;
+        final memberCentsMap = <String, int>{};
+        String? largestMemberId;
+        double maxPct = -1;
+
         for (final member in members) {
           final pct = double.tryParse(_percentControllers[member.id]?.text ?? '0') ?? 0.0;
-          final val = (pct / 100.0) * totalAmount;
+          if (pct > 0) {
+            final cents = ((pct / 100.0) * totalCents).round();
+            memberCentsMap[member.id] = cents;
+            allocatedCentsTotal += cents;
+            if (pct > maxPct) {
+              maxPct = pct;
+              largestMemberId = member.id;
+            }
+          } else {
+            memberCentsMap[member.id] = 0;
+          }
+        }
+
+        // Allocate single-cent drift caused by percentage rounding to largest stakeholder
+        final diffCents = totalCents - allocatedCentsTotal;
+        if (diffCents != 0 && largestMemberId != null) {
+          memberCentsMap[largestMemberId] = (memberCentsMap[largestMemberId] ?? 0) + diffCents;
+        }
+
+        for (final member in members) {
+          final pct = double.tryParse(_percentControllers[member.id]?.text ?? '0') ?? 0.0;
+          final cents = memberCentsMap[member.id] ?? 0;
           splits.add(
             ExpenseSplit(
               memberId: member.id,
-              allocatedAmount: val,
+              allocatedAmount: cents / 100.0,
               percentage: pct,
-              isIncluded: pct > 0,
+              isIncluded: cents > 0,
             ),
           );
         }
         break;
+
       case SplitType.shares:
+        double totalShares = 0.0;
+        final sharesMap = <String, double>{};
+        String? largestShareMemberId;
+        double maxShare = -1;
+
+        for (final member in members) {
+          final s = double.tryParse(_sharesControllers[member.id]?.text ?? '0') ?? 0.0;
+          final validShares = s > 0 ? s : 0.0;
+          sharesMap[member.id] = validShares;
+          totalShares += validShares;
+          if (validShares > maxShare) {
+            maxShare = validShares;
+            largestShareMemberId = member.id;
+          }
+        }
+
+        int allocatedCentsTotal = 0;
+        final memberCentsMap = <String, int>{};
+
+        if (totalShares > 0) {
+          for (final member in members) {
+            final sh = sharesMap[member.id] ?? 0.0;
+            if (sh > 0) {
+              final cents = ((sh / totalShares) * totalCents).round();
+              memberCentsMap[member.id] = cents;
+              allocatedCentsTotal += cents;
+            } else {
+              memberCentsMap[member.id] = 0;
+            }
+          }
+          final diffCents = totalCents - allocatedCentsTotal;
+          if (diffCents != 0 && largestShareMemberId != null) {
+            memberCentsMap[largestShareMemberId] = (memberCentsMap[largestShareMemberId] ?? 0) + diffCents;
+          }
+        }
+
+        for (final member in members) {
+          final sh = sharesMap[member.id] ?? 0.0;
+          final cents = memberCentsMap[member.id] ?? 0;
+          splits.add(
+            ExpenseSplit(
+              memberId: member.id,
+              allocatedAmount: cents / 100.0,
+              shares: sh,
+              isIncluded: cents > 0,
+            ),
+          );
+        }
         break;
     }
 
@@ -225,6 +342,149 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
     }
   }
 
+  Widget _buildReceiptImage(String path) {
+    if (path.startsWith('data:image')) {
+      final base64Data = path.split(',').last;
+      return Image.memory(base64Decode(base64Data), fit: BoxFit.contain);
+    } else if (path.startsWith('http://') || path.startsWith('https://')) {
+      return Image.network(path, fit: BoxFit.contain);
+    } else if (!kIsWeb) {
+      return Image.file(File(path), fit: BoxFit.contain);
+    } else {
+      return const Center(child: Icon(Icons.receipt_long_rounded, size: 48, color: AppTheme.primary));
+    }
+  }
+
+  void _showReceiptFullscreen(BuildContext context, String path) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(
+          children: [
+            Center(
+              child: InteractiveViewer(
+                minScale: 0.8,
+                maxScale: 4.0,
+                child: _buildReceiptImage(path),
+              ),
+            ),
+            Positioned(
+              top: 40,
+              right: 16,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withAlpha(120),
+                  shape: BoxShape.circle,
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.close_rounded, color: Colors.white, size: 26),
+                  onPressed: () => Navigator.of(ctx).pop(),
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 30,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(160),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.zoom_in_rounded, color: Colors.white70, size: 16),
+                      SizedBox(width: 6),
+                      Text(
+                        'Pinch to zoom • Tap ✕ to close',
+                        style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _autoMatchStoppage(double lat, double lng) {
+    try {
+      final stoppages = ref.read(currentTripStoppagesProvider);
+      String? closestId;
+      double minDistance = double.infinity;
+      for (final s in stoppages) {
+        
+          final dist = Geolocator.distanceBetween(lat, lng, s.latitude, s.longitude);
+          if (dist <= 1500 && dist < minDistance) {
+            minDistance = dist;
+            closestId = s.id;
+          }
+      }
+      if (closestId != null) {
+        _selectedStoppageId = closestId;
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _detectCurrentLocation() async {
+    setState(() => _isDetectingLocation = true);
+    try {
+      final pos = await LocationService.getCurrentPosition();
+      if (pos != null) {
+        final details = await LocationService.reverseGeocode(pos.latitude, pos.longitude);
+        if (mounted) {
+          _autoMatchStoppage(pos.latitude, pos.longitude);
+          setState(() {
+            _latitude = pos.latitude;
+            _longitude = pos.longitude;
+            final resolved = details.placeName.trim().isNotEmpty ? details.placeName : details.address;
+            _locationName = (resolved != null && resolved.trim().isNotEmpty)
+                ? resolved.trim()
+                : 'GPS: ${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}';
+            _isDetectingLocation = false;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() => _isDetectingLocation = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not obtain current GPS position.')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isDetectingLocation = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Location error: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _pickLocationOnMap() async {
+    final result = await MapLocationPickerDialog.show(
+      context,
+      initialPosition: _latitude != null && _longitude != null ? LatLng(_latitude!, _longitude!) : null,
+    );
+    if (result != null && mounted) {
+      _autoMatchStoppage(result.latitude, result.longitude);
+      setState(() {
+        _latitude = result.latitude;
+        _longitude = result.longitude;
+        _locationName = result.placeName.isNotEmpty ? result.placeName : (result.address ?? 'Pinned Map Location');
+      });
+    }
+  }
+
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
 
@@ -240,19 +500,79 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
     if (trip == null) return;
 
     final splits = _buildSplits(totalAmount, trip.members);
+    if (!_attachLocation && widget.initialStoppageId == null) {
+      _selectedStoppageId = null;
+    }
 
-    // Validate sum for exact & percentage splits
-    if (_splitType == SplitType.exact) {
-      final sum = splits.fold<double>(0, (acc, s) => acc + s.allocatedAmount);
-      if ((sum - totalAmount).abs() > 0.05) {
+    // Strict senior-dev financial integrity validation
+    if (_splitType == SplitType.equal) {
+      final includedCount = _equalIncluded.values.where((v) => v).length;
+      if (includedCount == 0) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Sum of exact shares (${CurrencyFormatter.format(sum, currency: trip.defaultCurrency)}) must equal total (${CurrencyFormatter.format(totalAmount, currency: trip.defaultCurrency)})',
-            ),
+          const SnackBar(
+            content: Text('At least one companion must be included in the bill split.'),
+            backgroundColor: Colors.red,
           ),
         );
         return;
+      }
+    } else if (_splitType == SplitType.exact) {
+      final sum = splits.fold<double>(0, (acc, s) => acc + s.allocatedAmount);
+      final diff = sum - totalAmount;
+      if (diff.abs() > 0.01) {
+        final symbol = CurrencyFormatter.getCurrencySymbol(trip.defaultCurrency);
+        final status = diff > 0
+            ? 'over-allocated by +$symbol${diff.toStringAsFixed(2)}'
+            : 'under-allocated by -$symbol${(-diff).toStringAsFixed(2)}';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Split sum ($symbol${sum.toStringAsFixed(2)}) does not match bill total ($symbol${totalAmount.toStringAsFixed(2)}). It is $status.'),
+            backgroundColor: Colors.red[800],
+          ),
+        );
+        return;
+      }
+    } else if (_splitType == SplitType.percentage) {
+      double totalPct = 0.0;
+      for (final member in trip.members) {
+        totalPct += double.tryParse(_percentControllers[member.id]?.text ?? '0') ?? 0.0;
+      }
+      if ((totalPct - 100.0).abs() > 0.1) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Percentages must sum to exactly 100.0% (Current sum: ${totalPct.toStringAsFixed(1)}%).'),
+            backgroundColor: Colors.red[800],
+          ),
+        );
+        return;
+      }
+    } else if (_splitType == SplitType.shares) {
+      double totalShares = 0.0;
+      for (final member in trip.members) {
+        totalShares += double.tryParse(_sharesControllers[member.id]?.text ?? '0') ?? 0.0;
+      }
+      if (totalShares <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('At least one member must have shares greater than 0.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+    }
+
+    // Build notes with location tag if enabled
+    String? rawNotes = _notesController.text.trim().isNotEmpty ? _notesController.text.trim() : null;
+    String? finalNotes = rawNotes;
+    if (_attachLocation && _locationName != null && _locationName!.trim().isNotEmpty) {
+      final locTag = '📍 Location: ${_locationName!.trim()}';
+      if (finalNotes != null) {
+        if (!finalNotes.contains('📍 Location:')) {
+          finalNotes = '$finalNotes\n$locTag';
+        }
+      } else {
+        finalNotes = locTag;
       }
     }
 
@@ -272,7 +592,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
         splitType: _splitType,
         splits: splits,
         receiptImagePath: _receiptImagePath,
-        notes: _notesController.text.trim().isNotEmpty ? _notesController.text.trim() : null,
+        notes: finalNotes,
         createdAt: oldExp.createdAt,
       );
 
@@ -343,7 +663,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
         splitType: _splitType,
         splits: splits,
         receiptImagePath: _receiptImagePath,
-        notes: _notesController.text.trim().isNotEmpty ? _notesController.text.trim() : null,
+        notes: finalNotes,
         createdAt: DateTime.now(),
       );
 
@@ -372,7 +692,6 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
   Widget build(BuildContext context) {
     final isEditing = widget.initialExpense != null;
     final trip = ref.watch(currentTripProvider);
-    final stoppages = ref.watch(currentTripStoppagesProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (trip == null) {
@@ -401,55 +720,6 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            // Stoppage Anchor Selector
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withAlpha(20),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.primary.withAlpha(50)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.link_rounded, size: 16, color: AppTheme.primary),
-                      SizedBox(width: 6),
-                      Text(
-                        'Anchor to Stop:',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primary),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String?>(
-                    value: (stoppages.any((s) => s.id == _selectedStoppageId)) ? _selectedStoppageId : null,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      fillColor: Colors.white,
-                      filled: true,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    ),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('General Trip Expense (No stop)', overflow: TextOverflow.ellipsis),
-                      ),
-                      ...Map.fromEntries(stoppages.map((s) => MapEntry(s.id, s))).values.map((s) {
-                        return DropdownMenuItem<String?>(
-                          value: s.id,
-                          child: Text('📍 ${s.name} (${s.category})', overflow: TextOverflow.ellipsis),
-                        );
-                      }),
-                    ],
-                    onChanged: (val) => setState(() => _selectedStoppageId = val),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-
             // Title & Amount
             TextFormField(
               controller: _titleController,
@@ -610,6 +880,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                     label: Text('Exact ${CurrencyFormatter.getCurrencySymbol(trip.defaultCurrency)}'),
                   ),
                   const ButtonSegment(value: SplitType.percentage, label: Text('Percent %')),
+                  const ButtonSegment(value: SplitType.shares, label: Text('Shares')),
                 ],
                 selected: {_splitType},
                 onSelectionChanged: (val) {
@@ -669,9 +940,31 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                                 child: TextField(
                                   controller: _exactControllers[m.id],
                                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  onChanged: (_) => setState(() {}),
                                   decoration: InputDecoration(
                                     prefixText: '${CurrencyFormatter.getCurrencySymbol(trip.defaultCurrency)} ',
                                     contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      } else if (_splitType == SplitType.shares) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Row(
+                            children: [
+                              Expanded(child: Text(m.name, style: const TextStyle(fontWeight: FontWeight.w600))),
+                              SizedBox(
+                                width: 100,
+                                child: TextField(
+                                  controller: _sharesControllers[m.id],
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: false),
+                                  onChanged: (_) => setState(() {}),
+                                  decoration: const InputDecoration(
+                                    suffixText: 'share(s)',
+                                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                   ),
                                 ),
                               ),
@@ -690,6 +983,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                                 child: TextField(
                                   controller: _percentControllers[m.id],
                                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  onChanged: (_) => setState(() {}),
                                   decoration: const InputDecoration(
                                     suffixText: '%',
                                     contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -701,11 +995,239 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                         );
                       }
                     }),
+                    const SizedBox(height: 8),
+                    const Divider(height: 1),
+                    const SizedBox(height: 8),
+                    Builder(builder: (context) {
+                      final total = double.tryParse(_amountController.text.trim()) ?? 0.0;
+                      if (_splitType == SplitType.exact) {
+                        double allocated = 0.0;
+                        for (final m in trip.members) {
+                          allocated += double.tryParse(_exactControllers[m.id]?.text ?? '0') ?? 0.0;
+                        }
+                        final diff = allocated - total;
+                        final isBalanced = (diff).abs() < 0.01;
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Allocated: ${CurrencyFormatter.format(allocated, currency: trip.defaultCurrency)} / ${CurrencyFormatter.format(total, currency: trip.defaultCurrency)}',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.bold,
+                                color: isBalanced ? Colors.green : Colors.red,
+                              ),
+                            ),
+                            Text(
+                              isBalanced ? '✓ Balanced' : (diff > 0 ? '+${CurrencyFormatter.format(diff, currency: trip.defaultCurrency)} over' : '-${CurrencyFormatter.format(-diff, currency: trip.defaultCurrency)} remaining'),
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: isBalanced ? Colors.green : Colors.red,
+                              ),
+                            ),
+                          ],
+                        );
+                      } else if (_splitType == SplitType.percentage) {
+                        double totalPct = 0.0;
+                        for (final m in trip.members) {
+                          totalPct += double.tryParse(_percentControllers[m.id]?.text ?? '0') ?? 0.0;
+                        }
+                        final isBalanced = (totalPct - 100.0).abs() < 0.1;
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Total: ${totalPct.toStringAsFixed(1)}% / 100.0%',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.bold,
+                                color: isBalanced ? Colors.green : Colors.orange[800],
+                              ),
+                            ),
+                            Text(
+                              isBalanced ? '✓ 100% Allocated' : '${(100.0 - totalPct).toStringAsFixed(1)}% remaining',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: isBalanced ? Colors.green : Colors.orange[800],
+                              ),
+                            ),
+                          ],
+                        );
+                      } else if (_splitType == SplitType.shares) {
+                        double totalShares = 0.0;
+                        for (final m in trip.members) {
+                          totalShares += double.tryParse(_sharesControllers[m.id]?.text ?? '0') ?? 0.0;
+                        }
+                        final perShare = totalShares > 0 ? (total / totalShares) : 0.0;
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Total Shares: ${totalShares.toStringAsFixed(0)}',
+                              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                            ),
+                            Text(
+                              '${CurrencyFormatter.format(perShare, currency: trip.defaultCurrency)} / share',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                            ),
+                          ],
+                        );
+                      } else {
+                        final incCount = _equalIncluded.values.where((v) => v).length;
+                        final perPerson = incCount > 0 ? (total / incCount) : 0.0;
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Splitting among $incCount member${incCount == 1 ? "" : "s"}',
+                              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                            ),
+                            Text(
+                              '${CurrencyFormatter.format(perPerson, currency: trip.defaultCurrency)} each',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                            ),
+                          ],
+                        );
+                      }
+                    }),
                   ],
                 ),
               ),
               const SizedBox(height: 20),
             ],
+
+            // Location Tagging Section (Toggle)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: _attachLocation ? const Color(0xFF0EA5E9).withAlpha(120) : Colors.grey.withAlpha(50),
+                  width: _attachLocation ? 1.5 : 1.0,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.place_rounded,
+                            size: 18,
+                            color: _attachLocation ? const Color(0xFF0EA5E9) : AppTheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Attach Location (GPS / Map)',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                        ],
+                      ),
+                      Switch(
+                        value: _attachLocation,
+                        activeColor: const Color(0xFF0EA5E9),
+                        onChanged: (val) {
+                          setState(() {
+                            _attachLocation = val;
+                            if (val && _locationName == null) {
+                              _detectCurrentLocation();
+                            }
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                  if (_attachLocation) ...[
+                    const SizedBox(height: 10),
+                    if (_locationName != null && _locationName!.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0EA5E9).withAlpha(18),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFF0EA5E9).withAlpha(60)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.location_on_rounded, color: Color(0xFF0EA5E9), size: 20),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _locationName!,
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  if (_latitude != null && _longitude != null)
+                                    Text(
+                                      'GPS: ${_latitude!.toStringAsFixed(4)}, ${_longitude!.toStringAsFixed(4)}',
+                                      style: TextStyle(fontSize: 10.5, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close_rounded, size: 18, color: Colors.grey),
+                              onPressed: () => setState(() {
+                                _locationName = null;
+                                _latitude = null;
+                                _longitude = null;
+                              }),
+                              tooltip: 'Clear location',
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _isDetectingLocation ? null : _detectCurrentLocation,
+                            icon: _isDetectingLocation
+                                ? const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.my_location_rounded, size: 16),
+                            label: Text(
+                              _isDetectingLocation ? 'Detecting...' : 'Current GPS',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _pickLocationOnMap,
+                            icon: const Icon(Icons.map_rounded, size: 16),
+                            label: const Text('Pick on Map', style: TextStyle(fontSize: 12)),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
 
             // Optional Bill / Receipt Upload Section
             Container(
@@ -733,7 +1255,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                           ),
                           const SizedBox(width: 8),
                           const Text(
-                            'Attach Bill / Receipt',
+                            'Attach Bill / Receipt Photo',
                             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                           ),
                         ],
@@ -761,12 +1283,29 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                   if (_receiptImagePath != null) ...[
                     Row(
                       children: [
-                        ClipRRect(
+                        InkWell(
+                          onTap: () => _showReceiptFullscreen(context, _receiptImagePath!),
                           borderRadius: BorderRadius.circular(8),
-                          child: SizedBox(
-                            width: 70,
-                            height: 70,
-                            child: _buildReceiptThumbnail(_receiptImagePath!),
+                          child: Stack(
+                            alignment: Alignment.bottomRight,
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: SizedBox(
+                                  width: 72,
+                                  height: 72,
+                                  child: _buildReceiptThumbnail(_receiptImagePath!),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.all(3),
+                                decoration: const BoxDecoration(
+                                  color: Colors.black54,
+                                  borderRadius: BorderRadius.only(topLeft: Radius.circular(6)),
+                                ),
+                                child: const Icon(Icons.zoom_in_rounded, size: 14, color: Colors.white),
+                              ),
+                            ],
                           ),
                         ),
                         const SizedBox(width: 14),
@@ -775,12 +1314,12 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const Text(
-                                'Bill image ready',
+                                'Bill photo attached',
                                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.green),
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: 3),
                               Text(
-                                'Will be shared with companions',
+                                'Tap photo thumbnail to zoom',
                                 style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : Colors.grey[600]),
                               ),
                               const SizedBox(height: 6),
@@ -821,7 +1360,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                           child: OutlinedButton.icon(
                             onPressed: () => _pickReceiptImage(ImageSource.camera),
                             icon: const Icon(Icons.camera_alt_rounded, size: 16),
-                            label: const Text('Camera', style: TextStyle(fontSize: 12)),
+                            label: const Text('Take Photo', style: TextStyle(fontSize: 12)),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 10),
                             ),
@@ -832,45 +1371,13 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                           child: OutlinedButton.icon(
                             onPressed: () => _pickReceiptImage(ImageSource.gallery),
                             icon: const Icon(Icons.photo_library_rounded, size: 16),
-                            label: const Text('Gallery', style: TextStyle(fontSize: 12)),
+                            label: const Text('Choose Gallery', style: TextStyle(fontSize: 12)),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 10),
                             ),
                           ),
                         ),
                       ],
-                    ),
-                    const SizedBox(height: 10),
-                    const Text(
-                      'Or pick sample bill:',
-                      style: TextStyle(fontSize: 11, color: Colors.grey),
-                    ),
-                    const SizedBox(height: 6),
-                    SizedBox(
-                      height: 48,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: _sampleReceipts.length,
-                        itemBuilder: (context, index) {
-                          final sample = _sampleReceipts[index];
-                          return GestureDetector(
-                            onTap: () => setState(() => _receiptImagePath = sample),
-                            child: Container(
-                              margin: const EdgeInsets.only(right: 8),
-                              width: 48,
-                              height: 48,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: AppTheme.primary.withAlpha(80)),
-                              ),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(7),
-                                child: Image.network(sample, fit: BoxFit.cover),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
                     ),
                   ],
                 ],

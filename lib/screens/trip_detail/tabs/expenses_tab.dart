@@ -432,11 +432,14 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                           children: [
                             const Icon(Icons.place_rounded, size: 16, color: Colors.teal),
                             const SizedBox(width: 8),
-                            const Text('Stoppage:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            const Text('Location / Stoppage:', style: TextStyle(fontSize: 12, color: Colors.grey)),
                             const Spacer(),
-                            Text(
-                              matchedStop != null ? matchedStop.name : 'General Trip',
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                            Flexible(
+                              child: Text(
+                                matchedStop != null ? matchedStop.name : (expense.locationName ?? 'General Trip'),
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           ],
                         ),
@@ -1144,6 +1147,37 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                                                       ],
                                                     ),
                                                   ),
+                                                ),
+                                              ),
+                                            )
+                                          else if (expense.locationName != null && expense.locationName!.isNotEmpty)
+                                            Padding(
+                                              padding: const EdgeInsets.only(right: 6),
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                                decoration: BoxDecoration(
+                                                  color: AppTheme.secondary.withAlpha(isDark ? 28 : 18),
+                                                  borderRadius: BorderRadius.circular(7),
+                                                  border: Border.all(color: AppTheme.secondary.withAlpha(isDark ? 80 : 50), width: 0.9),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    const Icon(Icons.place_rounded, size: 12, color: AppTheme.secondary),
+                                                    const SizedBox(width: 3.5),
+                                                    Flexible(
+                                                      child: Text(
+                                                        expense.locationName!,
+                                                        style: const TextStyle(
+                                                          fontSize: 10.5,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: AppTheme.secondary,
+                                                        ),
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow.ellipsis,
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
                                               ),
                                             )

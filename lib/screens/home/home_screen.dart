@@ -12,17 +12,14 @@ import '../../providers/memory_provider.dart';
 import '../../providers/settlement_provider.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
-import '../trip_detail/trip_detail_screen.dart';
 import 'create_trip_sheet.dart';
 import 'join_trip_sheet.dart';
-import 'qr_scanner_screen.dart';
 import '../common/sync_status_badge.dart';
+import '../common/sos_badge_icon.dart';
 import '../notifications/notification_center_sheet.dart';
 import '../../providers/invitation_provider.dart';
 import 'widgets/trip_invitation_card.dart';
 import '../main_scaffold.dart';
-import '../../providers/auth_provider.dart';
-import '../../core/utils/page_transitions.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -115,10 +112,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  void _openQRScanner(BuildContext context) {
-    AppNavigator.push(context, const QrScannerScreen());
-  }
-
   void _navigateToTripDetail(Trip trip, {int initialTabIndex = 0}) {
     final localTrip = ref.read(localStorageServiceProvider).getTrip(trip.id);
     if (localTrip == null || localTrip.isDeleted) {
@@ -133,14 +126,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       return;
     }
 
+    // Senior Dev Unified Cockpit Architecture (Req 8):
+    // Directly activate the trip and smoothly switch to the Current Trip Cockpit (Tab 1)
     ref.read(selectedTripIdProvider.notifier).state = trip.id;
-    AppNavigator.push(
-      context,
-      TripDetailScreen(
-        tripId: trip.id,
-        initialTabIndex: initialTabIndex,
-      ),
-    );
+    ref.read(activeMainTabProvider.notifier).state = 1;
   }
 
   @override
@@ -219,7 +208,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             pinned: true,
             floating: false,
             toolbarHeight: 60,
-            titleSpacing: 14,
+            titleSpacing: 10,
             backgroundColor: isDark ? AppTheme.surfaceDark : Colors.white,
             elevation: 0.5,
             title: Row(
@@ -234,18 +223,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ),
                   child: const Icon(Icons.explore_rounded, color: AppTheme.primary, size: 18),
                 ),
-                const SizedBox(width: 7),
-                Flexible(
-                  child: Text(
-                    'Track My Trip',
-                    style: TextStyle(
-                      color: isDark ? Colors.white : AppTheme.textMainLight,
-                      fontSize: 15.5,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.3,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                const SizedBox(width: 8),
+                Text(
+                  'Track My Trip',
+                  style: TextStyle(
+                    color: isDark ? Colors.white : AppTheme.textMainLight,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.3,
                   ),
                 ),
               ],
@@ -256,72 +241,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 child: SyncStatusBadge(),
               ),
               IconButton(
-                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 4),
                 iconSize: 22,
                 icon: const Icon(Icons.add_location_alt_rounded, color: AppTheme.primary),
                 tooltip: 'Join Journey (Code or QR)',
                 onPressed: () => _openJoinTripSheet(context),
               ),
-              Consumer(
-                builder: (context, ref, _) {
-                  return IconButton(
-                    padding: EdgeInsets.zero,
-                    iconSize: 21,
-                    icon: const Icon(Icons.sos_rounded, color: Colors.red),
-                    tooltip: 'Emergency SOS & Safety',
-                    onPressed: () => NotificationCenterSheet.show(context),
-                  );
-                },
-              ),
-              PopupMenuButton<String>(
-                padding: EdgeInsets.zero,
-                iconSize: 21,
-                icon: const Icon(Icons.more_vert_rounded),
-                tooltip: 'App Options',
-                position: PopupMenuPosition.under,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                onSelected: (val) async {
-                  if (val == 'qr') {
-                    _openQRScanner(context);
-                  } else if (val == 'code') {
-                    _openJoinTripSheet(context);
-                  } else if (val == 'signout') {
-                    await ref.read(authNotifierProvider.notifier).logout();
-                  }
-                },
-                itemBuilder: (ctx) => [
-                  const PopupMenuItem(
-                    value: 'code',
-                    child: Row(
-                      children: [
-                        Icon(Icons.keyboard_alt_outlined, size: 20, color: AppTheme.primary),
-                        SizedBox(width: 10),
-                        Text('Enter 6-Digit Share Code', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'qr',
-                    child: Row(
-                      children: [
-                        Icon(Icons.qr_code_scanner_rounded, size: 20, color: AppTheme.primary),
-                        SizedBox(width: 10),
-                        Text('Scan Trip QR Code', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuDivider(height: 8),
-                  const PopupMenuItem(
-                    value: 'signout',
-                    child: Row(
-                      children: [
-                        Icon(Icons.logout_rounded, size: 20, color: Colors.red),
-                        SizedBox(width: 10),
-                        Text('Sign Out', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.red)),
-                      ],
-                    ),
-                  ),
-                ],
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: SosBadgeIcon(
+                  size: 30,
+                  tooltip: 'Emergency SOS & Safety Alerts',
+                  onTap: () => NotificationCenterSheet.show(context),
+                ),
               ),
               const SizedBox(width: 4),
             ],
@@ -1094,79 +1027,109 @@ class _TripCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           Expanded(
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              physics: const NeverScrollableScrollPhysics(),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
+                            child: Wrap(
+                              spacing: 5,
+                              runSpacing: 4,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                // Trip Mode Badge
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: modeColor.withAlpha(20),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: modeColor.withAlpha(50)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(modeIcon, size: 11, color: modeColor),
+                                      const SizedBox(width: 3.5),
+                                      Text(
+                                        modeLabel,
+                                        style: TextStyle(
+                                          color: modeColor,
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+
+                                // Persistent Trip Ended Badge
+                                if (trip.isCompleted)
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 3),
                                     decoration: BoxDecoration(
-                                      color: modeColor.withAlpha(20),
+                                      color: const Color(0xFF64748B).withAlpha(isDark ? 40 : 25),
                                       borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: modeColor.withAlpha(50)),
+                                      border: Border.all(color: const Color(0xFF64748B).withAlpha(isDark ? 90 : 60)),
                                     ),
-                                    child: Row(
+                                    child: const Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Icon(modeIcon, size: 11, color: modeColor),
-                                        const SizedBox(width: 4),
+                                        Icon(Icons.flag_rounded, size: 10.5, color: Color(0xFF64748B)),
+                                        SizedBox(width: 3),
                                         Text(
-                                          modeLabel,
+                                          'ENDED',
                                           style: TextStyle(
-                                            color: modeColor,
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w800,
+                                            color: Color(0xFF64748B),
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: 0.2,
                                           ),
                                         ),
                                       ],
                                     ),
                                   ),
-                                  const SizedBox(width: 6),
-                                  if (trip.isCompleted)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey.withAlpha(20),
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(color: Colors.grey.withAlpha(40)),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(Icons.check_circle_rounded, size: 11, color: Colors.grey),
-                                          const SizedBox(width: 3),
-                                          Text(
-                                            trip.rating != null ? '⭐ ${trip.rating!.toStringAsFixed(1)}' : 'ENDED',
-                                            style: const TextStyle(
-                                              color: Colors.grey,
-                                              fontSize: 9.5,
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  if (trip.isCompleted) const SizedBox(width: 6),
+
+                                // Distinct Rating Badge (Never replaces ENDED badge)
+                                if (trip.rating != null)
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                                     decoration: BoxDecoration(
-                                      color: isDark ? Colors.black26 : const Color(0xFFF1F5F9),
+                                      color: Colors.amber.withAlpha(isDark ? 35 : 22),
                                       borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1)),
+                                      border: Border.all(color: Colors.amber.withAlpha(isDark ? 90 : 60)),
                                     ),
-                                    child: Text(
-                                      roomCode,
-                                      style: TextStyle(
-                                        color: isDark ? Colors.grey[400] : const Color(0xFF475569),
-                                        fontSize: 9.5,
-                                        fontWeight: FontWeight.w800,
-                                      ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.star_rounded, size: 11, color: Colors.amber),
+                                        const SizedBox(width: 2.5),
+                                        Text(
+                                          trip.rating!.toStringAsFixed(1),
+                                          style: TextStyle(
+                                            color: isDark ? Colors.amber[300] : Colors.amber[900],
+                                            fontSize: 9.5,
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                ],
-                              ),
+
+                                // Trip ID / Share Room Code Badge
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: isDark ? Colors.black26 : const Color(0xFFF1F5F9),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1)),
+                                  ),
+                                  child: Text(
+                                    roomCode,
+                                    style: TextStyle(
+                                      color: isDark ? Colors.grey[400] : const Color(0xFF475569),
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                           const SizedBox(width: 8),

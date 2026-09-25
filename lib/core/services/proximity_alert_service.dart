@@ -205,7 +205,7 @@ class ProximityAlertService extends ChangeNotifier {
   }
 
   /// Ingests an incoming alert received from a companion over WebSocket or Firestore
-  Future<void> ingestRemoteAlert(ProximityAlert alert) async {
+  Future<void> ingestRemoteAlert(ProximityAlert alert, {bool isHistorical = false}) async {
     if (_alerts.any((a) => a.id == alert.id)) return; // Prevent duplicate
 
     final currentUser = UserService.getCurrentUser();
@@ -224,10 +224,20 @@ class ProximityAlertService extends ChangeNotifier {
       }
     }
 
+    // Check persistent read state: if user already marked this alert read, maintain read state!
+    if (_storage.isAlertRead(alert.id)) {
+      alert = alert.copyWith(isRead: true);
+    }
+
     _alerts.insert(0, alert);
     await _storage.addAlert(alert);
-    if (_inAppBannersEnabled || alert.urgency == AlertUrgency.critical) {
-      _bannerController.add(alert);
+
+    // Suppress notification banners for historical snapshots, stale alerts, or already-read alerts!
+    final isStale = DateTime.now().difference(alert.timestamp).inMinutes > 2;
+    if (!isHistorical && !isStale && !alert.isRead) {
+      if (_inAppBannersEnabled || alert.urgency == AlertUrgency.critical) {
+        _bannerController.add(alert);
+      }
     }
     notifyListeners();
   }
@@ -320,7 +330,7 @@ class ProximityAlertService extends ChangeNotifier {
 
   Future<void> markAllAsRead() async {
     _alerts = _alerts.map((a) => a.copyWith(isRead: true)).toList();
-    await _storage.saveAllAlerts(_alerts);
+    await _storage.markAllAlertsAsRead();
     notifyListeners();
   }
 

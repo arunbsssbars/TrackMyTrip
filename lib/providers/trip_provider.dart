@@ -5,6 +5,7 @@ import '../core/services/firestore_sync_service.dart';
 import '../core/services/local_storage_service.dart';
 import '../core/services/location_service.dart';
 import '../core/services/realtime_sync_service.dart';
+import '../core/services/tombstone_service.dart';
 import '../core/services/trip_share_service.dart';
 import '../models/auth_user.dart';
 import '../models/trip.dart';
@@ -50,6 +51,7 @@ class TripNotifier extends StateNotifier<List<Trip>> {
     final filtered = <Trip>[];
     final seenIds = <String>{};
     for (final t in allTrips) {
+      if (TombstoneService.isTombstoned(t.id)) continue;
       if (seenIds.contains(t.id)) continue;
       final isCreator = t.createdByMemberId == userId;
       final isMember = t.members.any((m) =>
@@ -170,6 +172,7 @@ class TripNotifier extends StateNotifier<List<Trip>> {
     final effectiveTrip = (trip.shareCode == resolvedCode)
         ? trip
         : trip.copyWith(shareCode: resolvedCode);
+    if (TombstoneService.isTombstoned(effectiveTrip.id)) return;
     CloudTripSyncService.registerRoomCode(effectiveTrip.id, resolvedCode);
 
     // Prevent duplicate trip addition within rapid succession (e.g. double-tap)
@@ -200,6 +203,7 @@ class TripNotifier extends StateNotifier<List<Trip>> {
   }
 
   Future<void> updateTrip(Trip updatedTrip) async {
+    if (TombstoneService.isTombstoned(updatedTrip.id)) return;
     state = [
       for (final trip in state)
         if (trip.id == updatedTrip.id) updatedTrip else trip
@@ -224,6 +228,9 @@ class TripNotifier extends StateNotifier<List<Trip>> {
   }
 
   Future<void> deleteTrip(String tripId) async {
+    // 0. Mark tombstone FIRST in dual-layer persistent cache
+    await TombstoneService.markTombstoned(tripId);
+
     final trip = state.where((t) => t.id == tripId).firstOrNull;
     final authUser = _ref.read(authNotifierProvider).valueOrNull;
     final currentUid = authUser?.id;
@@ -322,6 +329,7 @@ class TripNotifier extends StateNotifier<List<Trip>> {
   }
 
   Future<void> deleteTripLocally(String tripId) async {
+    await TombstoneService.markTombstoned(tripId);
     CloudTripSyncService.stopLiveSync(tripId);
     try {
       _ref.read(realtimeSyncServiceProvider).disconnect();

@@ -21,6 +21,7 @@ import '../../providers/trip_provider.dart';
 import 'cloud_trip_sync_service.dart';
 import 'live_companion_tracker_service.dart';
 import 'proximity_alert_service.dart';
+import 'tombstone_service.dart';
 import 'trip_share_service.dart';
 import 'user_service.dart';
 
@@ -97,6 +98,11 @@ class FirestoreSyncService {
         final doc = change.doc;
         final tripId = doc.id;
         final data = doc.data();
+
+        if (TombstoneService.isTombstoned(tripId)) {
+          _ref.read(tripListProvider.notifier).deleteTripLocally(tripId);
+          return;
+        }
 
         if (change.type == DocumentChangeType.removed) {
           _ref.read(tripListProvider.notifier).deleteTripLocally(tripId);
@@ -183,6 +189,7 @@ class FirestoreSyncService {
   /// If already listening to a different trip, the old listeners are torn down
   /// first. Calling with the same [tripId] twice is a no-op.
   void connectTripRoom(String tripId) {
+    if (tripId.isEmpty || TombstoneService.isTombstoned(tripId)) return;
     if (_activeTripId == tripId) return;
     disconnectAll();
     _activeTripId = tripId;
@@ -219,8 +226,18 @@ class FirestoreSyncService {
   // --------------------------------------------------------------------------
 
   void _subscribeTripDoc(String tripId) {
+    if (TombstoneService.isTombstoned(tripId)) {
+      disconnectAll();
+      _ref.read(tripListProvider.notifier).deleteTripLocally(tripId);
+      return;
+    }
     final path = 'trip_$tripId';
     _docListeners[path] = _db.collection('trips').doc(tripId).snapshots().listen((snap) {
+      if (TombstoneService.isTombstoned(tripId)) {
+        disconnectAll();
+        _ref.read(tripListProvider.notifier).deleteTripLocally(tripId);
+        return;
+      }
       if (!snap.exists || snap.data() == null) {
         disconnectAll();
         _ref.read(tripListProvider.notifier).deleteTripLocally(tripId);
@@ -255,6 +272,7 @@ class FirestoreSyncService {
   // --------------------------------------------------------------------------
 
   void _subscribeStoppages(String tripId) {
+    if (TombstoneService.isTombstoned(tripId)) return;
     final path = 'stoppages_$tripId';
     _listeners[path] = _db
         .collection('trips')
@@ -294,6 +312,7 @@ class FirestoreSyncService {
   // --------------------------------------------------------------------------
 
   void _subscribeExpenses(String tripId) {
+    if (TombstoneService.isTombstoned(tripId)) return;
     final path = 'expenses_$tripId';
     _listeners[path] = _db
         .collection('trips')
@@ -333,6 +352,7 @@ class FirestoreSyncService {
   // --------------------------------------------------------------------------
 
   void _subscribeMemories(String tripId) {
+    if (TombstoneService.isTombstoned(tripId)) return;
     final path = 'memories_$tripId';
     _listeners[path] = _db
         .collection('trips')
@@ -372,6 +392,7 @@ class FirestoreSyncService {
   // --------------------------------------------------------------------------
 
   void _subscribeAuditLogs(String tripId) {
+    if (TombstoneService.isTombstoned(tripId)) return;
     final path = 'audit_logs_$tripId';
     _listeners[path] = _db
         .collection('trips')
@@ -402,7 +423,9 @@ class FirestoreSyncService {
   // --------------------------------------------------------------------------
 
   void _subscribeProximityAlerts(String tripId) {
+    if (TombstoneService.isTombstoned(tripId)) return;
     final path = 'alerts_$tripId';
+    final subscriptionStartTime = DateTime.now();
     _listeners[path] = _db
         .collection('trips')
         .doc(tripId)
@@ -416,7 +439,10 @@ class FirestoreSyncService {
           final data = change.doc.data();
           if (data == null) continue;
           final alert = ProximityAlert.fromJson({...data, 'id': change.doc.id});
-          _ref.read(proximityAlertServiceProvider).ingestRemoteAlert(alert);
+          // Historical if alert was created before subscription attached or is older than 2 minutes
+          final isHistorical = alert.timestamp.isBefore(subscriptionStartTime.subtract(const Duration(seconds: 15))) ||
+              DateTime.now().difference(alert.timestamp).inMinutes > 2;
+          _ref.read(proximityAlertServiceProvider).ingestRemoteAlert(alert, isHistorical: isHistorical);
         } catch (e) {
           if (kDebugMode) debugPrint('[FirestoreSyncService] Alert parse error: $e');
         }
@@ -431,6 +457,7 @@ class FirestoreSyncService {
   // --------------------------------------------------------------------------
 
   void _subscribeCompanionLocations(String tripId) {
+    if (TombstoneService.isTombstoned(tripId)) return;
     final path = 'members_$tripId';
     _listeners[path] = _db
         .collection('trips')
@@ -520,7 +547,7 @@ class FirestoreSyncService {
   /// Uses [SetOptions(merge: true)] so partial updates (e.g. departed-at
   /// timestamp) do not clobber unrelated fields.
   Future<void> pushStoppage(Stoppage stoppage) async {
-    if (stoppage.tripId.isEmpty) return;
+    if (stoppage.tripId.isEmpty || TombstoneService.isTombstoned(stoppage.tripId)) return;
     try {
       await _db
           .collection('trips')
@@ -557,7 +584,7 @@ class FirestoreSyncService {
 
   /// Writes [expense] to Firestore.
   Future<void> pushExpense(Expense expense) async {
-    if (expense.tripId.isEmpty) return;
+    if (expense.tripId.isEmpty || TombstoneService.isTombstoned(expense.tripId)) return;
     try {
       await _db
           .collection('trips')
@@ -594,7 +621,7 @@ class FirestoreSyncService {
 
   /// Writes [memory] to Firestore.
   Future<void> pushMemory(Memory memory) async {
-    if (memory.tripId.isEmpty) return;
+    if (memory.tripId.isEmpty || TombstoneService.isTombstoned(memory.tripId)) return;
     try {
       await _db
           .collection('trips')
@@ -616,7 +643,7 @@ class FirestoreSyncService {
 
   /// Appends an [auditLog] entry to Firestore.
   Future<void> pushAuditLog(TripAuditLog auditLog) async {
-    if (auditLog.tripId.isEmpty) return;
+    if (auditLog.tripId.isEmpty || TombstoneService.isTombstoned(auditLog.tripId)) return;
     try {
       await _db
           .collection('trips')
@@ -639,7 +666,7 @@ class FirestoreSyncService {
   /// Broadcasts [alert] (SOS, proximity warning, stray alert) to all
   /// companions via Firestore.
   Future<void> pushProximityAlert(ProximityAlert alert) async {
-    if (alert.tripId.isEmpty) return;
+    if (alert.tripId.isEmpty || TombstoneService.isTombstoned(alert.tripId)) return;
     try {
       await _db
           .collection('trips')
@@ -661,6 +688,7 @@ class FirestoreSyncService {
 
   /// Creates or updates the top-level trip document in Firestore.
   Future<void> pushTrip(Trip trip) async {
+    if (trip.id.isEmpty || TombstoneService.isTombstoned(trip.id)) return;
     try {
       String? authUid;
       try {
@@ -681,14 +709,54 @@ class FirestoreSyncService {
     }
   }
 
-  /// Soft-deletes a trip in Firestore
+  /// Permanently cascades deletion of a trip from Firestore:
+  /// Writes to persistent tombstones collection, clears all subcollections,
+  /// removes live room doc, and deletes the trip document.
   Future<void> markTripDeleted(String tripId) async {
     try {
+      // 1. Write persistent cloud tombstone to stop companions from resurrecting
+      await _db.collection('deleted_trips_tombstones').doc(tripId).set({
+        'tripId': tripId,
+        'status': 'deleted',
+        'deletedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // 2. Mark trip doc as deleted first so any active listeners know immediately
       await _db.collection('trips').doc(tripId).set({
         'status': 'deleted',
         'isDeleted': true,
         'deletedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+
+      // 3. Purge subcollections in Firestore
+      final subcollections = [
+        'stoppages',
+        'expenses',
+        'memories',
+        'settlements',
+        'audit_logs',
+        'proximity_alerts',
+        'member_locations',
+        'invitations',
+      ];
+      for (final sub in subcollections) {
+        try {
+          final snap = await _db.collection('trips').doc(tripId).collection(sub).get();
+          for (final doc in snap.docs) {
+            await doc.reference.delete();
+          }
+        } catch (_) {}
+      }
+
+      // 4. Purge trip_rooms if exists
+      try {
+        await _db.collection('trip_rooms').doc(tripId).delete();
+      } catch (_) {}
+
+      // 5. Finally, permanently delete the trip doc
+      try {
+        await _db.collection('trips').doc(tripId).delete();
+      } catch (_) {}
     } catch (e) {
       if (kDebugMode) debugPrint('[FirestoreSyncService] markTripDeleted error: $e');
     }
@@ -700,6 +768,9 @@ class FirestoreSyncService {
     String? userId,
     String? email,
   }) async {
+    if (TombstoneService.isTombstoned(tripId)) {
+      return true;
+    }
     try {
       final doc = await _db.collection('trips').doc(tripId).get();
       if (!doc.exists || doc.data() == null) {
@@ -781,11 +852,12 @@ class FirestoreSyncService {
           .where('creatorId', isEqualTo: userId)
           .get();
       for (final doc in creatorQuery.docs) {
+        if (TombstoneService.isTombstoned(doc.id)) continue;
         try {
           final data = doc.data();
           if (data['status'] == 'deleted' || data['isDeleted'] == true) continue;
           final trip = Trip.fromJson(data);
-          if (trip.isDeleted) continue;
+          if (trip.isDeleted || TombstoneService.isTombstoned(trip.id)) continue;
           final pkg = await _fetchTripPackage(trip);
           results[trip.id] = pkg;
         } catch (_) {}
@@ -898,6 +970,7 @@ class FirestoreSyncService {
 
   /// Fetches a specific trip package by ID directly from Cloud Firestore
   Future<TripPackage?> fetchTripById(String tripId) async {
+    if (TombstoneService.isTombstoned(tripId)) return null;
     try {
       final doc = await _db.collection('trips').doc(tripId).get();
       if (doc.exists && doc.data() != null) {
@@ -983,7 +1056,7 @@ class FirestoreSyncService {
     double speedKmh = 0.0,
     double heading = 0.0,
   }) async {
-    if (tripId.isEmpty || memberId.isEmpty) return;
+    if (tripId.isEmpty || memberId.isEmpty || TombstoneService.isTombstoned(tripId)) return;
 
     final now = DateTime.now();
     if (_lastBroadcastLat != null &&

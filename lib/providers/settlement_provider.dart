@@ -129,7 +129,22 @@ final tripNetBalancesProvider = Provider<Map<String, double>>((ref) {
     balances[settlement.receiverMemberId] = (balances[settlement.receiverMemberId] ?? 0.0) - settlement.amount;
   }
 
-  return balances;
+  // Round each balance to exact cents to eliminate IEEE 754 floating point dust
+  final Map<String, double> roundedBalances = {};
+  balances.forEach((memberId, bal) {
+    final rounded = double.parse(bal.toStringAsFixed(2));
+    roundedBalances[memberId] = rounded.abs() < 0.001 ? 0.0 : rounded;
+  });
+
+  return roundedBalances;
+});
+
+/// Verifies the zero-sum ledger invariant: sum(netBalances) == 0.00
+final ledgerImbalanceProvider = Provider<double>((ref) {
+  final balances = ref.watch(tripNetBalancesProvider);
+  if (balances.isEmpty) return 0.0;
+  final sum = balances.values.fold<double>(0.0, (acc, b) => acc + b);
+  return double.parse(sum.toStringAsFixed(2));
 });
 
 /// Computes the minimal number of direct transfers to settle all trip debts

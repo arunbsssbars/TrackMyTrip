@@ -337,8 +337,8 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
           inv.inviterName.toLowerCase().contains(searchQuery);
     }).toList();
 
-    // Show pending invites in "All" (0) and "Invitations" (1)
-    if ((selectedFilter == 0 || selectedFilter == 1) && filteredInvites.isNotEmpty) {
+    // Show pending invites exclusively under the second filter tab ("Invitations", index 1)
+    if (selectedFilter == 1 && filteredInvites.isNotEmpty) {
       items.add(_PendingInvitesHeaderItem(filteredInvites.length));
       for (final inv in filteredInvites) {
         items.add(_PendingInviteCardItem(inv));

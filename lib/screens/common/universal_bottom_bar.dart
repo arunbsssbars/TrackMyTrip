@@ -45,7 +45,7 @@ class UniversalBottomBar extends ConsumerWidget {
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 60,
+          height: 54,
           child: Row(
             children: [
               _buildNavItem(
@@ -53,9 +53,9 @@ class UniversalBottomBar extends ConsumerWidget {
                 ref: ref,
                 index: 0,
                 selectedIndex: currentIndex,
-                label: 'Journeys',
-                selectedIcon: Icons.luggage_rounded,
-                unselectedIcon: Icons.luggage_outlined,
+                tooltip: 'Journeys Dashboard',
+                selectedIcon: Icons.dashboard_rounded,
+                unselectedIcon: Icons.dashboard_outlined,
                 isDark: isDark,
               ),
               _buildNavItem(
@@ -63,9 +63,9 @@ class UniversalBottomBar extends ConsumerWidget {
                 ref: ref,
                 index: 1,
                 selectedIndex: currentIndex,
-                label: 'Live Trip',
-                selectedIcon: Icons.route_rounded,
-                unselectedIcon: Icons.route_outlined,
+                tooltip: 'Current Trip',
+                selectedIcon: Icons.explore_rounded,
+                unselectedIcon: Icons.explore_outlined,
                 isDark: isDark,
               ),
               _buildNavItem(
@@ -73,7 +73,7 @@ class UniversalBottomBar extends ConsumerWidget {
                 ref: ref,
                 index: 2,
                 selectedIndex: currentIndex,
-                label: 'Activity',
+                tooltip: 'Activity Hub',
                 selectedIcon: Icons.bolt_rounded,
                 unselectedIcon: Icons.bolt_outlined,
                 isDark: isDark,
@@ -84,7 +84,7 @@ class UniversalBottomBar extends ConsumerWidget {
                 ref: ref,
                 index: 3,
                 selectedIndex: currentIndex,
-                label: 'Memories',
+                tooltip: 'Memories',
                 selectedIcon: Icons.photo_library_rounded,
                 unselectedIcon: Icons.photo_library_outlined,
                 isDark: isDark,
@@ -94,7 +94,7 @@ class UniversalBottomBar extends ConsumerWidget {
                 ref: ref,
                 index: 4,
                 selectedIndex: currentIndex,
-                label: 'Profile',
+                tooltip: 'Profile',
                 selectedIcon: Icons.person_rounded,
                 unselectedIcon: Icons.person_outline_rounded,
                 isDark: isDark,
@@ -111,7 +111,7 @@ class UniversalBottomBar extends ConsumerWidget {
     required WidgetRef ref,
     required int index,
     required int selectedIndex,
-    required String label,
+    required String tooltip,
     required IconData selectedIcon,
     required IconData unselectedIcon,
     required bool isDark,
@@ -122,31 +122,30 @@ class UniversalBottomBar extends ConsumerWidget {
     final inactiveColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
 
     return Expanded(
-      child: InkWell(
-        onTap: () {
-          HapticFeedback.selectionClick();
-          if (onDestinationSelected != null) {
-            onDestinationSelected!(index);
-          } else {
-            if (Navigator.of(context).canPop()) {
-              Navigator.of(context).popUntil((route) => route.isFirst);
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            if (onDestinationSelected != null) {
+              onDestinationSelected!(index);
+            } else {
+              if (Navigator.of(context).canPop()) {
+                Navigator.of(context).popUntil((route) => route.isFirst);
+              }
+              ref.read(activeMainTabProvider.notifier).state = index;
             }
-            ref.read(activeMainTabProvider.notifier).state = index;
-          }
-        },
-        splashColor: activeColor.withAlpha(20),
-        highlightColor: Colors.transparent,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Icon with optional indicator pill & badge
-            AnimatedContainer(
+          },
+          splashColor: activeColor.withAlpha(20),
+          highlightColor: Colors.transparent,
+          child: Center(
+            child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               curve: Curves.easeOutCubic,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
                 color: isSelected ? activeColor.withAlpha(26) : Colors.transparent,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(16),
               ),
               child: Stack(
                 clipBehavior: Clip.none,
@@ -154,7 +153,7 @@ class UniversalBottomBar extends ConsumerWidget {
                 children: [
                   Icon(
                     isSelected ? selectedIcon : unselectedIcon,
-                    size: 22,
+                    size: 24,
                     color: isSelected ? activeColor : inactiveColor,
                   ),
                   if (badgeCount > 0)
@@ -187,24 +186,7 @@ class UniversalBottomBar extends ConsumerWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 2),
-            // Label
-            AnimatedDefaultTextStyle(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOutCubic,
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
-                color: isSelected ? activeColor : inactiveColor,
-                letterSpacing: -0.2,
-              ),
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

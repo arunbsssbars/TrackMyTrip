@@ -99,6 +99,7 @@ class AppDatabase {
           version: dbVersion,
           password: password,
           onCreate: _onCreate,
+          onOpen: _onOpen,
         );
       } catch (_) {
         // Fallback for test harnesses / desktop where native SQLCipher channel is unavailable
@@ -106,6 +107,7 @@ class AppDatabase {
           dbPath,
           version: dbVersion,
           onCreate: _onCreate,
+          onOpen: _onOpen,
         );
       }
     } else {
@@ -113,14 +115,27 @@ class AppDatabase {
         dbPath,
         version: dbVersion,
         onCreate: _onCreate,
+        onOpen: _onOpen,
       );
     }
 
     return AppDatabase(db);
   }
 
+  /// Ensures dynamically added tables exist across migrations
+  static Future<void> _onOpen(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS tombstoned_trips (
+        tripId TEXT PRIMARY KEY,
+        deletedAt INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_tombstone_tripId ON tombstoned_trips(tripId)');
+  }
+
   /// Schema creation
   static Future<void> _onCreate(Database db, int version) async {
+    await _onOpen(db);
     // 1. Trips
     await db.execute('''
       CREATE TABLE IF NOT EXISTS trips (
@@ -314,7 +329,11 @@ class AppDatabase {
   // --- TRIPS ---
   Future<List<Trip>> getTrips() async {
     final rows = await _db.query('trips', orderBy: 'startDate DESC');
-    return rows.map((row) => _tripFromRow(row)).toList();
+    final tombstoneIds = await getTombstonedTripIds();
+    return rows
+        .where((row) => !tombstoneIds.contains(row['id']))
+        .map((row) => _tripFromRow(row))
+        .toList();
   }
 
   Future<void> saveTrip(Trip trip) async {
@@ -345,7 +364,38 @@ class AppDatabase {
       await txn.delete('memories', where: 'tripId = ?', whereArgs: [tripId]);
       await txn.delete('settlements', where: 'tripId = ?', whereArgs: [tripId]);
       await txn.delete('audit_logs', where: 'tripId = ?', whereArgs: [tripId]);
+      await txn.delete('proximity_alerts', where: 'tripId = ?', whereArgs: [tripId]);
+      await txn.delete('trip_invitations', where: 'tripId = ?', whereArgs: [tripId]);
+      await txn.insert(
+        'tombstoned_trips',
+        {
+          'tripId': tripId,
+          'deletedAt': DateTime.now().millisecondsSinceEpoch,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     });
+  }
+
+  // --- TOMBSTONED TRIPS ---
+  Future<void> addTombstonedTrip(String tripId) async {
+    await _db.insert(
+      'tombstoned_trips',
+      {
+        'tripId': tripId,
+        'deletedAt': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<Set<String>> getTombstonedTripIds() async {
+    try {
+      final rows = await _db.query('tombstoned_trips');
+      return rows.map((r) => r['tripId'] as String).toSet();
+    } catch (_) {
+      return {};
+    }
   }
 
   // --- STOPPAGES ---

@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/trip.dart';
+import 'tombstone_service.dart';
 import 'trip_share_service.dart';
 
 class CloudTripSyncService {
@@ -48,6 +49,9 @@ class CloudTripSyncService {
 
   /// Publishes or updates a trip in the cloud room for live sharing
   static Future<bool> publishTrip(TripPackage package, {String? customCode}) async {
+    if (TombstoneService.isTombstoned(package.trip.id)) {
+      return false;
+    }
     final code = customCode ??
         package.trip.shareCode ??
         _tripRoomCodes[package.trip.id] ??

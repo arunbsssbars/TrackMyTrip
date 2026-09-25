@@ -13,6 +13,7 @@ import '../../models/proximity_alert.dart';
 import '../../models/auth_user.dart';
 import '../../models/trip_invitation.dart';
 import 'security_service.dart';
+import 'tombstone_service.dart';
 import 'trip_share_service.dart';
 
 class LocalStorageService {
@@ -32,6 +33,7 @@ class LocalStorageService {
   List<TripAuditLog> _cachedAuditLogs = [];
   List<SyncMutation> _cachedMutations = [];
   List<ProximityAlert> _cachedAlerts = [];
+  Set<String> _readAlertIds = {};
   List<TripInvitation> _cachedInvitations = [];
   List<Map<String, dynamic>> _cachedRegisteredUsers = [];
   AuthUser? _cachedAuthUser;
@@ -97,6 +99,7 @@ class LocalStorageService {
     if (cleanUserId == null) {
       _clearMemoryCaches();
     } else {
+      await TombstoneService.reload(_db);
       await _reloadAllCaches();
     }
   }
@@ -124,14 +127,36 @@ class LocalStorageService {
     _cachedAuditLogs = await _db.getAllAuditLogs();
     _cachedMutations = await _db.getPendingMutations();
     _cachedAlerts = await _db.getAllAlerts();
+    final readList = _prefs.getStringList('read_alert_ids_${_currentUserId ?? "anon"}') ?? [];
+    _readAlertIds = readList.toSet();
+    _cachedAlerts = _cachedAlerts.map((a) {
+      if (_readAlertIds.contains(a.id)) {
+        return a.copyWith(isRead: true);
+      }
+      return a;
+    }).toList();
     _cachedAuthUser = await _db.getAuthSession();
     _cachedRegisteredUsers = await _db.getRegisteredUsers();
     _cachedInvitations = await _db.getAllInvitations();
+
+    // Inbound anti-resurrection tombstone filter: purge any tombstoned items immediately
+    final tombstoned = TombstoneService.getAllTombstonedTripIds();
+    if (tombstoned.isNotEmpty) {
+      _cachedTrips.removeWhere((t) => tombstoned.contains(t.id));
+      _cachedStoppages.removeWhere((s) => tombstoned.contains(s.tripId));
+      _cachedExpenses.removeWhere((e) => tombstoned.contains(e.tripId));
+      _cachedMemories.removeWhere((m) => tombstoned.contains(m.tripId));
+      _cachedSettlements.removeWhere((s) => tombstoned.contains(s.tripId));
+      _cachedAuditLogs.removeWhere((a) => tombstoned.contains(a.tripId));
+      _cachedAlerts.removeWhere((a) => tombstoned.contains(a.tripId));
+      _cachedInvitations.removeWhere((i) => tombstoned.contains(i.tripId));
+    }
 
     await _purgeDummyData();
   }
 
   Future<void> _initDatabase() async {
+    await TombstoneService.init(_prefs, _db);
     if (_prefs.getBool(_migratedToSqliteKey) != true) {
       final legacyTripsStr = _prefs.getString('trips_data_v1');
       if (legacyTripsStr != null) {
@@ -185,12 +210,16 @@ class LocalStorageService {
   }
 
   Future<void> deleteTrip(String tripId) async {
+    await TombstoneService.markTombstoned(tripId);
+
     _cachedTrips.removeWhere((t) => t.id == tripId);
     _cachedStoppages.removeWhere((s) => s.tripId == tripId);
     _cachedExpenses.removeWhere((e) => e.tripId == tripId);
     _cachedMemories.removeWhere((m) => m.tripId == tripId);
     _cachedSettlements.removeWhere((s) => s.tripId == tripId);
     _cachedAuditLogs.removeWhere((a) => a.tripId == tripId);
+    _cachedAlerts.removeWhere((a) => a.tripId == tripId);
+    _cachedInvitations.removeWhere((i) => i.tripId == tripId);
 
     await saveTrips(_cachedTrips);
     await saveAllStoppages(_cachedStoppages);
@@ -199,12 +228,15 @@ class LocalStorageService {
     await saveAllSettlements(_cachedSettlements);
     await saveAllAuditLogs(_cachedAuditLogs);
 
-      await _db.deleteTrip(tripId);
+    await _db.deleteTrip(tripId);
   }
 
   Future<Trip> importTripPackage(TripPackage package, {String? activeMemberId}) async {
-    final existingTrips = List<Trip>.from(_cachedTrips);
     final tripId = package.trip.id;
+    if (TombstoneService.isTombstoned(tripId)) {
+      return package.trip;
+    }
+    final existingTrips = List<Trip>.from(_cachedTrips);
     final existingIndex = existingTrips.indexWhere((t) => t.id == tripId);
     final existingTrip = existingIndex >= 0 ? existingTrips[existingIndex] : null;
 
@@ -507,8 +539,14 @@ class LocalStorageService {
       await _db.saveAllAlerts(alerts);
   }
 
+  bool isAlertRead(String alertId) => _readAlertIds.contains(alertId);
+
   Future<void> addAlert(ProximityAlert alert) async {
+    if (_readAlertIds.contains(alert.id)) {
+      alert = alert.copyWith(isRead: true);
+    }
     final list = List<ProximityAlert>.from(_cachedAlerts);
+    list.removeWhere((a) => a.id == alert.id);
     list.insert(0, alert);
     if (list.length > 100) list.removeLast();
     _cachedAlerts = list;
@@ -516,6 +554,8 @@ class LocalStorageService {
   }
 
   Future<void> markAlertAsRead(String alertId) async {
+    _readAlertIds.add(alertId);
+    await _prefs.setStringList('read_alert_ids_${_currentUserId ?? "anon"}', _readAlertIds.toList());
     final list = List<ProximityAlert>.from(_cachedAlerts);
     final idx = list.indexWhere((a) => a.id == alertId);
     if (idx != -1) {
@@ -523,6 +563,15 @@ class LocalStorageService {
       _cachedAlerts = list;
       await saveAllAlerts(list);
     }
+  }
+
+  Future<void> markAllAlertsAsRead() async {
+    for (final a in _cachedAlerts) {
+      _readAlertIds.add(a.id);
+    }
+    await _prefs.setStringList('read_alert_ids_${_currentUserId ?? "anon"}', _readAlertIds.toList());
+    _cachedAlerts = _cachedAlerts.map((a) => a.copyWith(isRead: true)).toList();
+    await saveAllAlerts(_cachedAlerts);
   }
 
   Future<void> deleteAlert(String alertId) async {
