@@ -19,6 +19,7 @@ import '../../../providers/stoppage_provider.dart';
 import '../../../providers/trip_provider.dart';
 import '../../expense/add_expense_screen.dart';
 import '../audit_log_sheet.dart';
+import '../../../core/utils/trip_guard_helper.dart';
 
 class ExpensesTab extends ConsumerStatefulWidget {
   final Trip trip;
@@ -32,7 +33,15 @@ class ExpensesTab extends ConsumerStatefulWidget {
 class _ExpensesTabState extends ConsumerState<ExpensesTab> {
   String? _selectedCategoryFilter;
 
-  void _openAddExpenseScreen(BuildContext context, {Expense? expenseToEdit}) {
+  void _openAddExpenseScreen(BuildContext context, {Expense? expenseToEdit}) async {
+    final canProceed = await TripGuardHelper.ensureTripOpenForEdit(
+      context,
+      ref,
+      widget.trip,
+      actionLabel: expenseToEdit != null ? 'edit this expense' : 'record an expense',
+    );
+    if (!canProceed || !context.mounted) return;
+
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => AddExpenseScreen(
@@ -43,7 +52,15 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
     );
   }
 
-  void _showDeleteExpenseDialog(BuildContext context, Expense expense) {
+  void _showDeleteExpenseDialog(BuildContext context, Expense expense) async {
+    final canProceed = await TripGuardHelper.ensureTripOpenForEdit(
+      context,
+      ref,
+      widget.trip,
+      actionLabel: 'delete this expense',
+    );
+    if (!canProceed || !context.mounted) return;
+
     final reasonController = TextEditingController(text: 'Duplicate entry');
     final quickReasons = [
       'Duplicate entry',

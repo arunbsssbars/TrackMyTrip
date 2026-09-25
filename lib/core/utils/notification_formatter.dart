@@ -33,24 +33,37 @@ class NotificationFormatter {
 
     // Direct verb conjugation replacements when current user is the actor
     for (final name in namesToReplace) {
-      // e.g. "Arun has arrived at ..." -> "You have arrived at ..."
-      msg = msg.replaceAll('$name has arrived', 'You have arrived');
-      msg = msg.replaceAll('$name is arrived', 'You have arrived');
-      msg = msg.replaceAll('$name is', 'You are');
-      msg = msg.replaceAll('$name joined', 'You joined');
-      msg = msg.replaceAll('$name left', 'You left');
-      msg = msg.replaceAll('$name added', 'You added');
-      msg = msg.replaceAll('$name recorded', 'You recorded');
-      msg = msg.replaceAll('$name triggered', 'You triggered');
-      msg = msg.replaceAll('$name accepted', 'You accepted');
-      msg = msg.replaceAll('$name declined', 'You declined');
-      msg = msg.replaceAll('$name departed', 'You departed');
-      msg = msg.replaceAll('$name updated', 'You updated');
-      msg = msg.replaceAll('$name invited', 'You invited');
+      final escapedName = RegExp.escape(name);
 
-      // General fallback replace
+      // Sent invitation patterns (Requirement 11)
+      msg = msg.replaceAll(RegExp('$escapedName sent an invitation to', caseSensitive: false), 'You sent an invitation to');
+      msg = msg.replaceAll(RegExp('$escapedName sent invitation to', caseSensitive: false), 'You sent an invitation to');
+      msg = msg.replaceAll(RegExp('$escapedName sent an invitation', caseSensitive: false), 'You sent an invitation');
+      msg = msg.replaceAll(RegExp('$escapedName sent invitation', caseSensitive: false), 'You sent an invitation');
+      msg = msg.replaceAll(RegExp('$escapedName sent an invite to', caseSensitive: false), 'You sent an invite to');
+      msg = msg.replaceAll(RegExp('$escapedName sent invite to', caseSensitive: false), 'You sent an invite to');
+      msg = msg.replaceAll(RegExp('$escapedName has invited', caseSensitive: false), 'You invited');
+      msg = msg.replaceAll(RegExp('$escapedName invited', caseSensitive: false), 'You invited');
+
+      // Activity action replacements
+      msg = msg.replaceAll(RegExp('$escapedName has arrived', caseSensitive: false), 'You have arrived');
+      msg = msg.replaceAll(RegExp('$escapedName is arrived', caseSensitive: false), 'You have arrived');
+      msg = msg.replaceAll(RegExp('$escapedName is', caseSensitive: false), 'You are');
+      msg = msg.replaceAll(RegExp('$escapedName joined', caseSensitive: false), 'You joined');
+      msg = msg.replaceAll(RegExp('$escapedName left', caseSensitive: false), 'You left');
+      msg = msg.replaceAll(RegExp('$escapedName added', caseSensitive: false), 'You added');
+      msg = msg.replaceAll(RegExp('$escapedName recorded', caseSensitive: false), 'You recorded');
+      msg = msg.replaceAll(RegExp('$escapedName triggered', caseSensitive: false), 'You triggered');
+      msg = msg.replaceAll(RegExp('$escapedName accepted', caseSensitive: false), 'You accepted');
+      msg = msg.replaceAll(RegExp('$escapedName declined', caseSensitive: false), 'You declined');
+      msg = msg.replaceAll(RegExp('$escapedName departed', caseSensitive: false), 'You departed');
+      msg = msg.replaceAll(RegExp('$escapedName updated', caseSensitive: false), 'You updated');
+      msg = msg.replaceAll(RegExp('$escapedName created', caseSensitive: false), 'You created');
+      msg = msg.replaceAll(RegExp('$escapedName shared', caseSensitive: false), 'You shared');
+
+      // General fallback replace when this user is the sender
       if (isSender) {
-        msg = msg.replaceAll(name, 'You');
+        msg = msg.replaceAll(RegExp(r'\b' + escapedName + r'\b', caseSensitive: false), 'You');
       }
     }
 

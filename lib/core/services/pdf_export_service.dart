@@ -1,10 +1,10 @@
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:intl/intl.dart';
 import '../../models/trip.dart';
 import '../../models/stoppage.dart';
 import '../../models/expense.dart';
-import '../utils/currency_formatter.dart';
 import '../utils/date_formatter.dart';
 import '../utils/debt_simplifier.dart';
 
@@ -65,7 +65,7 @@ class PdfExportService {
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
-                _buildStatBox('Total Expenditure', CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency)),
+                _buildStatBox('Total Expenditure', _formatPdfCurrency(totalSpent, currency: trip.defaultCurrency)),
                 _buildStatBox('Total Stoppages', '${stoppages.length} stops'),
                 _buildStatBox('Travel Companions', '${trip.members.length} members'),
               ],
@@ -132,7 +132,7 @@ class PdfExportService {
                         ),
                         if (stopTotal > 0)
                           pw.Text(
-                            CurrencyFormatter.format(stopTotal, currency: trip.defaultCurrency),
+                            _formatPdfCurrency(stopTotal, currency: trip.defaultCurrency),
                             style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.teal800, fontSize: 11),
                           ),
                       ],
@@ -172,7 +172,7 @@ class PdfExportService {
                   e.category,
                   stopName,
                   payerName,
-                  CurrencyFormatter.format(e.totalAmount, currency: e.currency),
+                  _formatPdfCurrency(e.totalAmount, currency: e.currency),
                 ];
               }).toList(),
             ),
@@ -210,7 +210,7 @@ class PdfExportService {
                         pw.Text('$fromName owes $toName',
                             style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
                         pw.Text(
-                          CurrencyFormatter.format(t.amount, currency: trip.defaultCurrency),
+                          _formatPdfCurrency(t.amount, currency: trip.defaultCurrency),
                           style: pw.TextStyle(
                               fontWeight: pw.FontWeight.bold, color: PdfColors.orange900, fontSize: 11),
                         ),
@@ -255,5 +255,25 @@ class PdfExportService {
         ],
       ),
     );
+  }
+
+  static String _formatPdfCurrency(double amount, {String? currency}) {
+    final cur = (currency ?? 'INR').trim();
+    final formattedNum = NumberFormat('#,##,##0.00').format(amount);
+    if (cur.toUpperCase() == 'INR' || cur.contains('₹')) {
+      return 'INR $formattedNum';
+    }
+    if (cur.toUpperCase() == 'USD' || cur == r'$') {
+      return r'$' + formattedNum;
+    }
+    if (cur.toUpperCase() == 'EUR' || cur == '€') {
+      return 'EUR $formattedNum';
+    }
+    if (cur.toUpperCase() == 'GBP' || cur == '£') {
+      return 'GBP $formattedNum';
+    }
+    final cleanCur = cur.replaceAll(RegExp(r'[^\x00-\x7F]'), '').trim();
+    final prefix = cleanCur.isNotEmpty ? cleanCur : 'INR';
+    return '$prefix $formattedNum';
   }
 }

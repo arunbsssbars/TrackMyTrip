@@ -11,6 +11,7 @@ import '../../../providers/auth_provider.dart';
 import '../../../providers/invitation_provider.dart';
 import '../../../providers/trip_provider.dart';
 import '../../trip/companion_search_dialog.dart';
+import '../../../core/utils/trip_guard_helper.dart';
 
 class MembersTab extends ConsumerStatefulWidget {
   final Trip trip;
@@ -98,7 +99,15 @@ class _MembersTabState extends ConsumerState<MembersTab> {
     );
   }
 
-  void _showAddOfflineMemberDialog() {
+  void _showAddOfflineMemberDialog() async {
+    final canProceed = await TripGuardHelper.ensureTripOpenForEdit(
+      context,
+      ref,
+      widget.trip,
+      actionLabel: 'add a custom companion',
+    );
+    if (!canProceed || !mounted) return;
+
     final nameController = TextEditingController();
     final currentTrip = ref.read(tripListProvider).where((t) => t.id == widget.trip.id).firstOrNull ?? widget.trip;
     showDialog(
@@ -112,26 +121,28 @@ class _MembersTabState extends ConsumerState<MembersTab> {
             Text('Add Custom Member'),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Add an offline companion (e.g. driver, guide, family member without the app) to split expenses and track attendance.',
-              style: TextStyle(fontSize: 12.5, color: Colors.grey),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: nameController,
-              autofocus: true,
-              textCapitalization: TextCapitalization.words,
-              decoration: InputDecoration(
-                labelText: 'Companion Name',
-                hintText: 'e.g. Maya, Driver Ramesh',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Add an offline companion (e.g. driver, guide, family member without the app) to split expenses and track attendance.',
+                style: TextStyle(fontSize: 12.5, color: Colors.grey),
               ),
-            ),
-          ],
+              const SizedBox(height: 14),
+              TextField(
+                controller: nameController,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                decoration: InputDecoration(
+                  labelText: 'Companion Name',
+                  hintText: 'e.g. Maya, Driver Ramesh',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(

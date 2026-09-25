@@ -4,6 +4,7 @@ class TripMember {
   final String? email;
   final String? avatarUrl;
   final String? colorHex;
+  final String? phoneNumber;
   final bool isCurrentUser;
   final double? latitude;
   final double? longitude;
@@ -15,6 +16,7 @@ class TripMember {
     this.email,
     this.avatarUrl,
     this.colorHex,
+    this.phoneNumber,
     this.isCurrentUser = false,
     this.latitude,
     this.longitude,
@@ -33,6 +35,7 @@ class TripMember {
     String? email,
     String? avatarUrl,
     String? colorHex,
+    String? phoneNumber,
     bool? isCurrentUser,
     double? latitude,
     double? longitude,
@@ -44,6 +47,7 @@ class TripMember {
       email: email ?? this.email,
       avatarUrl: avatarUrl ?? this.avatarUrl,
       colorHex: colorHex ?? this.colorHex,
+      phoneNumber: phoneNumber ?? this.phoneNumber,
       isCurrentUser: isCurrentUser ?? this.isCurrentUser,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
@@ -58,6 +62,7 @@ class TripMember {
       'email': email,
       'avatarUrl': avatarUrl,
       'colorHex': colorHex,
+      'phoneNumber': phoneNumber,
       'isCurrentUser': isCurrentUser,
       'latitude': latitude,
       'longitude': longitude,
@@ -72,6 +77,7 @@ class TripMember {
       email: json['email'] as String?,
       avatarUrl: json['avatarUrl'] as String?,
       colorHex: json['colorHex'] as String?,
+      phoneNumber: json['phoneNumber'] as String?,
       isCurrentUser: json['isCurrentUser'] as bool? ?? false,
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),

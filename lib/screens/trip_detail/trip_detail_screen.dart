@@ -276,18 +276,19 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
                 if (trip.isCompleted) ...[
                   const SizedBox(width: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Colors.amber.withAlpha(25),
+                      color: const Color(0xFFEF4444).withAlpha(20),
                       borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: Colors.amber.withAlpha(60), width: 0.8),
+                      border: Border.all(color: const Color(0xFFEF4444).withAlpha(60), width: 0.8),
                     ),
-                    child: Text(
-                      trip.rating != null ? '⭐ ${trip.rating!.toStringAsFixed(1)}' : 'ENDED',
+                    child: const Text(
+                      'CONCLUDED',
                       style: TextStyle(
-                        fontSize: 9,
+                        fontSize: 8.5,
                         fontWeight: FontWeight.w900,
-                        color: Colors.amber[900],
+                        letterSpacing: 0.4,
+                        color: Color(0xFFEF4444),
                       ),
                     ),
                   ),
@@ -295,15 +296,47 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
               ],
             ),
             const SizedBox(height: 2),
-            Text(
-              '${DateFormatter.formatTripDateRange(trip.startDate, trip.endDate)} • ${trip.isSolo ? "Solo" : (trip.isFamily ? "Family" : "Group")}',
-              style: TextStyle(
-                fontSize: 11,
-                color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
-                fontWeight: FontWeight.w500,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${DateFormatter.formatTripDateRange(trip.startDate, trip.endDate)} • ${trip.isSolo ? "Solo" : (trip.isFamily ? "Family" : "Group")}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (trip.rating != null) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withAlpha(isDark ? 35 : 22),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.amber.withAlpha(isDark ? 90 : 60), width: 0.8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.star_rounded, size: 12, color: Colors.amber),
+                        const SizedBox(width: 2.5),
+                        Text(
+                          trip.rating!.toStringAsFixed(1),
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                            color: isDark ? Colors.amber[300] : Colors.amber[900],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
             ),
           ],
         ),

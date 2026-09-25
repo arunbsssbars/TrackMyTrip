@@ -12,6 +12,8 @@ import '../../providers/memory_provider.dart';
 import '../../providers/settlement_provider.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
+import '../../core/utils/page_transitions.dart';
+import '../trip_detail/trip_detail_screen.dart';
 import 'create_trip_sheet.dart';
 import 'join_trip_sheet.dart';
 import '../common/sync_status_badge.dart';
@@ -126,10 +128,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       return;
     }
 
-    // Senior Dev Unified Cockpit Architecture (Req 8):
-    // Directly activate the trip and smoothly switch to the Current Trip Cockpit (Tab 1)
     ref.read(selectedTripIdProvider.notifier).state = trip.id;
-    ref.read(activeMainTabProvider.notifier).state = 1;
+    AppNavigator.push(
+      context,
+      TripDetailScreen(
+        tripId: trip.id,
+        initialTabIndex: initialTabIndex,
+      ),
+    );
   }
 
   @override

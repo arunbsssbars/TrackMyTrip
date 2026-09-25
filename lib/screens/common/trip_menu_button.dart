@@ -536,7 +536,7 @@ class TripMenuButton extends ConsumerWidget {
               children: [
                 Icon(Icons.edit_outlined, color: AppTheme.primary, size: 18),
                 SizedBox(width: 10),
-                Text('Edit Trip & Members', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                Text('Edit Trip', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
               ],
             ),
           ),

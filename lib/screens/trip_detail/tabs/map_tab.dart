@@ -22,6 +22,7 @@ import '../../stoppage/stoppage_detail_screen.dart';
 import '../../../core/services/map_tile_cache_service.dart';
 import '../widgets/offline_map_download_sheet.dart';
 import '../../notifications/notification_center_sheet.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class MapTab extends ConsumerStatefulWidget {
   final Trip trip;
@@ -315,6 +316,17 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
       });
 
       _fitAllStoppagesAndRoute([], [], extraPoints: [userPos, targetPos]);
+
+      // Provide ample map area for navigation by minimizing bottom sheet
+      try {
+        if (_sheetController.isAttached) {
+          _sheetController.animateTo(
+            0.08,
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeInOut,
+          );
+        }
+      } catch (_) {}
     }
   }
 
@@ -334,6 +346,204 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
       _companionNavSafetyAdvisories = [];
       _isCompanionRouteNavigable = true;
     });
+    try {
+      if (_sheetController.isAttached) {
+        _sheetController.animateTo(
+          0.16,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeInOut,
+        );
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _callCompanion(TripMember companion) async {
+    HapticFeedback.lightImpact();
+    final phone = companion.phoneNumber?.trim();
+    if (phone != null && phone.isNotEmpty) {
+      final uri = Uri.parse('tel:$phone');
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+        return;
+      }
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("No number updated by companion '${companion.name}'"),
+          backgroundColor: Colors.orange[800],
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  void _showNavigationModeSheet(BuildContext context, TripMember companion, LatLng userPos) {
+    HapticFeedback.mediumImpact();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final dist = companion.latitude != null && companion.longitude != null
+        ? LocationService.calculatePolylineDistanceKm([userPos, LatLng(companion.latitude!, companion.longitude!)])
+        : 0.0;
+    TransportMode tempMode = _activeNavMode;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: isDark ? Colors.grey[700] : Colors.grey[300],
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withAlpha(25),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.navigation_rounded, color: AppTheme.primary, size: 22),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Navigate to ${companion.name}',
+                                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${dist.toStringAsFixed(1)} km away • Choose mode',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    const Text(
+                      'TRANSPORT MODE',
+                      style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.8, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        _buildModeSelectionChip(
+                          mode: TransportMode.car,
+                          isSelected: tempMode == TransportMode.car,
+                          onTap: () => setSheetState(() => tempMode = TransportMode.car),
+                          isDark: isDark,
+                        ),
+                        const SizedBox(width: 8),
+                        _buildModeSelectionChip(
+                          mode: TransportMode.bike,
+                          isSelected: tempMode == TransportMode.bike,
+                          onTap: () => setSheetState(() => tempMode = TransportMode.bike),
+                          isDark: isDark,
+                        ),
+                        const SizedBox(width: 8),
+                        _buildModeSelectionChip(
+                          mode: TransportMode.foot,
+                          isSelected: tempMode == TransportMode.foot,
+                          onTap: () => setSheetState(() => tempMode = TransportMode.foot),
+                          isDark: isDark,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton.icon(
+                      onPressed: () {
+                        Navigator.of(sheetCtx).pop();
+                        setState(() => _activeNavMode = tempMode);
+                        _startNavigationToCompanion(companion, userPos, mode: tempMode);
+                      },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(48),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      icon: Icon(_getTransportIcon(tempMode), size: 18),
+                      label: Text(
+                        'Start In-App Navigation (${tempMode.label})',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(sheetCtx).pop();
+                        if (companion.latitude != null && companion.longitude != null) {
+                          LocationService.openExternalNavigation(
+                            companion.latitude!,
+                            companion.longitude!,
+                            label: 'Meet ${companion.name}',
+                          );
+                        }
+                      },
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(46),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        side: BorderSide(color: isDark ? Colors.white24 : const Color(0xFFCBD5E1)),
+                      ),
+                      icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                      label: const Text(
+                        'Open in External Google Maps',
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      onPressed: () {
+                        Navigator.of(sheetCtx).pop();
+                        _callCompanion(companion);
+                      },
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size.fromHeight(40),
+                        foregroundColor: const Color(0xFF10B981),
+                      ),
+                      icon: const Icon(Icons.phone_rounded, size: 16),
+                      label: Text(
+                        'Call ${companion.name}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   String _formatRemaining(Duration? rem) {
@@ -1602,9 +1812,18 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
             ],
           ),
         ),
+        // Call Companion Button
+        IconButton(
+          icon: const Icon(Icons.phone_rounded, size: 18, color: Color(0xFF10B981)),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          tooltip: 'Call Companion',
+          onPressed: () => _callCompanion(c),
+        ),
+        const SizedBox(width: 2),
         if (c.latitude != null && c.longitude != null) ...[
           FilledButton.tonalIcon(
-            onPressed: () => _startNavigationToCompanion(c, userPos, mode: _activeNavMode),
+            onPressed: () => _showNavigationModeSheet(context, c, userPos),
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFF0891B2).withAlpha(isDark ? 50 : 25),
               foregroundColor: const Color(0xFF0891B2),
@@ -1979,6 +2198,16 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
                       style: TextStyle(fontWeight: FontWeight.w700, fontSize: 11.5),
                     ),
                   ),
+                  const SizedBox(height: 6),
+                  TextButton.icon(
+                    onPressed: () => _callCompanion(c),
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFF10B981),
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                    ),
+                    icon: const Icon(Icons.phone_rounded, size: 15),
+                    label: Text('Call ${c.name}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  ),
                 ],
               ),
             ),
@@ -2253,9 +2482,23 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
                             ),
                             const SizedBox(width: 8),
                             InkWell(
+                              onTap: () => _callCompanion(c),
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4.5),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF10B981).withAlpha(isDark ? 50 : 25),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xFF10B981).withAlpha(80)),
+                                ),
+                                child: const Icon(Icons.phone_rounded, size: 14, color: Color(0xFF10B981)),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            InkWell(
                               onTap: () {
                                 if (c.latitude != null && c.longitude != null) {
-                                  _startNavigationToCompanion(c, userPos, mode: _activeNavMode);
+                                  _showNavigationModeSheet(context, c, userPos);
                                 }
                               },
                               borderRadius: BorderRadius.circular(8),

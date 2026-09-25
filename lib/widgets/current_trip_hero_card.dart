@@ -211,79 +211,128 @@ class CurrentTripHeroCard extends StatelessWidget {
   }
 
   Widget _financialGlance(BuildContext context, bool hasBudget, double totalSpent, double budgetPercent, bool isOverBudget, bool isEnded) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.black.withAlpha(isDark ? 55 : 30),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withAlpha(35)),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTapLedger,
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.account_balance_wallet_rounded, size: 14, color: Colors.white70),
-                        SizedBox(width: 5),
-                        Text('TOTAL EXPENDITURE', style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.8)),
-                      ],
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(color: Colors.white.withAlpha(40), borderRadius: BorderRadius.circular(8)),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text('Ledger & Splits', style: TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w800)),
-                          SizedBox(width: 3),
-                          Icon(Icons.arrow_forward_ios_rounded, size: 9, color: Colors.white),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency),
-                  style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5),
-                ),
-                if (hasBudget) ...[
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: budgetPercent,
-                      minHeight: 5,
-                      backgroundColor: Colors.white24,
-                      valueColor: AlwaysStoppedAnimation<Color>(isOverBudget ? const Color(0xFFEF4444) : const Color(0xFF34D399)),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('${(budgetPercent * 100).toInt()}% of ${CurrencyFormatter.format(trip.budget!, currency: trip.defaultCurrency)}', style: const TextStyle(color: Colors.white70, fontSize: 10.5, fontWeight: FontWeight.w600)),
-                      Text(isOverBudget ? 'Over Budget!' : 'Left: ${CurrencyFormatter.format(trip.budget! - totalSpent, currency: trip.defaultCurrency)}', style: TextStyle(color: isOverBudget ? const Color(0xFFFCA5A5) : const Color(0xFF6EE7B7), fontSize: 10.5, fontWeight: FontWeight.w800)),
-                    ],
-                  ),
-                ] else ...[
-                  const SizedBox(height: 5),
-                  Text('$expenseCount expense ${expenseCount == 1 ? "entry" : "entries"} logged • Tap to view ledger & splits', style: const TextStyle(color: Colors.white70, fontSize: 10.5, fontWeight: FontWeight.w600)),
-                ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Subtle integrated divider eliminating box-in-box look
+        Container(
+          height: 1,
+          margin: const EdgeInsets.only(top: 2, bottom: 12),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Colors.white.withAlpha(50),
+                Colors.white.withAlpha(20),
+                Colors.white.withAlpha(5),
               ],
             ),
           ),
         ),
-      ),
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTapLedger,
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.account_balance_wallet_rounded, size: 14, color: Colors.white.withAlpha(190)),
+                          const SizedBox(width: 6),
+                          Text(
+                            'TOTAL EXPENDITURE',
+                            style: TextStyle(
+                              color: Colors.white.withAlpha(190),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Ledger & Splits',
+                            style: TextStyle(
+                              color: isDark ? const Color(0xFF38BDF8) : Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.arrow_forward_ios_rounded,
+                            size: 10,
+                            color: isDark ? const Color(0xFF38BDF8) : Colors.white,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.6,
+                    ),
+                  ),
+                  if (hasBudget) ...[
+                    const SizedBox(height: 10),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: LinearProgressIndicator(
+                        value: budgetPercent,
+                        minHeight: 6,
+                        backgroundColor: Colors.white.withAlpha(35),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          isOverBudget ? const Color(0xFFF87171) : const Color(0xFF34D399),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '${(budgetPercent * 100).toInt()}% of ${CurrencyFormatter.format(trip.budget!, currency: trip.defaultCurrency)}',
+                          style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600),
+                        ),
+                        Text(
+                          isOverBudget
+                              ? 'Over Budget!'
+                              : 'Left: ${CurrencyFormatter.format(trip.budget! - totalSpent, currency: trip.defaultCurrency)}',
+                          style: TextStyle(
+                            color: isOverBudget ? const Color(0xFFFCA5A5) : const Color(0xFF6EE7B7),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      '$expenseCount expense ${expenseCount == 1 ? "entry" : "entries"} logged • Tap to view ledger & splits',
+                      style: const TextStyle(color: Colors.white70, fontSize: 10.5, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

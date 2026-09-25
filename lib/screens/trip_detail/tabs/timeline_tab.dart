@@ -14,6 +14,7 @@ import '../../../providers/memory_provider.dart';
 import '../../../providers/stoppage_provider.dart';
 import '../../stoppage/add_stoppage_dialog.dart';
 import '../../stoppage/stoppage_detail_screen.dart';
+import '../../../core/utils/trip_guard_helper.dart';
 
 class TimelineTab extends ConsumerStatefulWidget {
   final Trip trip;
@@ -29,7 +30,15 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   String? _selectedDateFilterKey;
   bool _hasInitializedExpandedDates = false;
 
-  void _openAddStoppageDialog(BuildContext context, {bool autoDetectGps = true}) {
+  void _openAddStoppageDialog(BuildContext context, {bool autoDetectGps = true}) async {
+    final canProceed = await TripGuardHelper.ensureTripOpenForEdit(
+      context,
+      ref,
+      widget.trip,
+      actionLabel: 'add a stoppage',
+    );
+    if (!canProceed || !context.mounted) return;
+
     AddStoppageDialog.show(
       context,
       tripId: widget.trip.id,
