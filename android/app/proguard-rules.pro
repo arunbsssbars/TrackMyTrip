@@ -33,3 +33,7 @@
     public static int v(...);
     public static int d(...);
 }
+
+# Suppress warnings for optional Play Core Deferred Components & MLKit language models
+-dontwarn com.google.android.play.core.**
+-dontwarn com.google.mlkit.vision.text.**
