@@ -311,7 +311,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
       floatingActionButton: AppFloatingActionButton.extended(
         heroTag: 'members_share_fab',
         icon: Icons.share_rounded,
-        label: 'Share Code',
+        label: 'Share Trip',
         onPressed: () => _shareTripCode(shareCode, currentTrip.title),
       ),
       body: ListView(
