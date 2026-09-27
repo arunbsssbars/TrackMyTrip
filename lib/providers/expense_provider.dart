@@ -1,8 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../core/services/cloud_trip_sync_service.dart';
 import '../core/services/firestore_sync_service.dart';
 import '../core/services/local_storage_service.dart';
-import '../core/services/trip_share_service.dart';
 import '../models/expense.dart';
 import '../models/trip_audit_log.dart';
 import '../core/services/user_service.dart';
@@ -46,7 +44,6 @@ class ExpenseNotifier extends StateNotifier<List<Expense>> {
 
     state = [expense, ...state.where((e) => e.id != expense.id)];
     await _storage.saveAllExpenses(state);
-    _syncToCloud(expense.tripId);
 
     try {
       _ref.read(firestoreSyncServiceProvider).pushExpense(expense);
@@ -106,7 +103,6 @@ class ExpenseNotifier extends StateNotifier<List<Expense>> {
         if (e.id == updatedExpense.id) updatedExpense else e
     ];
     await _storage.saveAllExpenses(state);
-    _syncToCloud(updatedExpense.tripId);
 
     try {
       _ref.read(firestoreSyncServiceProvider).pushExpense(updatedExpense);
@@ -141,7 +137,6 @@ class ExpenseNotifier extends StateNotifier<List<Expense>> {
     final existing = state.firstWhere((e) => e.id == expenseId, orElse: () => state.first);
     state = state.where((e) => e.id != expenseId).toList();
     await _storage.saveAllExpenses(state);
-    _syncToCloud(existing.tripId);
 
     try {
       _ref.read(firestoreSyncServiceProvider).deleteExpense(existing.tripId, expenseId);
@@ -169,24 +164,6 @@ class ExpenseNotifier extends StateNotifier<List<Expense>> {
         tripId: existing.tripId,
         payload: {'id': expenseId},
       );
-    } catch (_) {}
-  }
-
-  void _syncToCloud(String tripId) {
-    try {
-      final trips = _storage.getTrips();
-      final trip = trips.where((t) => t.id == tripId).firstOrNull;
-      if (trip == null || trip.isDeleted) {
-        return; // Guard against resurrecting deleted or orphaned trips in Firestore
-      }
-      final package = TripPackage(
-        trip: trip,
-        stoppages: _storage.getAllStoppages().where((s) => s.tripId == tripId).toList(),
-        expenses: state.where((e) => e.tripId == tripId).toList(),
-        memories: _storage.getAllMemories().where((m) => m.tripId == tripId).toList(),
-        settlements: _storage.getAllSettlements().where((s) => s.tripId == tripId).toList(),
-      );
-      CloudTripSyncService.publishTrip(package);
     } catch (_) {}
   }
 }

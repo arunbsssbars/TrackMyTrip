@@ -1,10 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../core/services/cloud_trip_sync_service.dart';
 import '../core/services/firestore_sync_service.dart';
 import '../core/services/local_storage_service.dart';
 import '../core/services/offline_sync_engine.dart';
 import '../core/services/proximity_alert_service.dart';
-import '../core/services/trip_share_service.dart';
 import '../core/services/user_service.dart';
 import '../core/utils/debt_simplifier.dart';
 import '../models/proximity_alert.dart';
@@ -57,7 +55,6 @@ class SettlementNotifier extends StateNotifier<List<Settlement>> {
   Future<void> addSettlement(Settlement settlement) async {
     state = [settlement, ...state.where((s) => s.id != settlement.id)];
     await _storage.saveAllSettlements(state);
-    _syncToCloud(settlement.tripId);
 
     try {
       _ref.read(firestoreSyncServiceProvider).pushSettlement(settlement);
@@ -102,7 +99,6 @@ class SettlementNotifier extends StateNotifier<List<Settlement>> {
   Future<void> updateSettlement(Settlement updated) async {
     state = state.map((s) => s.id == updated.id ? updated : s).toList();
     await _storage.saveAllSettlements(state);
-    _syncToCloud(updated.tripId);
 
     try {
       _ref.read(firestoreSyncServiceProvider).pushSettlement(updated);
@@ -140,7 +136,6 @@ class SettlementNotifier extends StateNotifier<List<Settlement>> {
     final existing = state.firstWhere((s) => s.id == settlementId, orElse: () => state.first);
     state = state.where((s) => s.id != settlementId).toList();
     await _storage.saveAllSettlements(state);
-    _syncToCloud(existing.tripId);
 
     try {
       _ref.read(firestoreSyncServiceProvider).deleteSettlement(existing.tripId, settlementId);
@@ -173,21 +168,6 @@ class SettlementNotifier extends StateNotifier<List<Settlement>> {
         timestamp: DateTime.now(),
         changeDetails: 'Settlement deleted between $fromName and $toName',
       ));
-    } catch (_) {}
-  }
-
-  void _syncToCloud(String tripId) {
-    try {
-      final trips = _storage.getTrips();
-      final trip = trips.firstWhere((t) => t.id == tripId);
-      final package = TripPackage(
-        trip: trip,
-        stoppages: _storage.getAllStoppages().where((s) => s.tripId == tripId).toList(),
-        expenses: _storage.getAllExpenses().where((e) => e.tripId == tripId).toList(),
-        memories: _storage.getAllMemories().where((m) => m.tripId == tripId).toList(),
-        settlements: state.where((s) => s.tripId == tripId).toList(),
-      );
-      CloudTripSyncService.publishTrip(package);
     } catch (_) {}
   }
 }
