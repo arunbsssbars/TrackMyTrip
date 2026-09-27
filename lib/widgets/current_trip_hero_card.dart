@@ -2,6 +2,7 @@
 // Implements glass‑morphism style, dark‑mode aware gradient and micro‑animations.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../core/utils/currency_formatter.dart';
@@ -13,9 +14,11 @@ class CurrentTripHeroCard extends StatelessWidget {
   final bool isDark;
   final double totalSpent;
   final int expenseCount;
+  final Map<String, double>? categoryBreakdown;
   final VoidCallback onTapLedger;
   final VoidCallback? onTapCard;
   final VoidCallback? onTapAuditTrail;
+  final VoidCallback? onTapPieChart;
 
   const CurrentTripHeroCard({
     super.key,
@@ -23,9 +26,11 @@ class CurrentTripHeroCard extends StatelessWidget {
     required this.isDark,
     this.totalSpent = 0.0,
     this.expenseCount = 0,
+    this.categoryBreakdown,
     required this.onTapLedger,
     this.onTapCard,
     this.onTapAuditTrail,
+    this.onTapPieChart,
   });
 
   bool get isEnded => trip.isCompleted || trip.status == 'completed';
@@ -138,6 +143,10 @@ class CurrentTripHeroCard extends StatelessWidget {
           const SizedBox(height: 8),
           // Integrated Financial Glance Block
           _financialGlance(context, hasBudget, totalSpent, budgetPercent, isOverBudget, isEnded),
+          if (categoryBreakdown != null && categoryBreakdown!.isNotEmpty && totalSpent > 0) ...[
+            const SizedBox(height: 10),
+            _categoryPieChartGlance(context),
+          ],
           if (onTapAuditTrail != null) ...[
             const SizedBox(height: 10),
             InkWell(
@@ -424,5 +433,125 @@ class CurrentTripHeroCard extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  Widget _categoryPieChartGlance(BuildContext context) {
+    final sortedCategories = categoryBreakdown!.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return InkWell(
+      onTap: () {
+        HapticFeedback.lightImpact();
+        onTapPieChart?.call();
+      },
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withAlpha(22),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withAlpha(40), width: 0.9),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 44,
+              height: 44,
+              child: PieChart(
+                PieChartData(
+                  sectionsSpace: 2,
+                  centerSpaceRadius: 10,
+                  sections: sortedCategories.map((entry) {
+                    return PieChartSectionData(
+                      color: _getCategoryColor(entry.key),
+                      value: entry.value,
+                      title: '',
+                      radius: 12,
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Text(
+                        'Category Expense Breakdown',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      SizedBox(width: 4),
+                      Icon(Icons.pie_chart_rounded, size: 12, color: Colors.white70),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 2,
+                    children: sortedCategories.take(3).map((entry) {
+                      final pct = (entry.value / totalSpent * 100).toInt();
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _getCategoryColor(entry.key),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${entry.key} ($pct%)',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: Colors.white70, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _getCategoryColor(String category) {
+    switch (category.toLowerCase()) {
+      case 'food':
+      case 'dining':
+        return const Color(0xFFF97316);
+      case 'fuel':
+      case 'transport':
+        return const Color(0xFF3B82F6);
+      case 'stay':
+      case 'accommodation':
+      case 'hotel':
+        return const Color(0xFF8B5CF6);
+      case 'ticket':
+      case 'toll':
+      case 'entry':
+        return const Color(0xFF10B981);
+      case 'shopping':
+        return const Color(0xFFEC4899);
+      default:
+        return const Color(0xFFF59E0B);
+    }
   }
 }

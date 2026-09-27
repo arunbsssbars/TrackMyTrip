@@ -31,6 +31,7 @@ import '../../core/services/ocr_service.dart';
 import '../expenses/add_expense_screen.dart';
 import 'package:image_picker/image_picker.dart';
 import '../common/user_avatar.dart';
+import '../stats/trip_analytics_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -473,7 +474,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       InkWell(
                         onTap: () {
                           HapticFeedback.lightImpact();
-                          GlobalExpensesSheet.show(context);
+                          AppNavigator.push(context, const TripAnalyticsScreen());
                         },
                         borderRadius: BorderRadius.circular(14),
                         child: Container(

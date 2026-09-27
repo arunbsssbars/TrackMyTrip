@@ -1500,6 +1500,16 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
     final allExpenses = ref.watch(allExpensesProvider);
     final tripExpenses = allExpenses.where((e) => e.tripId == trip.id).toList();
     final totalSpent = tripExpenses.fold<double>(0.0, (sum, e) => sum + e.totalAmount);
+
+    final categoryBreakdown = <String, double>{};
+    for (final exp in tripExpenses) {
+      final cat = exp.category.toString().split('.').last;
+      final label = AppConstants.expenseCategories.contains(cat)
+          ? '${cat[0].toUpperCase()}${cat.substring(1)}'
+          : 'General';
+      categoryBreakdown[label] = (categoryBreakdown[label] ?? 0.0) + exp.totalAmount;
+    }
+
     // Item 19: Accurate upcoming stoppage - only show if genuinely ongoing or scheduled in future
     Stoppage? nextStoppage;
     if (!trip.isCompleted) {
@@ -1560,6 +1570,11 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
               isDark: isDark,
               totalSpent: totalSpent,
               expenseCount: tripExpenses.length,
+              categoryBreakdown: categoryBreakdown,
+              onTapPieChart: () {
+                HapticFeedback.lightImpact();
+                AppNavigator.push(context, TripAnalyticsScreen(tripId: trip.id));
+              },
               onTapLedger: () {
                 HapticFeedback.selectionClick();
                 _navigateToTripDetail(trip, initialTabIndex: 3);
