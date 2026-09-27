@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../core/services/cloud_trip_sync_service.dart';
@@ -12,6 +11,7 @@ import '../../../providers/auth_provider.dart';
 import '../../../providers/expense_provider.dart';
 import '../../../providers/invitation_provider.dart';
 import '../../../providers/trip_provider.dart';
+import '../../../widgets/app_floating_button.dart';
 import '../../trip/companion_search_dialog.dart';
 import '../../../core/utils/trip_guard_helper.dart';
 
@@ -197,25 +197,6 @@ class _MembersTabState extends ConsumerState<MembersTab> {
   }
 
 
-  void _copyShareCode(String code) {
-    Clipboard.setData(ClipboardData(text: code));
-    HapticFeedback.lightImpact();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
-            const SizedBox(width: 8),
-            Text('Trip Code "$code" copied to clipboard!'),
-          ],
-        ),
-        backgroundColor: AppTheme.primary,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
   void _shareTripCode(String code, String tripTitle) {
     final text = 'Join my trip "$tripTitle" on Track My Trip!\nUse code: $code\nDownload the app to follow route & split expenses.';
     Share.share(text, subject: 'Track My Trip Invite: $tripTitle');
@@ -324,135 +305,20 @@ class _MembersTabState extends ConsumerState<MembersTab> {
     final allExpenses = ref.watch(allExpensesProvider);
     final tripExpenses = allExpenses.where((e) => e.tripId == currentTrip.id).toList();
 
-    return ListView(
-      physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      children: [
-        // 1. Join Code Card
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: isDark
-                  ? [const Color(0xFF1E293B), const Color(0xFF0F172A)]
-                  : [AppTheme.primary.withAlpha(25), Colors.white],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: isDark ? const Color(0xFF334155) : AppTheme.primary.withAlpha(60),
-              width: 1.2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: AppTheme.primary.withAlpha(isDark ? 30 : 15),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primary.withAlpha(30),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(Icons.qr_code_rounded, color: AppTheme.primary, size: 20),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Trip Share Code',
-                                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
-                              ),
-                              Text(
-                                'Anyone with this code can join instantly',
-                                style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : AppTheme.textMutedLight),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  InkWell(
-                    onTap: () => _copyShareCode(shareCode),
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.copy_rounded, size: 14, color: Colors.white),
-                          SizedBox(width: 4),
-                          Text(
-                            'Copy',
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11.5),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF0F172A) : Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
-                  ),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      shareCode,
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 3,
-                        color: AppTheme.primary,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.share_rounded, size: 20, color: AppTheme.primary),
-                      onPressed: () => _shareTripCode(shareCode, currentTrip.title),
-                      tooltip: 'Share Invite',
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 18),
-
-        // 2. Members Header & Add Actions (Invite & Custom)
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      floatingActionButton: AppFloatingActionButton.extended(
+        heroTag: 'members_share_fab',
+        icon: Icons.share_rounded,
+        label: 'Share Code',
+        onPressed: () => _shareTripCode(shareCode, currentTrip.title),
+      ),
+      body: ListView(
+        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 88),
+        children: [
+          // 1. Members Header & Add Actions (Invite & Custom)
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -585,11 +451,14 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const SizedBox(height: 3),
-                    Row(
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: isMemberCreator ? Colors.amber.withAlpha(25) : Colors.blue.withAlpha(25),
                             borderRadius: BorderRadius.circular(6),
@@ -603,9 +472,8 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 6),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: memberPaid > 0 ? const Color(0xFF10B981).withAlpha(25) : (isDark ? Colors.white10 : Colors.grey.withAlpha(30)),
                             borderRadius: BorderRadius.circular(6),
@@ -622,7 +490,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                       ],
                     ),
                     if (member.email != null) ...[
-                      const SizedBox(height: 2),
+                      const SizedBox(height: 3),
                       Text(
                         member.email!,
                         style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : AppTheme.textMutedLight),
@@ -709,6 +577,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
           const SizedBox(height: 16),
         ],
       ],
-    );
-  }
+    ),
+  );
+}
 }

@@ -538,16 +538,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                               height: 6,
                                               decoration: BoxDecoration(
                                                 shape: BoxShape.circle,
-                                                color: _getCategoryColor(entry.key),
+                                                color: AppConstants.getExpenseCategoryColor(entry.key),
                                               ),
                                             ),
                                             const SizedBox(width: 3),
                                             Text(
                                               '${entry.key}: $pct%',
-                                              style: const TextStyle(
-                                                color: Colors.white70,
+                                              style: TextStyle(
+                                                color: AppConstants.getExpenseCategoryColor(entry.key),
                                                 fontSize: 10,
-                                                fontWeight: FontWeight.w600,
+                                                fontWeight: FontWeight.w700,
                                               ),
                                             ),
                                           ],
@@ -1241,32 +1241,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
     );
   }
-
-  Color _getCategoryColor(String category) {
-    switch (category.toLowerCase()) {
-      case 'food':
-      case 'dining':
-        return const Color(0xFFF59E0B);
-      case 'fuel':
-      case 'transport':
-      case 'transportation':
-        return const Color(0xFF0284C7);
-      case 'stay':
-      case 'hotel':
-      case 'lodging':
-      case 'accommodation':
-        return const Color(0xFF8B5CF6);
-      case 'activities':
-      case 'activity':
-      case 'sightseeing':
-        return const Color(0xFF10B981);
-      case 'shopping':
-        return const Color(0xFFEC4899);
-      case 'general':
-      default:
-        return const Color(0xFF0D9488);
-    }
-  }
 }
 
 class _TripCard extends StatelessWidget {
@@ -1778,7 +1752,7 @@ class _TripCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 7),
 
-                // Clean Action Bar: Indianized Yatra Cockpit button
+                // Clean Action Bar: Open Trip button
                 Material(
                   color: Colors.transparent,
                   child: InkWell(
@@ -1831,8 +1805,8 @@ class _TripCard extends StatelessWidget {
                           const SizedBox(width: 6),
                           Text(
                             isEnded
-                                ? 'Yatra Summary & Details'
-                                : (isActiveCockpit ? 'Yatra Cockpit (Active)' : 'Yatra Cockpit'),
+                                ? 'Trip Summary & Details'
+                                : (isActiveCockpit ? 'Open Trip (Active)' : 'Open Trip'),
                             style: TextStyle(
                               color: (!isEnded && isActiveCockpit)
                                   ? Colors.white

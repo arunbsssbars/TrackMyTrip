@@ -11,6 +11,7 @@ import '../../core/services/user_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../widgets/current_trip_hero_card.dart';
+import '../../widgets/app_floating_button.dart';
 import '../../models/trip.dart';
 import '../../models/stoppage.dart';
 import '../../providers/stoppage_provider.dart';
@@ -27,7 +28,6 @@ import '../../core/services/pdf_export_service.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/settlement_provider.dart';
 import '../stats/trip_analytics_screen.dart';
-import '../stoppage/add_stoppage_dialog.dart';
 import '../expenses/add_expense_screen.dart';
 import '../../core/utils/trip_guard_helper.dart';
 import '../../models/trip_audit_log.dart';
@@ -308,20 +308,22 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                       children: List.generate(5, (index) {
                         final starValue = index + 1.0;
                         final isFilled = currentRating >= starValue;
-                        return IconButton(
-                          iconSize: 32,
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          constraints: const BoxConstraints(),
-                          icon: Icon(
-                            isFilled ? Icons.star_rounded : Icons.star_border_rounded,
-                            color: const Color(0xFFF59E0B),
-                          ),
-                          onPressed: () {
+                        return InkResponse(
+                          onTap: () {
                             HapticFeedback.selectionClick();
                             setDialogState(() {
                               currentRating = starValue;
                             });
                           },
+                          radius: 20,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                            child: Icon(
+                              isFilled ? Icons.star_rounded : Icons.star_border_rounded,
+                              color: const Color(0xFFF59E0B),
+                              size: 32,
+                            ),
+                          ),
                         );
                       }),
                     ),
@@ -1098,61 +1100,6 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
     );
   }
 
-  Widget _buildPrimaryActionPill({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required bool isDark,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: isDark ? AppTheme.surfaceDark : Colors.white,
-      borderRadius: BorderRadius.circular(14),
-      elevation: isDark ? 0 : 2,
-      shadowColor: Colors.black.withAlpha(isDark ? 25 : 12),
-      child: InkWell(
-        onTap: () {
-          HapticFeedback.lightImpact();
-          onTap();
-        },
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(7),
-                decoration: BoxDecoration(
-                  color: color.withAlpha(25),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(icon, color: color, size: 18),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 11.5,
-                  color: isDark ? Colors.white : AppTheme.textMainLight,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -1169,14 +1116,10 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
         title: trips.isEmpty || currentTrip == null
             ? const Row(
                 children: [
-                  PulsingLiveBeacon(
-                    dotSize: 8,
-                    showLabel: false,
-                    color: AppTheme.primary,
-                  ),
+                  Icon(Icons.explore_rounded, color: AppTheme.primary, size: 20),
                   SizedBox(width: 8),
                   Text(
-                    'Live Trip',
+                    'Current Trip',
                     style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
                   ),
                 ],
@@ -1185,7 +1128,9 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                 onTap: () => _openJourneySwitcher(context, trips, currentTrip),
                 borderRadius: BorderRadius.circular(20),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  height: 38,
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
                   decoration: BoxDecoration(
                     color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
                     borderRadius: BorderRadius.circular(20),
@@ -1257,7 +1202,7 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                 ),
               ),
         actions: [
-          if (trackingState.isTracking)
+          if (trackingState.isTracking && currentTrip != null && !currentTrip.isCompleted && currentTrip.status != 'completed')
             Padding(
               padding: const EdgeInsets.only(right: 4),
               child: Container(
@@ -1307,19 +1252,13 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
           ? _buildEmptyState(context, isDark)
           : _buildActiveTripContent(context, currentTrip, trackingState, isDark),
       floatingActionButton: (currentTrip != null && !currentTrip.isCompleted && MediaQuery.of(context).viewInsets.bottom == 0)
-          ? FloatingActionButton.extended(
-              onPressed: () => _openOcrAddExpense(currentTrip),
-              backgroundColor: AppTheme.primary,
-              foregroundColor: Colors.white,
-              elevation: 4,
-              icon: const Icon(Icons.document_scanner_rounded, size: 19),
-              label: const Text(
-                'Scan Bill (OCR)',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, letterSpacing: -0.2),
-              ),
+          ? AppFloatingActionButton(
+              onTap: () => _openOcrAddExpense(currentTrip),
+              icon: Icons.document_scanner_rounded,
+              label: 'Scan Bill (OCR)',
             )
           : null,
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
     );
   }
 
@@ -1555,76 +1494,7 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
             ),
             const SizedBox(height: 14),
 
-            // 2. High-Frequency Action Launchpad (4 Thumb-Friendly Pills)
-            Row(
-              children: [
-                Expanded(
-                  child: _buildPrimaryActionPill(
-                    icon: Icons.add_location_alt_rounded,
-                    label: '+ Stop',
-                    color: const Color(0xFF0284C7),
-                    isDark: isDark,
-                    onTap: () async {
-                      final canProceed = await TripGuardHelper.ensureTripOpenForEdit(
-                        context,
-                        ref,
-                        trip,
-                        actionLabel: 'add a stoppage',
-                      );
-                      if (!canProceed || !context.mounted) return;
-                      AddStoppageDialog.show(context, tripId: trip.id);
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _buildPrimaryActionPill(
-                    icon: Icons.receipt_long_rounded,
-                    label: '+ Bill',
-                    color: const Color(0xFF10B981),
-                    isDark: isDark,
-                    onTap: () async {
-                      final canProceed = await TripGuardHelper.ensureTripOpenForEdit(
-                        context,
-                        ref,
-                        trip,
-                        actionLabel: 'add a bill / expense',
-                      );
-                      if (!canProceed || !context.mounted) return;
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => AddExpenseScreen(tripId: trip.id),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _buildPrimaryActionPill(
-                    icon: Icons.radar_rounded,
-                    label: 'Radar',
-                    color: const Color(0xFF8B5CF6),
-                    isDark: isDark,
-                    onTap: () => _navigateToTripDetail(trip, initialTabIndex: 1),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _buildPrimaryActionPill(
-                    icon: Icons.people_alt_rounded,
-                    label: 'Members',
-                    color: const Color(0xFFF59E0B),
-                    isDark: isDark,
-                    onTap: () => _navigateToTripDetail(trip, initialTabIndex: 2),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // 3. Connected Convoy Telemetry Instrument Cluster
+            // 2. Connected Convoy Telemetry Instrument Cluster
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
@@ -1907,13 +1777,13 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
               const SizedBox(height: 16),
             ],
 
-            // 5. Journey Modules Hub (4 Core Pillars in 2x2 Grid)
+            // 4. Journey Modules Hub (All 6 Core Modules in Clean 3x2 Grid)
             const Row(
               children: [
                 Icon(Icons.grid_view_rounded, size: 16, color: AppTheme.primary),
                 SizedBox(width: 6),
                 Text(
-                  'JOURNEY MODULES',
+                  'JOURNEY MODULES (6)',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w900,
@@ -1954,6 +1824,17 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
               children: [
                 Expanded(
                   child: _buildQuickActionCard(
+                    icon: Icons.people_alt_rounded,
+                    title: 'Companions',
+                    subtitle: '${trip.members.length} members',
+                    color: const Color(0xFFF59E0B),
+                    isDark: isDark,
+                    onTap: () => _navigateToTripDetail(trip, initialTabIndex: 2),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildQuickActionCard(
                     icon: Icons.account_balance_wallet_rounded,
                     title: 'Bills & Splits',
                     subtitle: '${tripExpenses.length} bills recorded',
@@ -1962,7 +1843,11 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                     onTap: () => _navigateToTripDetail(trip, initialTabIndex: 3),
                   ),
                 ),
-                const SizedBox(width: 10),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
                 Expanded(
                   child: _buildQuickActionCard(
                     icon: Icons.photo_library_rounded,
@@ -1971,6 +1856,19 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                     color: const Color(0xFFEC4899),
                     isDark: isDark,
                     onTap: () => _navigateToTripDetail(trip, initialTabIndex: trip.isSolo ? 4 : 5),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildQuickActionCard(
+                    icon: Icons.analytics_rounded,
+                    title: 'Analytics',
+                    subtitle: 'Charts & ledger',
+                    color: const Color(0xFF06B6D4),
+                    isDark: isDark,
+                    onTap: () {
+                      AppNavigator.push(context, TripAnalyticsScreen(tripId: trip.id));
+                    },
                   ),
                 ),
               ],

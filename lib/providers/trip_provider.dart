@@ -479,10 +479,15 @@ final selectedTripIdProvider = StateProvider<String?>((ref) => null);
 final currentTripProvider = Provider<Trip?>((ref) {
   final trips = ref.watch(tripListProvider);
   final selectedId = ref.watch(selectedTripIdProvider);
-  if (selectedId == null && trips.isNotEmpty) return trips.first;
+  if (selectedId == null && trips.isNotEmpty) {
+    // Prioritize active, ongoing (non-concluded) journeys
+    final activeTrip = trips.where((t) => !t.isCompleted && t.status != 'completed' && t.status != 'concluded' && t.status != 'ended').firstOrNull;
+    return activeTrip ?? trips.first;
+  }
   try {
     return trips.firstWhere((t) => t.id == selectedId);
   } catch (_) {
-    return trips.isNotEmpty ? trips.first : null;
+    final activeTrip = trips.where((t) => !t.isCompleted && t.status != 'completed' && t.status != 'concluded' && t.status != 'ended').firstOrNull;
+    return activeTrip ?? (trips.isNotEmpty ? trips.first : null);
   }
 });

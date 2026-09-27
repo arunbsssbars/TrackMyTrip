@@ -15,6 +15,7 @@ import '../../../providers/stoppage_provider.dart';
 import '../../stoppage/add_stoppage_dialog.dart';
 import '../../stoppage/stoppage_detail_screen.dart';
 import '../../../core/utils/trip_guard_helper.dart';
+import '../../../widgets/app_floating_button.dart';
 
 class TimelineTab extends ConsumerStatefulWidget {
   final Trip trip;
@@ -952,128 +953,14 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
           ),
         );
       }),
-
-      // Dedicated "Add Stoppage" Action Button below the latest/last timeline added
-      Container(
-        margin: const EdgeInsets.only(top: 8, bottom: 24),
-        decoration: BoxDecoration(
-          color: isDark ? AppTheme.surfaceDark : Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: AppTheme.primary.withAlpha(120),
-            width: 1.4,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: AppTheme.primary.withAlpha(isDark ? 30 : 20),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () => _openAddStoppageDialog(context, autoDetectGps: true),
-            borderRadius: BorderRadius.circular(20),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(11),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary.withAlpha(isDark ? 35 : 20),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.add_location_alt_rounded, color: AppTheme.primary, size: 24),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          '+ Add Stoppage',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.2,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Log a viewpoint, restaurant, fuel pump or stay',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 16),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
     ],
   ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       floatingActionButton: (!widget.trip.isCompleted && MediaQuery.of(context).viewInsets.bottom == 0)
-          ? Container(
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF0D9488), Color(0xFF0F766E)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(28),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF0D9488).withAlpha(110),
-                    blurRadius: 14,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-                border: Border.all(color: Colors.white.withAlpha(45), width: 1),
-              ),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: () => _openAddStoppageDialog(context, autoDetectGps: true),
-                  borderRadius: BorderRadius.circular(28),
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.add_location_alt_rounded, color: Colors.white, size: 18),
-                        SizedBox(width: 6.5),
-                        Text(
-                          'Tag Stoppage',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 13,
-                            letterSpacing: -0.2,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+          ? AppFloatingActionButton(
+              onTap: () => _openAddStoppageDialog(context, autoDetectGps: true),
+              icon: Icons.add_location_alt_rounded,
+              label: 'Tag Stoppage',
             )
           : null,
     );
