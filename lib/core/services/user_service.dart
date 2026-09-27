@@ -38,9 +38,11 @@ class UserService {
     return _cachedUsers[id] ?? _registeredUsers.where((u) => u.id == id).firstOrNull;
   }
 
-  static Future<UserProfile?> fetchUserProfile(String id) async {
+  static Future<UserProfile?> fetchUserProfile(String id, {bool forceRefresh = false}) async {
     final local = getUserById(id);
-    if (local != null && local.displayName != 'Traveler') return local;
+    if (!forceRefresh) {
+      if (local != null && local.displayName != 'Traveler' && (local.phone != null || local.bio != null)) return local;
+    }
     try {
       final fs = _firestore;
       if (fs != null) {
@@ -88,7 +90,7 @@ class UserService {
     _cachedUsers.clear();
   }
 
-  /// Generates full tokens and partial prefixes for flexible matching
+  /// Generates full tokens and partial prefixes for flexible matching (capped to 20 for storage efficiency)
   static Set<String> generateSearchTokens({
     required String username,
     required String displayName,
@@ -96,33 +98,148 @@ class UserService {
     String? phone,
   }) {
     final tokens = <String>{};
-    final inputs = <String>[
-      username.toLowerCase().trim(),
-      displayName.toLowerCase().trim(),
-      if (email != null) email.toLowerCase().trim(),
-      if (email != null) email.split('@').first.toLowerCase().trim(),
-      if (phone != null) phone.replaceAll(RegExp(r'\D'), ''),
-    ];
-
-    for (final word in displayName.toLowerCase().split(' ')) {
-      if (word.trim().isNotEmpty) inputs.add(word.trim());
-    }
-
-    for (final str in inputs) {
-      if (str.isEmpty) continue;
-      tokens.add(str);
-      for (int i = 2; i <= str.length && i <= 20; i++) {
-        tokens.add(str.substring(0, i));
+    final u = username.toLowerCase().trim();
+    if (u.isNotEmpty) {
+      tokens.add(u);
+      for (int i = 2; i <= u.length && tokens.length < 8; i++) {
+        tokens.add(u.substring(0, i));
       }
     }
-    return tokens;
+
+    final d = displayName.toLowerCase().trim();
+    if (d.isNotEmpty && d != u) {
+      tokens.add(d);
+      for (final word in d.split(' ')) {
+        final w = word.trim();
+        if (w.length >= 2 && tokens.length < 14) {
+          tokens.add(w);
+          if (w.length > 3 && tokens.length < 14) {
+            tokens.add(w.substring(0, 3));
+          }
+        }
+      }
+    }
+
+    if (email != null && email.trim().isNotEmpty) {
+      final e = email.toLowerCase().trim();
+      final ePrefix = e.split('@').first;
+      if (ePrefix.isNotEmpty && tokens.length < 18) {
+        tokens.add(ePrefix);
+      }
+    }
+
+    if (phone != null && phone.trim().isNotEmpty) {
+      final digits = phone.replaceAll(RegExp(r'\D'), '');
+      if (digits.length >= 4 && tokens.length < 20) {
+        tokens.add(digits);
+        if (digits.length >= 10 && tokens.length < 20) {
+          tokens.add(digits.substring(digits.length - 4)); // last 4 digits
+        }
+      }
+    }
+
+    return tokens.take(20).toSet();
+  }
+
+  /// Gets suggested / recent companions from previous trips and local database
+  static Future<List<UserProfile>> getSuggestedUsers() async {
+    final currentUserId = _currentUser.id;
+    String? fbUid;
+    String? fbEmail;
+    try {
+      fbUid = FirebaseAuth.instance.currentUser?.uid;
+      fbEmail = FirebaseAuth.instance.currentUser?.email;
+    } catch (_) {}
+    final currentUserEmail = (_currentUser.email ?? fbEmail)?.toLowerCase().trim();
+    final currentUsername = _currentUser.username.toLowerCase().trim();
+
+    final Map<String, UserProfile> suggested = {};
+
+    try {
+      final db = AppDatabase.instance;
+      if (db != null) {
+        // 1. Companions from existing trips
+        final trips = await db.getTrips();
+        for (final trip in trips) {
+          for (final m in trip.members) {
+            final id = m.id;
+            final email = m.email?.toLowerCase().trim();
+            final username = m.name.toLowerCase().replaceAll(' ', '_');
+
+            if (id == currentUserId ||
+                (fbUid != null && id == fbUid) ||
+                (currentUserEmail != null && email == currentUserEmail) ||
+                (currentUsername.isNotEmpty && username == currentUsername)) {
+              continue;
+            }
+
+            suggested.putIfAbsent(
+              id,
+              () => UserProfile(
+                id: id,
+                username: username,
+                displayName: m.name.isNotEmpty ? m.name : 'Traveler',
+                email: m.email,
+                colorHex: m.colorHex ?? '0xFF0D9488',
+                bio: 'Companion in ${trip.title}',
+                avatarUrl: m.avatarUrl,
+              ),
+            );
+          }
+        }
+
+        // 2. Locally registered users
+        final localDbUsers = await db.getRegisteredUsers();
+        for (final rec in localDbUsers) {
+          final id = rec['id'] as String? ?? rec['email'] as String? ?? '';
+          final email = (rec['email'] as String?)?.toLowerCase().trim();
+          final username = (rec['username'] as String? ?? '').toLowerCase().trim();
+          final displayName = (rec['name'] as String? ?? rec['displayName'] as String? ?? username).trim();
+
+          if (id.isEmpty ||
+              id == currentUserId ||
+              (fbUid != null && id == fbUid) ||
+              (currentUserEmail != null && email == currentUserEmail) ||
+              (currentUsername.isNotEmpty && username == currentUsername)) {
+            continue;
+          }
+
+          suggested.putIfAbsent(
+            id,
+            () => UserProfile(
+              id: id,
+              username: username.isNotEmpty ? username : 'user',
+              displayName: displayName.isNotEmpty ? displayName : 'Traveler',
+              email: rec['email'] as String?,
+              phone: rec['phone'] as String?,
+              colorHex: rec['colorHex'] as String? ?? '0xFF10B981',
+              bio: (rec['bio'] as String?)?.trim().isNotEmpty == true ? (rec['bio'] as String).trim() : null,
+              avatarUrl: rec['avatarUrl'] as String?,
+            ),
+          );
+        }
+      }
+    } catch (_) {}
+
+    // 3. In-memory registered users
+    for (final u in _registeredUsers) {
+      if (u.id == currentUserId ||
+          (currentUserEmail != null && u.email?.toLowerCase().trim() == currentUserEmail) ||
+          (currentUsername.isNotEmpty && u.username.toLowerCase().trim() == currentUsername)) {
+        continue;
+      }
+      suggested.putIfAbsent(u.id, () => u);
+    }
+
+    return suggested.values.take(15).toList();
   }
 
   /// Searches for companions matching a query by @username, display name, email, or mobile number
   static Future<List<UserProfile>> searchUsers(String query) async {
-    final cleanQuery = query.trim().toLowerCase().replaceAll('@', '');
-    if (cleanQuery.length < 2) {
-      return <UserProfile>[];
+    final rawTrimmed = query.trim();
+    final rawLower = rawTrimmed.toLowerCase();
+    if (rawLower.length < 2) {
+      return [];
     }
 
     final currentUserId = _currentUser.id;
@@ -135,6 +252,11 @@ class UserService {
     final currentUserEmail = (_currentUser.email ?? fbEmail)?.toLowerCase().trim();
     final currentUsername = _currentUser.username.toLowerCase().trim();
 
+    final isEmailQuery = rawLower.contains('@');
+    final usernameQuery = rawLower.startsWith('@') ? rawLower.substring(1).trim() : rawLower;
+    final cleanQuery = usernameQuery.replaceAll('@', '');
+    final digitsQuery = rawLower.replaceAll(RegExp(r'\D'), '');
+
     final Map<String, UserProfile> combined = {};
 
     void parseUserDocs(QuerySnapshot<Map<String, dynamic>> snap) {
@@ -146,7 +268,10 @@ class UserService {
         final displayName = (data['displayName'] as String? ?? data['name'] as String? ?? username).trim();
 
         // Never show own account in search results
-        if (id == currentUserId || (fbUid != null && id == fbUid) || (currentUserEmail != null && email == currentUserEmail) || (currentUsername.isNotEmpty && username == currentUsername)) {
+        if (id == currentUserId ||
+            (fbUid != null && id == fbUid) ||
+            (currentUserEmail != null && email == currentUserEmail) ||
+            (currentUsername.isNotEmpty && username == currentUsername)) {
           continue;
         }
 
@@ -163,20 +288,35 @@ class UserService {
         combined[id] = profile;
         _cachedUsers[id] = profile;
       }
-
     }
-
-    final digitsQuery = cleanQuery.replaceAll(RegExp(r'\D'), '');
 
     // 1. Fetch from Firestore users collection
     final fs = _firestore;
     if (fs != null) {
       final usersRef = fs.collection('users');
+
+      // (A) Search tokens array query
       try {
         final snap = await usersRef.where('searchTokens', arrayContains: cleanQuery).limit(25).get();
         parseUserDocs(snap);
       } catch (_) {}
 
+      // (B) Email direct / prefix query if '@' present
+      if (isEmailQuery) {
+        try {
+          final snap = await usersRef.where('email', isEqualTo: rawLower).limit(5).get();
+          parseUserDocs(snap);
+        } catch (_) {}
+        try {
+          final snap = await usersRef
+              .where('email', isGreaterThanOrEqualTo: rawLower)
+              .where('email', isLessThan: '$rawLower\uf8ff')
+              .limit(15)
+              .get();
+          parseUserDocs(snap);
+        } catch (_) {}
+      } else {
+        // (C) Username prefix range query
         try {
           final snap = await usersRef
               .where('username', isGreaterThanOrEqualTo: cleanQuery)
@@ -185,52 +325,48 @@ class UserService {
               .get();
           parseUserDocs(snap);
         } catch (_) {}
-
-        try {
-          final snap = await usersRef
-              .where('email', isGreaterThanOrEqualTo: cleanQuery)
-              .where('email', isLessThan: '$cleanQuery\uf8ff')
-              .limit(15)
-              .get();
-          parseUserDocs(snap);
-        } catch (_) {}
-
-        try {
-          final broadSnap = await usersRef.limit(100).get();
-          for (final doc in broadSnap.docs) {
-            final data = doc.data();
-            final id = doc.id;
-            final email = (data['email'] as String?)?.toLowerCase().trim();
-            final username = (data['username'] as String? ?? '').toLowerCase().trim();
-            final displayName = (data['displayName'] as String? ?? data['name'] as String? ?? username).trim();
-            final phone = (data['phone'] as String? ?? '').replaceAll(RegExp(r'\D'), '');
-
-            if (id == currentUserId || (fbUid != null && id == fbUid) || (currentUserEmail != null && email == currentUserEmail) || (currentUsername.isNotEmpty && username == currentUsername)) {
-              continue;
-            }
-
-            final matchName = displayName.toLowerCase().contains(cleanQuery);
-            final matchUser = username.contains(cleanQuery);
-            final matchEmail = email != null && email.contains(cleanQuery);
-            final matchPhone = digitsQuery.length >= 3 && phone.contains(digitsQuery);
-
-            if (matchName || matchUser || matchEmail || matchPhone) {
-              final profile = UserProfile(
-                id: id,
-                username: username.isNotEmpty ? username : 'user',
-                displayName: displayName.isNotEmpty ? displayName : 'Traveler',
-                email: data['email'] as String?,
-                phone: data['phone'] as String?,
-                colorHex: data['colorHex'] as String? ?? '0xFF3B82F6',
-                bio: (data['bio'] as String?)?.trim().isNotEmpty == true ? (data['bio'] as String).trim() : null,
-                avatarUrl: data['avatarUrl'] as String?,
-              );
-              combined[id] = profile;
-              _cachedUsers[id] = profile;
-            }
-          }
-        } catch (_) {}
       }
+
+      // (D) Broad scan fallback for phone and substring matches
+      try {
+        final broadSnap = await usersRef.limit(100).get();
+        for (final doc in broadSnap.docs) {
+          final data = doc.data();
+          final id = doc.id;
+          final email = (data['email'] as String?)?.toLowerCase().trim();
+          final username = (data['username'] as String? ?? '').toLowerCase().trim();
+          final displayName = (data['displayName'] as String? ?? data['name'] as String? ?? username).trim();
+          final phone = (data['phone'] as String? ?? '').replaceAll(RegExp(r'\D'), '');
+
+          if (id == currentUserId ||
+              (fbUid != null && id == fbUid) ||
+              (currentUserEmail != null && email == currentUserEmail) ||
+              (currentUsername.isNotEmpty && username == currentUsername)) {
+            continue;
+          }
+
+          final matchName = displayName.toLowerCase().contains(cleanQuery);
+          final matchUser = username.contains(cleanQuery);
+          final matchEmail = email != null && (email.contains(cleanQuery) || (isEmailQuery && email.contains(rawLower)));
+          final matchPhone = digitsQuery.length >= 3 && phone.contains(digitsQuery);
+
+          if (matchName || matchUser || matchEmail || matchPhone) {
+            final profile = UserProfile(
+              id: id,
+              username: username.isNotEmpty ? username : 'user',
+              displayName: displayName.isNotEmpty ? displayName : 'Traveler',
+              email: data['email'] as String?,
+              phone: data['phone'] as String?,
+              colorHex: data['colorHex'] as String? ?? '0xFF3B82F6',
+              bio: (data['bio'] as String?)?.trim().isNotEmpty == true ? (data['bio'] as String).trim() : null,
+              avatarUrl: data['avatarUrl'] as String?,
+            );
+            combined[id] = profile;
+            _cachedUsers[id] = profile;
+          }
+        }
+      } catch (_) {}
+    }
 
     // 2. Fetch locally registered accounts from SQLite database
     try {
@@ -244,13 +380,16 @@ class UserService {
           final displayName = (rec['name'] as String? ?? rec['displayName'] as String? ?? username).trim();
           final phone = (rec['phone'] as String?)?.replaceAll(RegExp(r'\D'), '');
 
-          if (id.isEmpty || id == currentUserId || (currentUserEmail != null && email == currentUserEmail) || (currentUsername.isNotEmpty && username == currentUsername)) {
+          if (id.isEmpty ||
+              id == currentUserId ||
+              (currentUserEmail != null && email == currentUserEmail) ||
+              (currentUsername.isNotEmpty && username == currentUsername)) {
             continue;
           }
 
           final matchName = displayName.toLowerCase().contains(cleanQuery);
           final matchUser = username.contains(cleanQuery);
-          final matchEmail = email != null && email.contains(cleanQuery);
+          final matchEmail = email != null && (email.contains(cleanQuery) || (isEmailQuery && email.contains(rawLower)));
           final matchPhone = digitsQuery.length >= 3 && phone != null && phone.contains(digitsQuery);
 
           if (matchName || matchUser || matchEmail || matchPhone) {
@@ -281,12 +420,14 @@ class UserService {
             final email = m.email?.toLowerCase().trim();
             final username = name.toLowerCase().replaceAll(' ', '_');
 
-            if (id == currentUserId || (currentUserEmail != null && email == currentUserEmail) || (currentUsername.isNotEmpty && username == currentUsername)) {
+            if (id == currentUserId ||
+                (currentUserEmail != null && email == currentUserEmail) ||
+                (currentUsername.isNotEmpty && username == currentUsername)) {
               continue;
             }
 
             final matchName = name.toLowerCase().contains(cleanQuery);
-            final matchEmail = email != null && email.contains(cleanQuery);
+            final matchEmail = email != null && (email.contains(cleanQuery) || (isEmailQuery && email.contains(rawLower)));
             final matchUser = username.contains(cleanQuery);
 
             if (matchName || matchEmail || matchUser) {
@@ -317,7 +458,7 @@ class UserService {
       }
       final matchUsername = local.username.toLowerCase().contains(cleanQuery);
       final matchName = local.displayName.toLowerCase().contains(cleanQuery);
-      final matchEmail = local.email?.toLowerCase().contains(cleanQuery) ?? false;
+      final matchEmail = local.email?.toLowerCase().contains(rawLower) ?? false;
       final cleanPhone = local.phone?.replaceAll(RegExp(r'\D'), '') ?? '';
       final matchPhone = (local.phone != null && local.phone!.toLowerCase().contains(cleanQuery)) ||
           (digitsQuery.length >= 3 && cleanPhone.contains(digitsQuery));
@@ -421,6 +562,9 @@ class UserService {
 }
 
 final userSearchProvider = FutureProvider.autoDispose.family<List<UserProfile>, String>((ref, query) async {
+  if (query.trim().length < 2) {
+    return UserService.getSuggestedUsers();
+  }
   return UserService.searchUsers(query);
 });
 

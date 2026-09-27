@@ -5,6 +5,7 @@ import '../../core/utils/date_formatter.dart';
 import '../../models/trip.dart';
 import '../../models/trip_audit_log.dart';
 import '../../providers/audit_log_provider.dart';
+import '../../widgets/audit_log_entry_card.dart';
 
 class AuditLogSheet extends ConsumerStatefulWidget {
   final Trip trip;
@@ -26,12 +27,34 @@ class AuditLogSheet extends ConsumerStatefulWidget {
 
 class _AuditLogSheetState extends ConsumerState<AuditLogSheet> {
   final Set<String> _expandedDates = {};
+  final ScrollController _scrollController = ScrollController();
+  int _displayLimit = 10;
+  String _selectedCategory = 'all';
 
   @override
   void initState() {
     super.initState();
     // Default expand today
     _expandedDates.add(_getDateKey(DateTime.now()));
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.hasClients &&
+        _scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 150) {
+      if (_displayLimit < 200) {
+        setState(() {
+          _displayLimit += 10;
+        });
+      }
+    }
   }
 
   String _getDateKey(DateTime dt) {
@@ -50,100 +73,6 @@ class _AuditLogSheetState extends ConsumerState<AuditLogSheet> {
       return 'Yesterday • ${DateFormatter.formatShortDate(dt)}';
     } else {
       return DateFormatter.formatShortDate(dt);
-    }
-  }
-
-  String _selectedCategory = 'all';
-
-  Color _getActionColor(String actionType) {
-    switch (actionType) {
-      case 'delete_expense':
-      case 'delete_settlement':
-      case 'delete_stoppage':
-      case 'delete_memory':
-        return Colors.red;
-      case 'edit_expense':
-      case 'edit_settlement':
-      case 'edit_stoppage':
-        return Colors.amber.shade800;
-      case 'create_expense':
-      case 'create_settlement':
-      case 'create_stoppage':
-        return Colors.green;
-      case 'add_memory':
-        return AppTheme.secondary;
-      case 'update_budget':
-        return Colors.teal;
-      case 'member_joined':
-        return Colors.blue;
-      case 'depart_stoppage':
-        return Colors.indigo;
-      default:
-        return AppTheme.primary;
-    }
-  }
-
-  String _getActionLabel(String actionType) {
-    switch (actionType) {
-      case 'delete_expense':
-        return 'Deleted Bill';
-      case 'edit_expense':
-        return 'Edited Bill';
-      case 'create_expense':
-        return 'Added Bill';
-      case 'delete_settlement':
-        return 'Deleted Payment';
-      case 'edit_settlement':
-        return 'Edited Payment';
-      case 'create_settlement':
-        return 'Recorded Payment';
-      case 'create_stoppage':
-        return 'Added Stoppage';
-      case 'edit_stoppage':
-        return 'Updated Stoppage';
-      case 'depart_stoppage':
-        return 'Departed Stoppage';
-      case 'delete_stoppage':
-        return 'Deleted Stoppage';
-      case 'add_memory':
-        return 'Added Photo';
-      case 'delete_memory':
-        return 'Deleted Photo';
-      case 'update_budget':
-        return 'Updated Budget';
-      case 'member_joined':
-        return 'Companion Joined';
-      default:
-        return 'Activity';
-    }
-  }
-
-  IconData _getActionIcon(String actionType) {
-    switch (actionType) {
-      case 'delete_expense':
-      case 'delete_settlement':
-      case 'delete_stoppage':
-      case 'delete_memory':
-        return Icons.delete_forever_rounded;
-      case 'edit_expense':
-      case 'edit_settlement':
-      case 'edit_stoppage':
-        return Icons.edit_note_rounded;
-      case 'create_expense':
-      case 'create_settlement':
-        return Icons.add_circle_outline_rounded;
-      case 'create_stoppage':
-        return Icons.add_location_alt_rounded;
-      case 'depart_stoppage':
-        return Icons.directions_walk_rounded;
-      case 'add_memory':
-        return Icons.add_photo_alternate_rounded;
-      case 'update_budget':
-        return Icons.account_balance_wallet_rounded;
-      case 'member_joined':
-        return Icons.person_add_alt_1_rounded;
-      default:
-        return Icons.history_rounded;
     }
   }
 
@@ -186,156 +115,13 @@ class _AuditLogSheetState extends ConsumerState<AuditLogSheet> {
     );
   }
 
-  void _showActivityDetailDialog(BuildContext context, TripAuditLog log) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final actionColor = _getActionColor(log.actionType);
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: actionColor.withAlpha(25),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(_getActionIcon(log.actionType), color: actionColor, size: 22),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                _getActionLabel(log.actionType),
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        ),
-        content: SizedBox(
-          width: MediaQuery.of(context).size.width * 0.9,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  log.itemTitle,
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 10),
-
-                // Performer & Time details
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: isDark ? AppTheme.surfaceMutedDark : const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: isDark ? AppTheme.borderDark : AppTheme.borderLight),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.person_rounded, size: 16, color: AppTheme.primary),
-                          const SizedBox(width: 8),
-                          const Text('Modified by:', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              log.performedByName,
-                              textAlign: TextAlign.end,
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const Divider(height: 14),
-                      Row(
-                        children: [
-                          const Icon(Icons.access_time_rounded, size: 16, color: AppTheme.secondary),
-                          const SizedBox(width: 8),
-                          const Text('Timestamp:', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              DateFormatter.formatDateTime(log.timestamp),
-                              textAlign: TextAlign.end,
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-            const SizedBox(height: 12),
-
-            // Actual Change Details
-            if (log.changeDetails != null && log.changeDetails!.isNotEmpty) ...[
-              const Text('What Changed:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
-              const SizedBox(height: 4),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.black26 : const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  log.changeDetails!,
-                  style: TextStyle(fontSize: 13, color: isDark ? Colors.grey[200] : const Color(0xFF1E293B)),
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-
-            // Remark
-            const Text('Remark:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.secondary)),
-            const SizedBox(height: 4),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppTheme.secondary.withAlpha(15),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppTheme.secondary.withAlpha(40)),
-              ),
-              child: Text(
-                (log.reason != null && log.reason!.isNotEmpty) ? log.reason! : 'No remark provided.',
-                style: const TextStyle(fontSize: 13, fontStyle: FontStyle.italic),
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-    actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final auditLogs = ref.watch(currentTripAuditLogsProvider);
+    final auditLogs = ref.watch(tripAuditLogsProvider(widget.trip.id));
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final allCount = auditLogs.length;
     final billsCount = auditLogs.where((l) => l.category == 'expense').length;
-    final stopsCount = auditLogs.where((l) => l.category == 'stoppage').length;
-    final photosCount = auditLogs.where((l) => l.category == 'memory').length;
     final paymentsCount = auditLogs.where((l) => l.category == 'settlement').length;
 
     final filteredLogs = _selectedCategory == 'all'
@@ -395,11 +181,11 @@ class _AuditLogSheetState extends ConsumerState<AuditLogSheet> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Trip Trust & Live Audit Trail',
+                      'Audit Trail & Trust History',
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: -0.3),
                     ),
                     Text(
-                      'Real-time transparent activity & modification remarks',
+                      'Immutable financial audit trail & tamper-evident history',
                       style: TextStyle(fontSize: 11, color: Colors.grey),
                     ),
                   ],
@@ -413,19 +199,15 @@ class _AuditLogSheetState extends ConsumerState<AuditLogSheet> {
           ),
           const SizedBox(height: 10),
 
-          // Category filter pills
+          // Category filter pills (Financial Only: All, Bills, Payments)
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
                 _buildFilterChip('all', 'All ($allCount)'),
-                const SizedBox(width: 6),
+                const SizedBox(width: 8),
                 _buildFilterChip('expense', 'Bills ($billsCount)'),
-                const SizedBox(width: 6),
-                _buildFilterChip('stoppage', 'Stops ($stopsCount)'),
-                const SizedBox(width: 6),
-                _buildFilterChip('memory', 'Photos ($photosCount)'),
-                const SizedBox(width: 6),
+                const SizedBox(width: 8),
                 _buildFilterChip('settlement', 'Payments ($paymentsCount)'),
               ],
             ),
@@ -459,227 +241,119 @@ class _AuditLogSheetState extends ConsumerState<AuditLogSheet> {
                       ),
                     ),
                   )
-                : ListView.builder(
-                    itemCount: sortedDateKeys.length,
-                    itemBuilder: (context, dateIndex) {
-                      final dateKey = sortedDateKeys[dateIndex];
-                      final dateLogs = groupedByDate[dateKey]!;
-                      final isExpanded = _expandedDates.contains(dateKey);
-                      final firstDate = dateLogs.first.timestamp;
+                : Builder(
+                    builder: (context) {
+                      final displayedDateKeys = sortedDateKeys.take(_displayLimit).toList();
+                      final hasMore = sortedDateKeys.length > displayedDateKeys.length;
 
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        decoration: BoxDecoration(
-                          color: isDark ? AppTheme.surfaceMutedDark : const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: isDark ? AppTheme.borderDark : AppTheme.borderLight),
-                        ),
-                        child: Column(
-                          children: [
-                            // Date Accordion Header
-                            InkWell(
-                              onTap: () {
-                                setState(() {
-                                  if (isExpanded) {
-                                    _expandedDates.remove(dateKey);
-                                  } else {
-                                    _expandedDates.add(dateKey);
-                                  }
-                                });
-                              },
-                              borderRadius: BorderRadius.circular(16),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.all(6),
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.primary.withAlpha(20),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: const Icon(Icons.calendar_today_rounded, size: 14, color: AppTheme.primary),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        _formatDateHeading(firstDate),
-                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                      ),
-                                    ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: isExpanded ? AppTheme.primary : Colors.grey.withAlpha(40),
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Text(
-                                        '${dateLogs.length} ${dateLogs.length == 1 ? 'activity' : 'activities'}',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.bold,
-                                          color: isExpanded ? Colors.white : (isDark ? Colors.grey[300] : Colors.grey[700]),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Icon(
-                                      isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
-                                      color: Colors.grey,
-                                      size: 20,
-                                    ),
-                                  ],
+                      return ListView.builder(
+                        controller: _scrollController,
+                        itemCount: displayedDateKeys.length + (hasMore ? 1 : 0),
+                        itemBuilder: (context, dateIndex) {
+                          if (dateIndex == displayedDateKeys.length) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              child: Center(
+                                child: Text(
+                                  'Showing ${displayedDateKeys.length} of ${sortedDateKeys.length} days • Scroll for more',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ),
+                            );
+                          }
+                          final dateKey = displayedDateKeys[dateIndex];
+                          final dateLogs = groupedByDate[dateKey]!;
+                          final isExpanded = _expandedDates.contains(dateKey);
+                          final firstDate = dateLogs.first.timestamp;
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            decoration: BoxDecoration(
+                              color: isDark ? AppTheme.surfaceMutedDark : const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: isDark ? AppTheme.borderDark : AppTheme.borderLight),
                             ),
-
-                            // Expanded Activities for this Date
-                            if (isExpanded) ...[
-                              const Divider(height: 1),
-                              ListView.separated(
-                                shrinkWrap: true,
-                                physics: const NeverScrollableScrollPhysics(),
-                                padding: const EdgeInsets.all(12),
-                                itemCount: dateLogs.length,
-                                separatorBuilder: (_, __) => const SizedBox(height: 10),
-                                itemBuilder: (ctx, logIndex) {
-                                  final log = dateLogs[logIndex];
-                                  final actionColor = _getActionColor(log.actionType);
-                                  final actionLabel = _getActionLabel(log.actionType);
-                                  final actionIcon = _getActionIcon(log.actionType);
-
-                                  return InkWell(
-                                    onTap: () => _showActivityDetailDialog(context, log),
-                                    borderRadius: BorderRadius.circular(14),
-                                    child: Container(
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        color: isDark ? AppTheme.surfaceDark : Colors.white,
-                                        borderRadius: BorderRadius.circular(14),
-                                        border: Border.all(color: isDark ? AppTheme.borderDark : AppTheme.borderLight),
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                            children: [
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                                decoration: BoxDecoration(
-                                                  color: actionColor.withAlpha(20),
-                                                  borderRadius: BorderRadius.circular(6),
-                                                ),
-                                                child: Row(
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: [
-                                                    Icon(actionIcon, size: 12, color: actionColor),
-                                                    const SizedBox(width: 4),
-                                                    Text(
-                                                      actionLabel,
-                                                      style: TextStyle(
-                                                        fontSize: 10,
-                                                        fontWeight: FontWeight.bold,
-                                                        color: actionColor,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                              Text(
-                                                DateFormatter.formatTimeOnly(log.timestamp),
-                                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey),
-                                              ),
-                                            ],
+                            child: Column(
+                              children: [
+                                // Date Accordion Header
+                                InkWell(
+                                  onTap: () {
+                                    setState(() {
+                                      if (isExpanded) {
+                                        _expandedDates.remove(dateKey);
+                                      } else {
+                                        _expandedDates.add(dateKey);
+                                      }
+                                    });
+                                  },
+                                  borderRadius: BorderRadius.circular(16),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(6),
+                                          decoration: BoxDecoration(
+                                            color: AppTheme.primary.withAlpha(20),
+                                            borderRadius: BorderRadius.circular(8),
                                           ),
-                                          const SizedBox(height: 6),
-                                          Text(
-                                            log.itemTitle,
-                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                          child: const Icon(Icons.calendar_today_rounded, size: 14, color: AppTheme.primary),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Text(
+                                            _formatDateHeading(firstDate),
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                                           ),
-                                          if (log.changeDetails != null && log.changeDetails!.isNotEmpty) ...[
-                                            const SizedBox(height: 3),
-                                            Text(
-                                              log.changeDetails!,
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: isDark ? Colors.grey[300] : Colors.grey[700],
-                                              ),
-                                            ),
-                                          ],
-                                          const SizedBox(height: 6),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                                            decoration: BoxDecoration(
-                                              color: isDark ? AppTheme.surfaceMutedDark : const Color(0xFFF1F5F9),
-                                              borderRadius: BorderRadius.circular(8),
-                                            ),
-                                            child: Row(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                const Icon(Icons.notes_rounded, size: 13, color: AppTheme.secondary),
-                                                const SizedBox(width: 6),
-                                                Expanded(
-                                                  child: RichText(
-                                                    text: TextSpan(
-                                                      style: TextStyle(
-                                                        fontSize: 11,
-                                                        color: isDark ? Colors.grey[300] : const Color(0xFF334155),
-                                                      ),
-                                                      children: [
-                                                        const TextSpan(
-                                                          text: 'Remark: ',
-                                                          style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.secondary),
-                                                        ),
-                                                        TextSpan(
-                                                          text: (log.reason != null && log.reason!.isNotEmpty)
-                                                              ? log.reason!
-                                                              : 'No remark provided.',
-                                                          style: const TextStyle(fontStyle: FontStyle.italic),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
+                                        ),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: isExpanded ? AppTheme.primary : Colors.grey.withAlpha(40),
+                                            borderRadius: BorderRadius.circular(10),
+                                          ),
+                                          child: Text(
+                                            '${dateLogs.length} ${dateLogs.length == 1 ? 'activity' : 'activities'}',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                              color: isExpanded ? Colors.white : (isDark ? Colors.grey[300] : Colors.grey[700]),
                                             ),
                                           ),
-                                          const SizedBox(height: 6),
-                                          Row(
-                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                            children: [
-                                              Row(
-                                                children: [
-                                                  CircleAvatar(
-                                                    radius: 9,
-                                                    backgroundColor: AppTheme.primary.withAlpha(30),
-                                                    child: Text(
-                                                      log.performedByName.isNotEmpty ? log.performedByName[0].toUpperCase() : '?',
-                                                      style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppTheme.primary),
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 5),
-                                                  Text(
-                                                    log.performedByName,
-                                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey),
-                                                  ),
-                                                ],
-                                              ),
-                                              const Text(
-                                                'View Details ➔',
-                                                style: TextStyle(fontSize: 10, color: AppTheme.primary, fontWeight: FontWeight.bold),
-                                              ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Icon(
+                                          isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                                          color: Colors.grey,
+                                          size: 20,
+                                        ),
+                                      ],
                                     ),
-                                  );
-                                },
-                              ),
-                            ],
-                          ],
-                        ),
+                                  ),
+                                ),
+
+                                // Expanded Activities for this Date — now using shared AuditLogEntryCard
+                                if (isExpanded) ...[
+                                  const Divider(height: 1),
+                                  Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Column(
+                                      children: dateLogs.map((log) => AuditLogEntryCard(
+                                        key: ValueKey(log.id),
+                                        log: log,
+                                        trip: widget.trip,
+                                      )).toList(),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          );
+                        },
                       );
                     },
                   ),

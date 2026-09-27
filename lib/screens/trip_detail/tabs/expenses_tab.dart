@@ -17,7 +17,7 @@ import '../../../providers/audit_log_provider.dart';
 import '../../../providers/expense_provider.dart';
 import '../../../providers/stoppage_provider.dart';
 import '../../../providers/trip_provider.dart';
-import '../../expense/add_expense_screen.dart';
+import '../../expenses/add_expense_screen.dart';
 import '../audit_log_sheet.dart';
 import '../../../core/utils/trip_guard_helper.dart';
 
@@ -32,6 +32,32 @@ class ExpensesTab extends ConsumerStatefulWidget {
 
 class _ExpensesTabState extends ConsumerState<ExpensesTab> {
   String? _selectedCategoryFilter;
+  final ScrollController _scrollController = ScrollController();
+  int _displayLimit = 20;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.hasClients &&
+        _scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      if (_displayLimit < 500) {
+        setState(() {
+          _displayLimit += 20;
+        });
+      }
+    }
+  }
 
   void _openAddExpenseScreen(BuildContext context, {Expense? expenseToEdit}) async {
     final canProceed = await TripGuardHelper.ensureTripOpenForEdit(
@@ -65,7 +91,7 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
     final quickReasons = [
       'Duplicate entry',
       'Incorrect amount',
-      'Maya paid directly',
+      'Paid separately directly',
       'Cancelled activity',
       'Other',
     ];
@@ -129,7 +155,7 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                 controller: reasonController,
                 decoration: const InputDecoration(
                   labelText: 'Custom Remark / Note (Optional)',
-                  hintText: 'e.g. Maya already paid for this separately',
+                  hintText: 'e.g. Already paid for this separately',
                 ),
               ),
             ],
@@ -283,7 +309,9 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        CurrencyFormatter.format(expense.totalAmount, currency: expense.currency),
+                        expense.hasForeignConversion
+                            ? '${CurrencyFormatter.format(expense.totalAmount, currency: expense.currency)} (${CurrencyFormatter.format(expense.originalAmount!, currency: expense.originalCurrency)})'
+                            : CurrencyFormatter.format(expense.totalAmount, currency: expense.currency),
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
@@ -398,9 +426,20 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                       ],
                     ),
                   ),
-                  Text(
-                    CurrencyFormatter.format(expense.totalAmount, currency: expense.currency),
-                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AppTheme.primary),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        CurrencyFormatter.format(expense.totalAmount, currency: expense.currency),
+                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AppTheme.primary),
+                      ),
+                      if (expense.hasForeignConversion)
+                        Text(
+                          '(${CurrencyFormatter.format(expense.originalAmount!, currency: expense.originalCurrency)})',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue),
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -460,6 +499,21 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                             ),
                           ],
                         ),
+                        if (expense.hasForeignConversion) ...[
+                          const Divider(height: 16),
+                          Row(
+                            children: [
+                              const Icon(Icons.currency_exchange_rounded, size: 16, color: Colors.blue),
+                              const SizedBox(width: 8),
+                              const Text('Original Foreign Bill:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                              const Spacer(),
+                              Text(
+                                '${CurrencyFormatter.format(expense.originalAmount!, currency: expense.originalCurrency)}${expense.exchangeRate != null ? ' @ ${expense.exchangeRate!.toStringAsFixed(2)}' : ''}',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blue),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -677,8 +731,29 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
           ElevatedButton(
             onPressed: () {
               final val = double.tryParse(controller.text.trim());
+              final oldBudget = widget.trip.budget;
               final updated = widget.trip.copyWith(budget: val);
               ref.read(tripListProvider.notifier).updateTrip(updated);
+
+              final currentMember = widget.trip.currentUserMember;
+              final curSymbol = CurrencyFormatter.getCurrencySymbol(widget.trip.defaultCurrency);
+              final changeText = oldBudget == null
+                  ? 'Set trip budget to $curSymbol${val?.toStringAsFixed(2) ?? '0.00'}'
+                  : 'Updated trip budget from $curSymbol${oldBudget.toStringAsFixed(2)} to $curSymbol${val?.toStringAsFixed(2) ?? '0.00'}';
+
+              ref.read(allAuditLogsProvider.notifier).logAction(
+                TripAuditLog(
+                  id: const Uuid().v4(),
+                  tripId: widget.trip.id,
+                  actionType: oldBudget == null ? 'set_budget' : 'update_budget',
+                  itemTitle: 'Trip Budget',
+                  performedByMemberId: currentMember?.id ?? 'User',
+                  performedByName: currentMember?.name ?? 'Companion',
+                  timestamp: DateTime.now(),
+                  changeDetails: changeText,
+                ),
+              );
+
               Navigator.of(ctx).pop();
             },
             child: const Text('Save Budget'),
@@ -693,7 +768,7 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
     final expenses = ref.watch(currentTripExpensesProvider);
     final stoppages = ref.watch(currentTripStoppagesProvider);
     final totalSpent = ref.watch(currentTripTotalSpentProvider);
-    final auditLogs = ref.watch(currentTripAuditLogsProvider);
+    final auditLogs = ref.watch(tripAuditLogsProvider(widget.trip.id));
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final trip = ref.watch(tripListProvider).firstWhere((t) => t.id == widget.trip.id, orElse: () => widget.trip);
     final budget = trip.budget;
@@ -878,7 +953,7 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                                 const Icon(Icons.verified_user_rounded, size: 14, color: AppTheme.primary),
                                 const SizedBox(width: 6),
                                 Text(
-                                  'Trust & Audit History (${auditLogs.length} logs)',
+                                  'Audit Trail & Trust History (${auditLogs.length} logs)',
                                   style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primary),
                                 ),
                               ],
@@ -949,13 +1024,34 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                     ],
                   ),
                 )
-              : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 80),
-                  itemCount: filteredExpenses.length,
-                  itemBuilder: (context, index) {
-                    final expense = filteredExpenses[index];
-                    final payer = widget.trip.getMember(expense.paidByMemberId);
-                    final payerName = payer?.name ?? 'Unknown';
+              : Builder(
+                  builder: (context) {
+                    final displayedExpenses = filteredExpenses.take(_displayLimit).toList();
+                    final hasMore = filteredExpenses.length > displayedExpenses.length;
+
+                    return ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 80),
+                      itemCount: displayedExpenses.length + (hasMore ? 1 : 0),
+                      itemBuilder: (context, index) {
+                        if (index == displayedExpenses.length) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            child: Center(
+                              child: Text(
+                                'Showing ${displayedExpenses.length} of ${filteredExpenses.length} bills • Scroll for more',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          );
+                        }
+                        final expense = displayedExpenses[index];
+                        final payer = widget.trip.getMember(expense.paidByMemberId);
+                        final payerName = payer?.name ?? 'Unknown';
 
                     Stoppage? matchedStop;
                     if (expense.stoppageId != null) {
@@ -1014,26 +1110,31 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                           ),
-                                          const SizedBox(height: 2),
-                                          Text.rich(
-                                            TextSpan(
-                                              children: [
-                                                TextSpan(
-                                                  text: 'Paid by ',
-                                                  style: TextStyle(fontSize: 12, color: isDark ? Colors.grey[400] : Colors.grey[600]),
-                                                ),
-                                                TextSpan(
-                                                  text: payerName,
-                                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                                                ),
-                                                TextSpan(
-                                                  text: ' • ${DateFormatter.formatRelativeOrTime(expense.createdAt)}',
-                                                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-                                                ),
-                                              ],
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            'Paid by $payerName',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                              color: isDark ? Colors.grey[300] : const Color(0xFF334155),
                                             ),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Row(
+                                            children: [
+                                              Icon(Icons.schedule_rounded, size: 11, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+                                              const SizedBox(width: 3.5),
+                                              Flexible(
+                                                child: Text(
+                                                  '${DateFormatter.formatDateTime(expense.createdAt)}${matchedStop != null ? ' • ${matchedStop.name}' : ''}',
+                                                  style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ],
                                       ),
@@ -1042,14 +1143,29 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Text(
-                                          CurrencyFormatter.format(expense.totalAmount, currency: expense.currency),
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w900,
-                                            fontSize: 16,
-                                            letterSpacing: -0.3,
-                                            color: isDark ? Colors.white : AppTheme.textMainLight,
-                                          ),
+                                        Column(
+                                          crossAxisAlignment: CrossAxisAlignment.end,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              CurrencyFormatter.format(expense.totalAmount, currency: expense.currency),
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.w900,
+                                                fontSize: 16,
+                                                letterSpacing: -0.3,
+                                                color: isDark ? Colors.white : AppTheme.textMainLight,
+                                              ),
+                                            ),
+                                            if (expense.hasForeignConversion)
+                                              Text(
+                                                CurrencyFormatter.format(expense.originalAmount!, currency: expense.originalCurrency),
+                                                style: const TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.blue,
+                                                ),
+                                              ),
+                                          ],
                                         ),
                                         const SizedBox(width: 3),
                                         Icon(
@@ -1257,7 +1373,9 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                       ),
                     );
                   },
-                ),
+                );
+              },
+            ),
         ),
       ],
     );

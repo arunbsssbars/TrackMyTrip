@@ -1,8 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/services/cloud_trip_sync_service.dart';
+import '../core/services/firestore_sync_service.dart';
 import '../core/services/local_storage_service.dart';
 import '../core/services/trip_share_service.dart';
 import '../models/expense.dart';
+import '../models/trip_audit_log.dart';
+import '../core/services/user_service.dart';
+import 'audit_log_provider.dart';
 import 'trip_provider.dart';
 
 import '../models/sync_mutation.dart';
@@ -44,12 +48,30 @@ class ExpenseNotifier extends StateNotifier<List<Expense>> {
     await _storage.saveAllExpenses(state);
     _syncToCloud(expense.tripId);
 
+    try {
+      _ref.read(firestoreSyncServiceProvider).pushExpense(expense);
+    } catch (_) {}
+
+    final payerName = trip.getMember(expense.paidByMemberId)?.name ?? 'A companion';
+
+    try {
+      _ref.read(allAuditLogsProvider.notifier).logAction(TripAuditLog(
+        id: 'exp_${expense.id}',
+        tripId: expense.tripId,
+        actionType: 'add_expense',
+        itemTitle: '${expense.title} (${expense.currency} ${expense.totalAmount.toStringAsFixed(0)})',
+        performedByMemberId: expense.paidByMemberId,
+        performedByName: payerName,
+        timestamp: expense.createdAt,
+        changeDetails: 'Expense registered in category ${expense.category}',
+      ));
+    } catch (_) {}
+
     if (broadcast) {
       try {
         _ref.read(realtimeSyncServiceProvider).broadcastNewExpense(expense);
       } catch (_) {}
       try {
-        final payerName = trip.getMember(expense.paidByMemberId)?.name ?? 'A companion';
         _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
           tripId: expense.tripId,
           type: AlertType.billAdded,
@@ -87,6 +109,24 @@ class ExpenseNotifier extends StateNotifier<List<Expense>> {
     _syncToCloud(updatedExpense.tripId);
 
     try {
+      _ref.read(firestoreSyncServiceProvider).pushExpense(updatedExpense);
+    } catch (_) {}
+
+    try {
+      final payerName = trip.getMember(updatedExpense.paidByMemberId)?.name ?? 'A companion';
+      _ref.read(allAuditLogsProvider.notifier).logAction(TripAuditLog(
+        id: 'exp_edit_${updatedExpense.id}_${DateTime.now().millisecondsSinceEpoch}',
+        tripId: updatedExpense.tripId,
+        actionType: 'edit_expense',
+        itemTitle: 'Updated: ${updatedExpense.title}',
+        performedByMemberId: updatedExpense.paidByMemberId,
+        performedByName: payerName,
+        timestamp: DateTime.now(),
+        changeDetails: 'Expense updated (${updatedExpense.currency} ${updatedExpense.totalAmount.toStringAsFixed(0)})',
+      ));
+    } catch (_) {}
+
+    try {
       _ref.read(offlineSyncEngineProvider).enqueueMutation(
         action: MutationAction.updateExpense,
         entityType: 'expense',
@@ -102,6 +142,24 @@ class ExpenseNotifier extends StateNotifier<List<Expense>> {
     state = state.where((e) => e.id != expenseId).toList();
     await _storage.saveAllExpenses(state);
     _syncToCloud(existing.tripId);
+
+    try {
+      _ref.read(firestoreSyncServiceProvider).deleteExpense(existing.tripId, expenseId);
+    } catch (_) {}
+
+    try {
+      final currentUser = UserService.getCurrentUser();
+      _ref.read(allAuditLogsProvider.notifier).logAction(TripAuditLog(
+        id: 'exp_del_${expenseId}_${DateTime.now().millisecondsSinceEpoch}',
+        tripId: existing.tripId,
+        actionType: 'delete_expense',
+        itemTitle: 'Deleted: ${existing.title}',
+        performedByMemberId: currentUser.id,
+        performedByName: currentUser.displayName,
+        timestamp: DateTime.now(),
+        changeDetails: 'Expense deleted (${existing.currency} ${existing.totalAmount.toStringAsFixed(0)})',
+      ));
+    } catch (_) {}
 
     try {
       _ref.read(offlineSyncEngineProvider).enqueueMutation(

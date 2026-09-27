@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/proximity_alert_service.dart';
 import '../../core/services/user_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/date_formatter.dart';
 import '../../core/utils/notification_formatter.dart';
 import '../../models/proximity_alert.dart';
 import '../../providers/trip_provider.dart';
@@ -24,6 +25,32 @@ class NotificationCenterSheet extends ConsumerStatefulWidget {
 }
 
 class _NotificationCenterSheetState extends ConsumerState<NotificationCenterSheet> {
+  final ScrollController _scrollController = ScrollController();
+  int _displayLimit = 15;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.hasClients &&
+        _scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 150) {
+      if (_displayLimit < 200) {
+        setState(() {
+          _displayLimit += 15;
+        });
+      }
+    }
+  }
   void _confirmSendSos(BuildContext context) {
     final currentTrip = ref.read(currentTripProvider);
     final currentUser = UserService.getCurrentUser();
@@ -75,14 +102,6 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
         ],
       ),
     );
-  }
-
-  String _formatTimestamp(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
   }
 
   Color _getUrgencyColor(AlertUrgency urgency, [AlertType? type]) {
@@ -261,6 +280,7 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
 
           Expanded(
             child: ListView(
+              controller: _scrollController,
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               children: [
                 // Emergency SOS Banner Card
@@ -431,8 +451,19 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                       ),
                     ),
                   )
-                else
-                  ...alerts.map((alert) => _buildAlertCard(context, alertService, alert, isDark)),
+                else ...[
+                  ...alerts.take(_displayLimit).map((alert) => _buildAlertCard(context, alertService, alert, isDark)),
+                  if (alerts.length > _displayLimit)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Center(
+                        child: Text(
+                          'Showing ${_displayLimit.clamp(0, alerts.length)} of ${alerts.length} alerts • Scroll down for more',
+                          style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : const Color(0xFF64748B), fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                ],
               ],
             ),
           ),
@@ -565,8 +596,12 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                           ),
                         ),
                         Text(
-                          _formatTimestamp(alert.timestamp),
-                          style: const TextStyle(fontSize: 10.5, color: Colors.grey),
+                          DateFormatter.formatDateTime(alert.timestamp),
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ],
                     ),

@@ -179,7 +179,8 @@ class OfflineSyncEngine extends ChangeNotifier {
 
           if (mutation.action == MutationAction.deleteStoppage ||
               mutation.action == MutationAction.deleteExpense ||
-              mutation.action == MutationAction.deleteMemory) {
+              mutation.action == MutationAction.deleteMemory ||
+              mutation.action == MutationAction.deleteSettlement) {
             await docRef.delete();
           } else {
             await docRef.set(mutation.payload);

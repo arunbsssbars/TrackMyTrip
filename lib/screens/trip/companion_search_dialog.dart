@@ -248,7 +248,9 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
                   return true;
                 }).toList();
 
-                if (_query.trim().length < 2) {
+                final isSuggested = _query.trim().length < 2;
+
+                if (isSuggested && users.isEmpty) {
                   return Center(
                     child: Padding(
                       padding: const EdgeInsets.all(28),
@@ -273,7 +275,7 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
                   );
                 }
 
-                if (users.isEmpty) {
+                if (!isSuggested && users.isEmpty) {
                   return Center(
                     child: Padding(
                       padding: const EdgeInsets.all(24),
@@ -333,10 +335,29 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
                 return ListView.separated(
                   physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  itemCount: users.length,
+                  itemCount: users.length + (isSuggested ? 1 : 0),
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (context, index) {
-                    final user = users[index];
+                    if (isSuggested && index == 0) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 4, left: 4),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.people_alt_rounded, size: 14, color: AppTheme.primary),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Suggested Companions (Recent Co-Travelers)',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                color: isDark ? Colors.grey[300] : const Color(0xFF475569),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    final user = users[isSuggested ? index - 1 : index];
                     final isMember = _isAlreadyMember(user);
                     final sentInvitations = ref.watch(sentInvitationsProvider);
                     final isInvited = !isMember && _hasPendingInvitation(user, sentInvitations);

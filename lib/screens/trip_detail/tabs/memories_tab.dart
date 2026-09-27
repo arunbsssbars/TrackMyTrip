@@ -11,14 +11,22 @@ import '../../../models/stoppage.dart';
 import '../../../models/trip.dart';
 import '../../../providers/memory_provider.dart';
 import '../../../providers/stoppage_provider.dart';
-import '../../memory/add_memory_dialog.dart';
+import '../../../core/utils/trip_guard_helper.dart';
+import '../../memories/add_memory_dialog.dart';
 
 class MemoriesTab extends ConsumerWidget {
   final Trip trip;
 
   const MemoriesTab({super.key, required this.trip});
 
-  void _openAddMemoryDialog(BuildContext context, Stoppage stoppage) {
+  Future<void> _openAddMemoryDialog(BuildContext context, WidgetRef ref, Stoppage stoppage) async {
+    final canProceed = await TripGuardHelper.ensureTripOpenForEdit(
+      context,
+      ref,
+      trip,
+      actionLabel: 'add memories / photos',
+    );
+    if (!canProceed || !context.mounted) return;
     showDialog(
       context: context,
       builder: (context) => AddMemoryDialog(tripId: trip.id, stoppage: stoppage),
@@ -145,7 +153,7 @@ class MemoriesTab extends ConsumerWidget {
               const SizedBox(height: 20),
               if (stoppages.isNotEmpty)
                 ElevatedButton.icon(
-                  onPressed: () => _openAddMemoryDialog(context, stoppages.first),
+                  onPressed: () => _openAddMemoryDialog(context, ref, stoppages.first),
                   icon: const Icon(Icons.add_a_photo_rounded, size: 18),
                   label: const Text('Add First Photo Memory'),
                 ),
@@ -220,7 +228,7 @@ class MemoriesTab extends ConsumerWidget {
                     ),
                     icon: const Icon(Icons.add_photo_alternate_rounded, color: AppTheme.secondary, size: 18),
                     tooltip: 'Add Photo Here',
-                    onPressed: () => _openAddMemoryDialog(context, stop),
+                    onPressed: () => _openAddMemoryDialog(context, ref, stop),
                   ),
                 ],
               ),

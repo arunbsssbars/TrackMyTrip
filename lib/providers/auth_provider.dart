@@ -12,6 +12,7 @@ import 'stoppage_provider.dart';
 import 'memory_provider.dart';
 import 'settlement_provider.dart';
 import 'invitation_provider.dart';
+import 'audit_log_provider.dart';
 import '../main.dart';
 
 class AuthNotifier extends StateNotifier<AsyncValue<AuthUser?>> {
@@ -38,6 +39,7 @@ class AuthNotifier extends StateNotifier<AsyncValue<AuthUser?>> {
       _ref.read(allStoppagesProvider.notifier).reload();
       _ref.read(allMemoriesProvider.notifier).reload();
       _ref.read(allSettlementsProvider.notifier).reload();
+      _ref.read(allAuditLogsProvider.notifier).reload();
       _ref.read(invitationProvider.notifier).refreshListeners();
       _authService.syncCurrentUserToFirestore(user);
     } else {
@@ -63,6 +65,7 @@ class AuthNotifier extends StateNotifier<AsyncValue<AuthUser?>> {
       _ref.read(allStoppagesProvider.notifier).reset();
       _ref.read(allMemoriesProvider.notifier).reset();
       _ref.read(allSettlementsProvider.notifier).reset();
+      _ref.read(allAuditLogsProvider.notifier).reset();
       _ref.read(invitationProvider.notifier).reset();
     }
   }
@@ -86,8 +89,27 @@ class AuthNotifier extends StateNotifier<AsyncValue<AuthUser?>> {
         _ref.read(allStoppagesProvider.notifier).reload();
         _ref.read(allMemoriesProvider.notifier).reload();
         _ref.read(allSettlementsProvider.notifier).reload();
+        _ref.read(allAuditLogsProvider.notifier).reload();
         _ref.read(invitationProvider.notifier).refreshListeners();
         _authService.syncCurrentUserToFirestore(user);
+
+        // Asynchronously hydrate latest phone, bio, and profile attributes from Firestore
+        UserService.fetchUserProfile(user.id, forceRefresh: true).then((cloudProfile) async {
+          if (cloudProfile != null && (cloudProfile.phone != null || cloudProfile.bio != null || (cloudProfile.displayName != 'Traveler' && cloudProfile.displayName.isNotEmpty))) {
+            final mergedUser = user.copyWith(
+              phone: cloudProfile.phone ?? user.phone,
+              bio: cloudProfile.bio ?? user.bio,
+              displayName: cloudProfile.displayName.isNotEmpty && cloudProfile.displayName != 'Traveler'
+                  ? cloudProfile.displayName
+                  : user.displayName,
+            );
+            await storage.saveAuthSession(mergedUser);
+            final mergedProfile = mergedUser.toUserProfile();
+            UserService.updateCurrentUser(mergedProfile);
+            _ref.read(currentUserProvider.notifier).state = mergedProfile;
+            state = AsyncValue.data(mergedUser);
+          }
+        }).catchError((_) {});
       }
     } catch (e, st) {
       state = AsyncValue.error(e, st);
@@ -162,6 +184,17 @@ class AuthNotifier extends StateNotifier<AsyncValue<AuthUser?>> {
 
   Future<bool> resetPassword({required String email, required String newPassword}) async {
     return _authService.resetPassword(email: email, newPassword: newPassword);
+  }
+
+  Future<void> updateUser(AuthUser updatedUser) async {
+    state = AsyncValue.data(updatedUser);
+    final userProfile = updatedUser.toUserProfile();
+    UserService.updateCurrentUser(userProfile);
+    _ref.read(currentUserProvider.notifier).state = userProfile;
+
+    final storage = _ref.read(localStorageServiceProvider);
+    await storage.saveAuthSession(updatedUser);
+    await _authService.syncCurrentUserToFirestore(updatedUser);
   }
 
   Future<void> logout() async {

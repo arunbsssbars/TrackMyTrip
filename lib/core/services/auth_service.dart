@@ -278,9 +278,9 @@ class AuthService {
 
       final user = AuthUser(
         id: match['id'] as String? ?? 'usr_local',
-        username: match['username'] as String,
-        displayName: match['name'] as String,
-        email: match['email'] as String,
+        username: (match['username'] as String?) ?? identifier,
+        displayName: (match['displayName'] as String?) ?? (match['name'] as String?) ?? 'Traveler',
+        email: (match['email'] as String?) ?? identifier,
         provider: AuthProviderType.email,
         createdAt: DateTime.tryParse(match['createdAt'] as String? ?? '') ?? DateTime.now(),
         colorHex: '0xFF0D9488',
@@ -311,15 +311,44 @@ class AuthService {
         
         final UserCredential userCredential = await fb.signInWithCredential(credential);
         
+        String displayName = userCredential.user!.displayName ?? 'Google User';
+        String username = userCredential.user!.email!.split('@').first;
+        String? phone;
+        String? bio;
+        String colorHex = '0xFF4285F4';
+        String? photoUrl = userCredential.user!.photoURL;
+
+        try {
+          final fs = _firestore;
+          if (fs != null) {
+            final doc = await fs.collection('users').doc(userCredential.user!.uid).get();
+            if (doc.exists && doc.data() != null) {
+              final data = doc.data()!;
+              final fsName = (data['displayName'] as String? ?? data['name'] as String?)?.trim();
+              if (fsName != null && fsName.isNotEmpty) displayName = fsName;
+              final fsUser = (data['username'] as String?)?.trim();
+              if (fsUser != null && fsUser.isNotEmpty) username = fsUser;
+              phone = data['phone'] as String?;
+              bio = data['bio'] as String?;
+              final fsColor = data['colorHex'] as String?;
+              if (fsColor != null && fsColor.isNotEmpty) colorHex = fsColor;
+              final fsAvatar = data['avatarUrl'] as String?;
+              if (fsAvatar != null && fsAvatar.isNotEmpty) photoUrl = fsAvatar;
+            }
+          }
+        } catch (_) {}
+
         final googleAuthUser = AuthUser(
           id: userCredential.user!.uid,
-          username: userCredential.user!.email!.split('@').first,
-          displayName: userCredential.user!.displayName ?? 'Google User',
+          username: username,
+          displayName: displayName,
           email: userCredential.user!.email!,
-          photoUrl: userCredential.user!.photoURL,
+          photoUrl: photoUrl,
+          phone: phone,
+          bio: bio,
           provider: AuthProviderType.google,
           createdAt: DateTime.now(),
-          colorHex: '0xFF4285F4',
+          colorHex: colorHex,
           token: 'google_token',
         );
         
@@ -384,7 +413,6 @@ class AuthService {
       await _firebaseAuth?.signOut();
       await _googleSignIn.signOut();
     } catch (_) {}
-    await _securityService.wipeAllSensitiveData(db: null);
     await _storage.clearAuthSession();
     await _storage.switchUser(null);
     UserService.resetCurrentUser();
@@ -400,10 +428,10 @@ class AuthService {
   Future<void> syncCurrentUserToFirestore([AuthUser? authUser]) async {
     final user = authUser ?? currentSession;
     if (user == null) return;
-    _syncToUserProfile(user);
+    await _syncToUserProfile(user);
   }
 
-  void _syncToUserProfile(AuthUser authUser) async {
+  Future<void> _syncToUserProfile(AuthUser authUser) async {
     final profile = UserProfile(
       id: authUser.id,
       username: authUser.username,
@@ -417,11 +445,25 @@ class AuthService {
     UserService.updateCurrentUser(profile);
     UserService.registerUser(profile);
 
-    // Save User Document and FCM Token to Firestore only if user is actively authenticated
+    // 1. Sync to local SQLite storage & session
     try {
-      final currentUser = _firebaseAuth?.currentUser;
+      await _storage.saveAuthSession(authUser);
+      await _storage.db.saveRegisteredUser({
+        'id': authUser.id,
+        'email': authUser.email,
+        'username': authUser.username,
+        'displayName': authUser.displayName,
+        'phone': authUser.phone,
+        'bio': authUser.bio,
+        'colorHex': authUser.colorHex,
+      });
+    } catch (_) {}
+
+    // 2. Save User Document and FCM Token to Firestore with merge: true
+    try {
+      final docId = _firebaseAuth?.currentUser?.uid ?? authUser.id;
       final fs = _firestore;
-      if (currentUser != null && fs != null) {
+      if (fs != null && docId.isNotEmpty) {
         String? token;
         try {
           token = await _pushService.getToken();
@@ -434,21 +476,28 @@ class AuthService {
           phone: authUser.phone,
         );
 
-        await fs.collection('users').doc(currentUser.uid).set({
-          'id': currentUser.uid,
+        final updateData = <String, dynamic>{
+          'id': docId,
           'username': authUser.username.toLowerCase(),
           'displayName': authUser.displayName,
           'email': authUser.email.toLowerCase(),
-          'phone': authUser.phone,
-          'bio': (authUser.bio != null && authUser.bio!.trim().isNotEmpty) ? authUser.bio!.trim() : null,
           'colorHex': authUser.colorHex ?? '0xFF0D9488',
           'searchTokens': searchTokens.toList(),
           if (token != null) 'fcmToken': token,
           'lastActive': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+        };
+
+        if (authUser.phone != null && authUser.phone!.trim().isNotEmpty) {
+          updateData['phone'] = authUser.phone!.trim();
+        }
+        if (authUser.bio != null && authUser.bio!.trim().isNotEmpty) {
+          updateData['bio'] = authUser.bio!.trim();
+        }
+
+        await fs.collection('users').doc(docId).set(updateData, SetOptions(merge: true));
 
         if (kDebugMode) {
-          debugPrint('[AuthService] Successfully synced user ${currentUser.uid} (${authUser.username}) to Firestore');
+          debugPrint('[AuthService] Successfully synced user $docId (${authUser.username}) to Firestore with merge: true');
         }
       }
     } catch (e) {

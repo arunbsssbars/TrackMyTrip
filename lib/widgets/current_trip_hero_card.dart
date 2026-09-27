@@ -6,6 +6,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../models/trip.dart';
+import '../screens/common/pulsing_live_beacon.dart';
 
 class CurrentTripHeroCard extends StatelessWidget {
   final Trip trip;
@@ -13,6 +14,8 @@ class CurrentTripHeroCard extends StatelessWidget {
   final double totalSpent;
   final int expenseCount;
   final VoidCallback onTapLedger;
+  final VoidCallback? onTapCard;
+  final VoidCallback? onTapAuditTrail;
 
   const CurrentTripHeroCard({
     super.key,
@@ -21,6 +24,8 @@ class CurrentTripHeroCard extends StatelessWidget {
     this.totalSpent = 0.0,
     this.expenseCount = 0,
     required this.onTapLedger,
+    this.onTapCard,
+    this.onTapAuditTrail,
   });
 
   bool get isEnded => trip.isCompleted || trip.status == 'completed';
@@ -32,7 +37,7 @@ class CurrentTripHeroCard extends StatelessWidget {
     final isOverBudget = hasBudget && totalSpent > trip.budget!;
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: isDark
@@ -41,123 +46,207 @@ class CurrentTripHeroCard extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: isDark ? const Color(0xFF334155) : Colors.white.withAlpha(50),
-          width: 1,
+          color: isEnded
+              ? (isDark ? const Color(0xFFF59E0B) : const Color(0xFFD97706))
+              : (isDark ? const Color(0xFF334155) : Colors.white.withAlpha(50)),
+          width: isEnded ? 2.0 : 1.0,
         ),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.primary.withAlpha(isDark ? 40 : 75),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
+            color: isEnded
+                ? (isDark ? const Color(0xFFF59E0B).withAlpha(45) : const Color(0xFFD97706).withAlpha(50))
+                : (AppTheme.primary.withAlpha(isDark ? 35 : 65)),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Top Row: Journey Type Pill & Share Code Chip
+          // Top Row: Journey Type Pill, Pulsing Live Beacon & Share Code
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _journeyTypePill(context),
-              if (trip.shareCode != null && trip.shareCode!.isNotEmpty) _shareCodeChip(context),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // Title & Sub‑metadata
-          Text(
-            trip.title,
-            style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.4),
-          ),
-          const SizedBox(height: 5),
-          Row(
-            children: [
-              const Icon(Icons.event_note_rounded, size: 13, color: Colors.white70),
-              const SizedBox(width: 5),
-              Text(
-                DateFormatter.formatTripDateRange(trip.startDate, trip.endDate),
-                style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
-              ),
-              if (trip.members.isNotEmpty) ...[
-                const Text('  •  ', style: TextStyle(color: Colors.white38)),
-                const Icon(Icons.people_alt_rounded, size: 13, color: Colors.white70),
-                const SizedBox(width: 4),
-                Text(
-                  '${trip.members.length} Traveler${trip.members.length == 1 ? "" : "s"}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
-                ),
+              Flexible(child: _journeyTypePill(context)),
+              if (trip.shareCode != null && trip.shareCode!.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                _shareCodeChip(context),
               ],
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 8),
+          // Title & Sub‑metadata (Tap to view Trip Details)
+          InkWell(
+            onTap: onTapCard,
+            borderRadius: BorderRadius.circular(12),
+            splashColor: Colors.white.withAlpha(25),
+            highlightColor: Colors.white.withAlpha(15),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          trip.title,
+                          style: const TextStyle(color: Colors.white, fontSize: 18.5, fontWeight: FontWeight.w900, letterSpacing: -0.3),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (onTapCard != null)
+                        Container(
+                          padding: const EdgeInsets.all(4.5),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withAlpha(25),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.arrow_forward_ios_rounded, size: 11, color: Colors.white),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 4,
+                    runSpacing: 2,
+                    children: [
+                      const Icon(Icons.event_note_rounded, size: 12, color: Colors.white70),
+                      Text(
+                        DateFormatter.formatTripDateRange(trip.startDate, trip.endDate),
+                        style: const TextStyle(color: Colors.white70, fontSize: 11.5, fontWeight: FontWeight.w600),
+                      ),
+                      if (trip.members.isNotEmpty) ...[
+                        const Text('  •  ', style: TextStyle(color: Colors.white38)),
+                        const Icon(Icons.people_alt_rounded, size: 12, color: Colors.white70),
+                        Text(
+                          '${trip.members.length} Traveler${trip.members.length == 1 ? "" : "s"}',
+                          style: const TextStyle(color: Colors.white70, fontSize: 11.5, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
           // Integrated Financial Glance Block
           _financialGlance(context, hasBudget, totalSpent, budgetPercent, isOverBudget, isEnded),
+          if (onTapAuditTrail != null) ...[
+            const SizedBox(height: 10),
+            InkWell(
+              onTap: () {
+                HapticFeedback.lightImpact();
+                onTapAuditTrail?.call();
+              },
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withAlpha(28),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white.withAlpha(50), width: 0.9),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.verified_user_rounded, size: 14, color: Colors.white),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Audit Trail & Trust History',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ),
+                    Icon(Icons.arrow_forward_ios_rounded, size: 11, color: Colors.white70),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 
   Widget _journeyTypePill(BuildContext context) {
-    return Expanded(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Flexible(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.white.withAlpha(35),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white.withAlpha(50), width: 0.8),
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 6,
+      runSpacing: 4,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.white.withAlpha(35),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white.withAlpha(50), width: 0.8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                trip.isSolo
+                    ? Icons.person_rounded
+                    : (trip.isFamily ? Icons.family_restroom_rounded : Icons.groups_rounded),
+                size: 12,
+                color: Colors.white,
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    trip.isSolo
-                        ? Icons.person_rounded
-                        : (trip.isFamily ? Icons.family_restroom_rounded : Icons.groups_rounded),
-                    size: 12,
-                    color: Colors.white,
-                  ),
-                  const SizedBox(width: 5),
-                  Flexible(
-                    child: Text(
-                      trip.isSolo
-                          ? 'SOLO JOURNEY'
-                          : (trip.isFamily ? 'FAMILY CONVOY' : 'GROUP EXPEDITION'),
-                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.6),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
+              const SizedBox(width: 5),
+              Text(
+                trip.isSolo
+                    ? 'SOLO JOURNEY'
+                    : (trip.isFamily ? 'FAMILY CONVOY' : 'GROUP EXPEDITION'),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.6,
+                ),
               ),
+            ],
+          ),
+        ),
+        if (isEnded)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEF4444).withAlpha(50),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.white38, width: 0.8),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.flag_rounded, size: 10, color: Colors.white),
+                SizedBox(width: 3.5),
+                Text('CONCLUDED', style: TextStyle(color: Colors.white, fontSize: 8.5, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+              ],
+            ),
+          )
+        else
+          const PulsingLiveBeacon(
+            label: 'LIVE',
+            color: Color(0xFF34D399),
+            dotSize: 9.0,
+            labelStyle: TextStyle(
+              color: Colors.white,
+              fontSize: 9.5,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.6,
             ),
           ),
-          if (isEnded) ...[
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
-              decoration: BoxDecoration(
-                color: const Color(0xFFEF4444).withAlpha(50),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white38, width: 0.8),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.flag_rounded, size: 10, color: Colors.white),
-                  SizedBox(width: 3),
-                  Text('CONCLUDED', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
+      ],
     );
   }
 
@@ -217,7 +306,7 @@ class CurrentTripHeroCard extends StatelessWidget {
         // Subtle integrated divider eliminating box-in-box look
         Container(
           height: 1,
-          margin: const EdgeInsets.only(top: 2, bottom: 12),
+          margin: const EdgeInsets.only(top: 2, bottom: 8),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
@@ -231,100 +320,101 @@ class CurrentTripHeroCard extends StatelessWidget {
         Material(
           color: Colors.transparent,
           child: InkWell(
-            onTap: onTapLedger,
+            onTap: () {
+              HapticFeedback.lightImpact();
+              onTapLedger();
+            },
             borderRadius: BorderRadius.circular(12),
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
+              padding: const EdgeInsets.symmetric(vertical: 2),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        children: [
-                          Icon(Icons.account_balance_wallet_rounded, size: 14, color: Colors.white.withAlpha(190)),
-                          const SizedBox(width: 6),
-                          Text(
-                            'TOTAL EXPENDITURE',
-                            style: TextStyle(
-                              color: Colors.white.withAlpha(190),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 0.8,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'Ledger & Splits',
-                            style: TextStyle(
-                              color: isDark ? const Color(0xFF38BDF8) : Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            Icons.arrow_forward_ios_rounded,
-                            size: 10,
-                            color: isDark ? const Color(0xFF38BDF8) : Colors.white,
-                          ),
-                        ],
+                      Icon(Icons.account_balance_wallet_rounded, size: 13, color: Colors.white.withAlpha(190)),
+                      const SizedBox(width: 5),
+                      Text(
+                        'TOTAL EXPENDITURE',
+                        style: TextStyle(
+                          color: Colors.white.withAlpha(190),
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.7,
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 26,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.6,
-                    ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 21,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withAlpha(25),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.chevron_right_rounded,
+                          size: 18,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
                   ),
                   if (hasBudget) ...[
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 7),
                     ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(4),
                       child: LinearProgressIndicator(
                         value: budgetPercent,
-                        minHeight: 6,
+                        minHeight: 4,
                         backgroundColor: Colors.white.withAlpha(35),
                         valueColor: AlwaysStoppedAnimation<Color>(
                           isOverBudget ? const Color(0xFFF87171) : const Color(0xFF34D399),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          '${(budgetPercent * 100).toInt()}% of ${CurrencyFormatter.format(trip.budget!, currency: trip.defaultCurrency)}',
-                          style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600),
+                        Flexible(
+                          child: Text(
+                            '${(budgetPercent * 100).toInt()}% of ${CurrencyFormatter.format(trip.budget!, currency: trip.defaultCurrency)}',
+                            style: const TextStyle(color: Colors.white70, fontSize: 10.5, fontWeight: FontWeight.w600),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
+                        const SizedBox(width: 8),
                         Text(
                           isOverBudget
                               ? 'Over Budget!'
                               : 'Left: ${CurrencyFormatter.format(trip.budget! - totalSpent, currency: trip.defaultCurrency)}',
                           style: TextStyle(
                             color: isOverBudget ? const Color(0xFFFCA5A5) : const Color(0xFF6EE7B7),
-                            fontSize: 11,
+                            fontSize: 10.5,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
                       ],
                     ),
                   ] else ...[
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
                     Text(
                       '$expenseCount expense ${expenseCount == 1 ? "entry" : "entries"} logged • Tap to view ledger & splits',
-                      style: const TextStyle(color: Colors.white70, fontSize: 10.5, fontWeight: FontWeight.w600),
+                      style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ],

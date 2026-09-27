@@ -11,7 +11,11 @@ import '../../models/trip_member.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/trip_provider.dart';
 import '../../providers/invitation_provider.dart';
+import '../../providers/audit_log_provider.dart';
+import '../../models/trip_audit_log.dart';
 import '../trip/companion_search_dialog.dart';
+import '../common/sheet_drag_handle.dart';
+import '../common/user_avatar.dart';
 
 class CreateTripSheet extends ConsumerStatefulWidget {
   final String? initialTripType;
@@ -211,6 +215,19 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
     ref.read(tripListProvider.notifier).addTrip(newTrip);
     ref.read(selectedTripIdProvider.notifier).state = newTrip.id;
 
+    ref.read(allAuditLogsProvider.notifier).logAction(
+      TripAuditLog(
+        id: 'log_${const Uuid().v4().substring(0, 8)}',
+        tripId: newTrip.id,
+        actionType: 'create_trip',
+        itemTitle: newTrip.title,
+        performedByMemberId: myMemberId,
+        performedByName: myName,
+        timestamp: DateTime.now(),
+        changeDetails: 'Created new ${newTrip.isSolo ? "Solo" : (newTrip.isFamily ? "Family" : "Group")} expedition with ${memberList.length} member(s)',
+      ),
+    );
+
     // Two-Phase Workflow: Dispatch invitations in batch (creates exactly 1 consolidated notification for the creator)
     if (_tripType != 'solo' && _companions.isNotEmpty) {
       final registerableCompanions = _companions.where((c) => c.email != null || !c.id.startsWith('custom_')).toList();
@@ -232,6 +249,7 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.90),
       decoration: BoxDecoration(
         color: isDark ? AppTheme.surfaceDark : Colors.white,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
@@ -250,17 +268,7 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // Drag handle
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.withAlpha(80),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
+              const SheetDragHandle(margin: EdgeInsets.only(bottom: 14)),
 
               // Header
               Row(
@@ -506,7 +514,7 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
                       child: TextField(
                         controller: _companionController,
                         decoration: const InputDecoration(
-                          hintText: 'Or type family member name (e.g. Mom, Maya)',
+                          hintText: 'Or type family member name (e.g. Mom, Brother)',
                           prefixIcon: Icon(Icons.person_add_alt_1_rounded),
                         ),
                         onSubmitted: (_) => _addCompanion(),
@@ -544,12 +552,11 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
                     ),
                     ..._companions.map(
                       (comp) => Chip(
-                        avatar: CircleAvatar(
-                          backgroundColor: Color(int.tryParse(comp.colorHex ?? '0xFFF97316') ?? 0xFFF97316),
-                          child: Text(
-                            comp.name.isNotEmpty ? comp.name[0].toUpperCase() : '?',
-                            style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                          ),
+                        avatar: UserAvatar(
+                          name: comp.name,
+                          colorHex: comp.colorHex,
+                          size: 20,
+                          fontSize: 10,
                         ),
                         label: Text(comp.name),
                         onDeleted: () => _removeCompanion(comp),
@@ -576,7 +583,7 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
                       child: TextField(
                         controller: _companionController,
                         decoration: const InputDecoration(
-                          hintText: 'Or type friend name (e.g. Maya)',
+                          hintText: 'Or type companion name (e.g. Friend, Colleague)',
                           prefixIcon: Icon(Icons.person_add_alt_1_rounded),
                         ),
                         onSubmitted: (_) => _addCompanion(),

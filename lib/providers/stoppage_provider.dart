@@ -1,8 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/services/cloud_trip_sync_service.dart';
+import '../core/services/firestore_sync_service.dart';
 import '../core/services/local_storage_service.dart';
 import '../core/services/trip_share_service.dart';
 import '../models/stoppage.dart';
+import '../models/trip_audit_log.dart';
+import '../models/proximity_alert.dart';
+import '../core/services/proximity_alert_service.dart';
+import '../core/services/user_service.dart';
+import 'audit_log_provider.dart';
 import 'trip_provider.dart';
 
 import '../models/sync_mutation.dart';
@@ -34,13 +40,39 @@ class StoppageNotifier extends StateNotifier<List<Stoppage>> {
     await _storage.saveAllStoppages(state);
     _syncToCloud(stoppage.tripId);
 
+    try {
+      _ref.read(firestoreSyncServiceProvider).pushStoppage(stoppage);
+    } catch (_) {}
+
+    try {
+      final trip = _storage.getTrips().where((t) => t.id == stoppage.tripId).firstOrNull;
+      final creator = trip?.currentUserMember ?? (trip?.members.isNotEmpty == true ? trip!.members.first : null);
+      final authorName = creator?.name ?? 'Companion';
+
+      _ref.read(allAuditLogsProvider.notifier).logAction(TripAuditLog(
+        id: 'stop_${stoppage.id}',
+        tripId: stoppage.tripId,
+        actionType: 'add_stoppage',
+        itemTitle: stoppage.name,
+        performedByMemberId: stoppage.createdBy.isNotEmpty ? stoppage.createdBy : (creator?.id ?? 'usr_me'),
+        performedByName: authorName,
+        timestamp: stoppage.arrivedAt,
+        changeDetails: 'Waypoint stop marked on itinerary',
+      ));
+
+      _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
+        tripId: stoppage.tripId,
+        type: AlertType.stoppageArrival,
+        title: 'New Waypoint Added',
+        message: '$authorName added stop "${stoppage.name}"',
+      );
+    } catch (_) {}
+
     if (broadcast) {
       try {
         _ref.read(realtimeSyncServiceProvider).broadcastNewStoppage(stoppage);
       } catch (_) {}
     }
-
-
 
     try {
       _ref.read(offlineSyncEngineProvider).enqueueMutation(
@@ -62,6 +94,24 @@ class StoppageNotifier extends StateNotifier<List<Stoppage>> {
     _syncToCloud(updatedStoppage.tripId);
 
     try {
+      _ref.read(firestoreSyncServiceProvider).pushStoppage(updatedStoppage);
+    } catch (_) {}
+
+    try {
+      final currentUser = UserService.getCurrentUser();
+      _ref.read(allAuditLogsProvider.notifier).logAction(TripAuditLog(
+        id: 'stop_edit_${updatedStoppage.id}_${DateTime.now().millisecondsSinceEpoch}',
+        tripId: updatedStoppage.tripId,
+        actionType: 'edit_stoppage',
+        itemTitle: 'Updated: ${updatedStoppage.name}',
+        performedByMemberId: currentUser.id,
+        performedByName: currentUser.displayName,
+        timestamp: DateTime.now(),
+        changeDetails: 'Waypoint updated',
+      ));
+    } catch (_) {}
+
+    try {
       _ref.read(offlineSyncEngineProvider).enqueueMutation(
         action: MutationAction.updateStoppage,
         entityType: 'stoppage',
@@ -79,8 +129,6 @@ class StoppageNotifier extends StateNotifier<List<Stoppage>> {
     final stoppage = state[stoppageIndex];
     final updated = stoppage.copyWith(departedAt: DateTime.now());
     await updateStoppage(updated);
-
-
   }
 
   Future<void> deleteStoppage(String stoppageId) async {
@@ -89,7 +137,23 @@ class StoppageNotifier extends StateNotifier<List<Stoppage>> {
     await _storage.saveAllStoppages(state);
     _syncToCloud(existing.tripId);
 
+    try {
+      _ref.read(firestoreSyncServiceProvider).deleteStoppage(existing.tripId, stoppageId);
+    } catch (_) {}
 
+    try {
+      final currentUser = UserService.getCurrentUser();
+      _ref.read(allAuditLogsProvider.notifier).logAction(TripAuditLog(
+        id: 'stop_del_${stoppageId}_${DateTime.now().millisecondsSinceEpoch}',
+        tripId: existing.tripId,
+        actionType: 'delete_stoppage',
+        itemTitle: 'Deleted: ${existing.name}',
+        performedByMemberId: currentUser.id,
+        performedByName: currentUser.displayName,
+        timestamp: DateTime.now(),
+        changeDetails: 'Waypoint stop removed from itinerary',
+      ));
+    } catch (_) {}
 
     try {
       _ref.read(offlineSyncEngineProvider).enqueueMutation(
@@ -145,3 +209,12 @@ final selectedStoppageProvider = Provider<Stoppage?>((ref) {
     return null;
   }
 });
+
+final tripStoppagesProvider = Provider.family<List<Stoppage>, String?>((ref, tripId) {
+  if (tripId == null) return [];
+  final allStoppages = ref.watch(allStoppagesProvider);
+  final tripStoppages = allStoppages.where((s) => s.tripId == tripId).toList();
+  tripStoppages.sort((a, b) => a.arrivedAt.compareTo(b.arrivedAt));
+  return tripStoppages;
+});
+

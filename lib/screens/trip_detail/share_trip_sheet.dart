@@ -83,7 +83,7 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
               controller: nameController,
               decoration: const InputDecoration(
                 labelText: 'Companion Name',
-                hintText: 'e.g. Maya, David, Sam',
+                hintText: 'e.g. Co-traveler, Driver, Tour Guide',
                 prefixIcon: Icon(Icons.person_add_rounded),
               ),
               autofocus: true,

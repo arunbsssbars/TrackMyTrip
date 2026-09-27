@@ -148,7 +148,8 @@ class RealtimeSyncService {
           break;
         case 'PROXIMITY_ALERT':
           final alert = ProximityAlert.fromJson(payload);
-          ref.read(proximityAlertServiceProvider).ingestRemoteAlert(alert);
+          final bool isStaleOrOld = alert.timestamp.isBefore(DateTime.now().subtract(const Duration(seconds: 45)));
+          ref.read(proximityAlertServiceProvider).ingestRemoteAlert(alert, isHistorical: isStaleOrOld);
           break;
         case 'TRIP_DELETED':
           final deletedTripId = payload['tripId'] as String?;

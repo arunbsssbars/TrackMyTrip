@@ -800,6 +800,7 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
     final isCompleted = widget.trip.isCompleted;
     if (isCompleted && trackingState.isTracking) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
         ref.read(liveLocationTrackerProvider.notifier).stopTracking();
       });
     }

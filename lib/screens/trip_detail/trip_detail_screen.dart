@@ -7,13 +7,14 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../models/trip.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/audit_log_provider.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/settlement_provider.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
-import '../expense/add_expense_screen.dart';
-import '../memory/add_memory_dialog.dart';
+import '../expenses/add_expense_screen.dart';
+import '../memories/add_memory_dialog.dart';
 import '../stoppage/add_stoppage_dialog.dart';
 import '../../core/utils/page_transitions.dart';
 import 'tabs/expenses_tab.dart';
@@ -77,6 +78,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
         ref.read(allExpensesProvider.notifier).reload();
         ref.read(allMemoriesProvider.notifier).reload();
         ref.read(allSettlementsProvider.notifier).reload();
+        ref.read(allAuditLogsProvider.notifier).reload();
         if (mounted) setState(() {});
       },
     );
@@ -542,17 +544,20 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
               ),
             ),
           Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                TimelineTab(trip: trip),
-                MapTab(trip: trip),
-                MembersTab(trip: trip),
-                ExpensesTab(trip: trip),
-                if (!trip.isSolo)
-                  SettlementTab(trip: trip),
-                MemoriesTab(trip: trip),
-              ],
+            child: Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  TimelineTab(trip: trip),
+                  MapTab(trip: trip),
+                  MembersTab(trip: trip),
+                  ExpensesTab(trip: trip),
+                  if (!trip.isSolo)
+                    SettlementTab(trip: trip),
+                  MemoriesTab(trip: trip),
+                ],
+              ),
             ),
           ),
         ],

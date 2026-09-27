@@ -7,6 +7,8 @@ import '../../core/utils/currency_formatter.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../models/trip.dart';
 import '../../models/trip_member.dart';
+import '../../models/trip_audit_log.dart';
+import '../../providers/audit_log_provider.dart';
 import '../../providers/invitation_provider.dart';
 import '../../providers/trip_provider.dart';
 import '../trip/companion_search_dialog.dart';
@@ -223,7 +225,30 @@ class _EditTripDialogState extends ConsumerState<EditTripDialog> {
       members: _members,
     );
 
+    final oldBudget = widget.trip.budget;
     ref.read(tripListProvider.notifier).updateTrip(updated);
+
+    if (oldBudget != budgetVal && budgetVal != null) {
+      final currentMember = widget.trip.currentUserMember;
+      final curSymbol = CurrencyFormatter.getCurrencySymbol(updated.defaultCurrency);
+      final changeText = oldBudget == null
+          ? 'Set trip budget to $curSymbol${budgetVal.toStringAsFixed(2)}'
+          : 'Updated trip budget from $curSymbol${oldBudget.toStringAsFixed(2)} to $curSymbol${budgetVal.toStringAsFixed(2)}';
+
+      ref.read(allAuditLogsProvider.notifier).logAction(
+        TripAuditLog(
+          id: const Uuid().v4(),
+          tripId: widget.trip.id,
+          actionType: oldBudget == null ? 'set_budget' : 'update_budget',
+          itemTitle: 'Trip Budget',
+          performedByMemberId: currentMember?.id ?? 'User',
+          performedByName: currentMember?.name ?? 'Companion',
+          timestamp: DateTime.now(),
+          changeDetails: changeText,
+        ),
+      );
+    }
+
     Navigator.of(context).pop();
 
     ScaffoldMessenger.of(context).showSnackBar(

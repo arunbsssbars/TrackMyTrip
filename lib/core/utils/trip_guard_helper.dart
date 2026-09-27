@@ -55,19 +55,20 @@ class TripGuardHelper {
               ),
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(
                   color: isDark ? Colors.white10 : const Color(0xFFF1F5F9),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Row(
-                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.info_outline_rounded, size: 14, color: AppTheme.primary),
-                    SizedBox(width: 6),
-                    Text(
-                      'Reopening enables all edits & real-time sync',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                    Icon(Icons.info_outline_rounded, size: 16, color: AppTheme.primary),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Reopening enables all edits & real-time sync',
+                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
+                      ),
                     ),
                   ],
                 ),
@@ -75,6 +76,8 @@ class TripGuardHelper {
             ],
           ),
           actionsAlignment: MainAxisAlignment.spaceBetween,
+          actionsOverflowDirection: VerticalDirection.down,
+          actionsOverflowButtonSpacing: 8,
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(false),

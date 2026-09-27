@@ -22,12 +22,24 @@ class TripAuditLog {
   });
 
   String get category {
-    if (actionType.contains('expense')) return 'expense';
-    if (actionType.contains('settlement')) return 'settlement';
+    if (actionType.contains('expense') || actionType.contains('bill')) return 'expense';
+    if (actionType.contains('settlement') || actionType.contains('payment')) return 'settlement';
     if (actionType.contains('stoppage')) return 'stoppage';
-    if (actionType.contains('memory')) return 'memory';
+    if (actionType.contains('memory') || actionType.contains('photo')) return 'memory';
     if (actionType.contains('budget') || actionType.contains('trip')) return 'trip';
+    if (actionType.contains('sos') || actionType.contains('emergency')) return 'emergency';
     return 'general';
+  }
+
+  /// Action-specific semantic color hex for unified UI styling across the app
+  int get semanticColorValue {
+    if (actionType.contains('sos') || actionType.contains('emergency')) return 0xFFDC2626; // Crimson
+    if (actionType.contains('delete') || actionType.contains('remove') || actionType.contains('conclude')) return 0xFFEF4444; // Rose Red
+    if (actionType.contains('create') || actionType.contains('add') || actionType.contains('join')) return 0xFF10B981; // Emerald Teal
+    if (actionType.contains('edit') || actionType.contains('update')) return 0xFF3B82F6; // Dodger Blue
+    if (actionType.contains('settlement') || actionType.contains('payment')) return 0xFFD97706; // Amber
+    if (actionType.contains('expense') || actionType.contains('bill')) return 0xFF6366F1; // Indigo
+    return 0xFF10B981;
   }
 
   Map<String, dynamic> toJson() {

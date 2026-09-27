@@ -4,6 +4,7 @@ import '../core/services/cloud_trip_sync_service.dart';
 import '../core/services/firestore_sync_service.dart';
 import '../core/services/local_storage_service.dart';
 import '../core/services/location_service.dart';
+import '../core/services/offline_sync_engine.dart';
 import '../core/services/realtime_sync_service.dart';
 import '../core/services/tombstone_service.dart';
 import '../core/services/trip_share_service.dart';
@@ -17,6 +18,7 @@ import 'expense_provider.dart';
 import 'memory_provider.dart';
 import 'settlement_provider.dart';
 import 'stoppage_provider.dart';
+import 'audit_log_provider.dart';
 
 final currencyNotifierProvider = ChangeNotifierProvider<ValueNotifier<String>>((ref) {
   return LocationService.currencyNotifier;
@@ -144,6 +146,14 @@ class TripNotifier extends StateNotifier<List<Trip>> {
 
       _loadTrips();
       _reloadDependentProviders();
+
+      // Ensure any pending mutations are cleanly reconciled with cloud
+      try {
+        final engine = _ref.read(offlineSyncEngineProvider);
+        if (engine.pendingCount > 0) {
+          await engine.syncPendingMutationsNow();
+        }
+      } catch (_) {}
     } catch (_) {
     } finally {
       _ref.read(isSyncingTripsProvider.notifier).state = false;
@@ -162,6 +172,12 @@ class TripNotifier extends StateNotifier<List<Trip>> {
     } catch (_) {}
     try {
       _ref.read(allSettlementsProvider.notifier).reload();
+    } catch (_) {}
+    try {
+      _ref.read(allAuditLogsProvider.notifier).reload();
+    } catch (_) {}
+    try {
+      _ref.read(proximityAlertServiceProvider).reload();
     } catch (_) {}
   }
 

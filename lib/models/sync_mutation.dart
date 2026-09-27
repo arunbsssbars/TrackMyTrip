@@ -9,6 +9,8 @@ enum MutationAction {
   updateExpense,
   deleteExpense,
   addSettlement,
+  updateSettlement,
+  deleteSettlement,
   updateMemberLocation,
   addMemory,
   deleteMemory,

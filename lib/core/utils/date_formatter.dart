@@ -5,6 +5,10 @@ class DateFormatter {
     return DateFormat('MMM d, y').format(date);
   }
 
+  static String formatMonthYear(DateTime date) {
+    return DateFormat('MMMM yyyy').format(date);
+  }
+
   static String formatDateTime(DateTime dateTime) {
     return DateFormat('MMM d, y • h:mm a').format(dateTime);
   }

@@ -4,17 +4,20 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../models/stoppage.dart';
+import '../../models/trip_audit_log.dart';
+import '../../providers/audit_log_provider.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
-import '../expense/add_expense_screen.dart';
-import '../memory/add_memory_dialog.dart';
+import '../expenses/add_expense_screen.dart';
+import '../memories/add_memory_dialog.dart';
 
 class StoppageDetailScreen extends ConsumerWidget {
   final String stoppageId;
@@ -366,15 +369,33 @@ class StoppageDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final trip = ref.watch(currentTripProvider);
-    final stoppages = ref.watch(currentTripStoppagesProvider);
+    final tripList = ref.watch(tripListProvider);
+    final tripStoppages = ref.watch(tripStoppagesProvider(tripId));
+    final allStoppages = ref.watch(allStoppagesProvider);
+    final currentStoppages = ref.watch(currentTripStoppagesProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     Stoppage? matchedStoppage;
-    for (final s in stoppages) {
+    for (final s in tripStoppages) {
       if (s.id == stoppageId) {
         matchedStoppage = s;
         break;
+      }
+    }
+    if (matchedStoppage == null) {
+      for (final s in allStoppages) {
+        if (s.id == stoppageId) {
+          matchedStoppage = s;
+          break;
+        }
+      }
+    }
+    if (matchedStoppage == null) {
+      for (final s in currentStoppages) {
+        if (s.id == stoppageId) {
+          matchedStoppage = s;
+          break;
+        }
       }
     }
 
@@ -385,6 +406,10 @@ class StoppageDetailScreen extends ConsumerWidget {
       );
     }
     final stoppage = matchedStoppage;
+
+    final trip = tripList.where((t) => t.id == stoppage.tripId).firstOrNull 
+        ?? tripList.where((t) => t.id == tripId).firstOrNull 
+        ?? ref.watch(currentTripProvider);
 
     final expenses = ref.watch(stoppageExpensesProvider(stoppageId));
     final memories = ref.watch(stoppageMemoriesProvider(stoppageId));
@@ -706,7 +731,7 @@ class StoppageDetailScreen extends ConsumerWidget {
                     style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, letterSpacing: -0.3),
                   ),
                   Text(
-                    CurrencyFormatter.format(totalSpent, currency: trip?.defaultCurrency ?? 'USD'),
+                    CurrencyFormatter.format(totalSpent, currency: trip?.defaultCurrency),
                     style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: AppTheme.primary),
                   ),
                 ],
@@ -858,6 +883,22 @@ class StoppageDetailScreen extends ConsumerWidget {
                                   );
                                   if (confirmed == true) {
                                     ref.read(allExpensesProvider.notifier).deleteExpense(expense.id);
+
+                                    final trip = ref.read(tripListProvider).where((t) => t.id == tripId).firstOrNull;
+                                    final currentMember = trip?.currentUserMember;
+                                    ref.read(allAuditLogsProvider.notifier).logAction(
+                                      TripAuditLog(
+                                        id: const Uuid().v4(),
+                                        tripId: tripId,
+                                        actionType: 'delete_expense',
+                                        itemTitle: expense.title,
+                                        performedByMemberId: currentMember?.id ?? 'User',
+                                        performedByName: currentMember?.name ?? 'Companion',
+                                        timestamp: DateTime.now(),
+                                        changeDetails: 'Deleted expense "${expense.title}" (${expense.currency} ${expense.totalAmount.toStringAsFixed(2)})',
+                                      ),
+                                    );
+
                                     if (context.mounted) {
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(

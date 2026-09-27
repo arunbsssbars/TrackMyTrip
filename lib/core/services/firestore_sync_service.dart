@@ -16,6 +16,7 @@ import '../../providers/audit_log_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/memory_provider.dart';
+import '../../providers/settlement_provider.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
 import 'cloud_trip_sync_service.dart';
@@ -196,6 +197,7 @@ class FirestoreSyncService {
     _subscribeTripDoc(tripId);
     _subscribeStoppages(tripId);
     _subscribeExpenses(tripId);
+    _subscribeSettlements(tripId);
     _subscribeMemories(tripId);
     _subscribeAuditLogs(tripId);
     _subscribeProximityAlerts(tripId);
@@ -344,6 +346,46 @@ class FirestoreSyncService {
       }
     }, onError: (e) {
       if (kDebugMode) debugPrint('[FirestoreSyncService] Expense listener error: $e');
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // Settlements — Subscribe
+  // --------------------------------------------------------------------------
+
+  void _subscribeSettlements(String tripId) {
+    if (TombstoneService.isTombstoned(tripId)) return;
+    final path = 'settlements_$tripId';
+    _listeners[path] = _db
+        .collection('trips')
+        .doc(tripId)
+        .collection('settlements')
+        .snapshots()
+        .listen((snap) {
+      for (final change in snap.docChanges) {
+        try {
+          final data = change.doc.data();
+          if (data == null) continue;
+          final settlement = Settlement.fromJson({...data, 'id': change.doc.id});
+          switch (change.type) {
+            case DocumentChangeType.added:
+            case DocumentChangeType.modified:
+              _ref
+                  .read(allSettlementsProvider.notifier)
+                  .receiveRemoteSettlement(settlement);
+              break;
+            case DocumentChangeType.removed:
+              _ref
+                  .read(allSettlementsProvider.notifier)
+                  .deleteSettlementLocally(settlement.id);
+              break;
+          }
+        } catch (e) {
+          if (kDebugMode) debugPrint('[FirestoreSyncService] Settlement parse error: $e');
+        }
+      }
+    }, onError: (e) {
+      if (kDebugMode) debugPrint('[FirestoreSyncService] Settlement listener error: $e');
     });
   }
 
@@ -612,6 +654,43 @@ class FirestoreSyncService {
           .delete();
     } catch (e) {
       if (kDebugMode) debugPrint('[FirestoreSyncService] deleteExpense error: $e');
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Push Writes — Settlements
+  // --------------------------------------------------------------------------
+
+  /// Writes [settlement] to Firestore.
+  Future<void> pushSettlement(Settlement settlement) async {
+    if (settlement.tripId.isEmpty || TombstoneService.isTombstoned(settlement.tripId)) return;
+    try {
+      await _db
+          .collection('trips')
+          .doc(settlement.tripId)
+          .collection('settlements')
+          .doc(settlement.id)
+          .set({
+        ...settlement.toJson(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      if (kDebugMode) debugPrint('[FirestoreSyncService] pushSettlement error: $e');
+    }
+  }
+
+  /// Removes [settlementId] from Firestore.
+  Future<void> deleteSettlement(String tripId, String settlementId) async {
+    if (tripId.isEmpty) return;
+    try {
+      await _db
+          .collection('trips')
+          .doc(tripId)
+          .collection('settlements')
+          .doc(settlementId)
+          .delete();
+    } catch (e) {
+      if (kDebugMode) debugPrint('[FirestoreSyncService] deleteSettlement error: $e');
     }
   }
 

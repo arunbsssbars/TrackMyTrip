@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/proximity_alert_service.dart';
 import '../../core/services/user_service.dart';
@@ -23,16 +24,91 @@ class ActivityHubTab extends ConsumerStatefulWidget {
 }
 
 class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
-  int _selectedFilter = 0; // 0: All, 1: Invitations, 2: Alerts & Activity
+  int _selectedFilter = 0; // 0: All, 1: Alerts & Activity, 2: Invitations
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounceTimer;
   String _searchQuery = '';
-  final Set<String> _collapsedDates = {};
+  bool _groupByTrip = false;
+  final Set<String> _manuallyExpandedDates = {};
+  final Set<String> _manuallyCollapsedDates = {};
+  final Set<String> _collapsedTrips = {};
+  final Set<String> _collapsedMonths = {};
+  final ScrollController _scrollController = ScrollController();
+  int _displayedLimit = 25;
+
+  bool _isDateCollapsed(String dateKey) {
+    // Check if the date is within the last 7 days
+    try {
+      final parts = dateKey.split('-');
+      if (parts.length == 3) {
+        final parsedDate = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+        final now = DateTime.now();
+        final today = DateTime(now.year, now.month, now.day);
+        final diffDays = today.difference(parsedDate).inDays;
+        // If within 7 days, it's expanded by default unless manually collapsed
+        if (diffDays >= 0 && diffDays <= 7) {
+          return _manuallyCollapsedDates.contains(dateKey);
+        }
+      }
+    } catch (_) {}
+
+    // Older than 7 days: collapsed by default unless manually expanded
+    return !_manuallyExpandedDates.contains(dateKey);
+  }
+
+  void _toggleDate(String dateKey) {
+    setState(() {
+      bool isRecent = false;
+      try {
+        final parts = dateKey.split('-');
+        if (parts.length == 3) {
+          final parsedDate = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+          final now = DateTime.now();
+          final today = DateTime(now.year, now.month, now.day);
+          final diffDays = today.difference(parsedDate).inDays;
+          if (diffDays >= 0 && diffDays <= 7) {
+            isRecent = true;
+          }
+        }
+      } catch (_) {}
+
+      if (isRecent) {
+        if (_manuallyCollapsedDates.contains(dateKey)) {
+          _manuallyCollapsedDates.remove(dateKey);
+        } else {
+          _manuallyCollapsedDates.add(dateKey);
+        }
+      } else {
+        if (_manuallyExpandedDates.contains(dateKey)) {
+          _manuallyExpandedDates.remove(dateKey);
+        } else {
+          _manuallyExpandedDates.add(dateKey);
+        }
+      }
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      if (mounted) {
+        setState(() {
+          _displayedLimit += 20;
+        });
+      }
+    }
+  }
 
   @override
   void dispose() {
     _searchDebounceTimer?.cancel();
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -154,26 +230,10 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
       appBar: AppBar(
         elevation: 0,
         backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(7),
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withAlpha(25),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.notifications_active_rounded, color: AppTheme.primary, size: 20),
-            ),
-            const SizedBox(width: 10),
-            const Expanded(
-              child: Text(
-                'Activity & Alerts',
-                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, letterSpacing: -0.3),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
+        titleSpacing: 16,
+        title: const Text(
+          'Activity & Alerts',
+          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, letterSpacing: -0.3),
         ),
         actions: [
           // Banner Notifications Mute / Unmute Toggle (Point 7)
@@ -196,18 +256,19 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
               );
             },
           ),
-          // Emergency SOS Icon with text inside (Point 12)
+          // Emergency SOS Icon
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 4),
             child: SosBadgeIcon(
-              size: 32,
+              size: 30,
               onTap: () => _confirmSendSos(context),
             ),
           ),
           if (relevantAlerts.isNotEmpty)
-            TextButton(
+            IconButton(
+              icon: const Icon(Icons.done_all_rounded, size: 21, color: AppTheme.primary),
+              tooltip: 'Mark all as read',
               onPressed: () => ref.read(proximityAlertServiceProvider).markAllAsRead(),
-              child: const Text('Read All', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
             ),
           const SizedBox(width: 4),
         ],
@@ -248,13 +309,17 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                         )
                       : null,
                   border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  disabledBorder: InputBorder.none,
+                  errorBorder: InputBorder.none,
                   contentPadding: const EdgeInsets.symmetric(vertical: 10),
                 ),
               ),
             ),
           ),
 
-          // Horizontally Scrollable Filter Chips (Fixes Point 8 overflow)
+          // Horizontally Scrollable Filter Chips + Grouping Toggle (Points 12 & 13)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -266,16 +331,57 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                 children: [
                   _buildFilterChip('All', 0, totalUnread),
                   const SizedBox(width: 8),
-                  _buildFilterChip('Invitations', 1, unreadInvitesTab),
+                  // Grouping & Sort Mode at Second Place (Point 2)
+                  InkWell(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      setState(() => _groupByTrip = !_groupByTrip);
+                    },
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withAlpha(isDark ? 35 : 20),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: AppTheme.primary.withAlpha(isDark ? 150 : 100),
+                          width: 1.2,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _groupByTrip ? Icons.near_me_rounded : Icons.calendar_month_rounded,
+                            size: 13,
+                            color: AppTheme.primary,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            _groupByTrip ? 'Sort: Trip-wise' : 'Sort: Date-wise',
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 3),
+                          const Icon(Icons.swap_horiz_rounded, size: 14, color: AppTheme.primary),
+                        ],
+                      ),
+                    ),
+                  ),
                   const SizedBox(width: 8),
-                  _buildFilterChip('Alerts & Activity', 2, unreadActivityTab),
+                  _buildFilterChip('Alerts & Activity', 1, unreadActivityTab),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('Invitations', 2, unreadInvitesTab),
                 ],
               ),
             ),
           ),
           const Divider(height: 1),
 
-          // Activity List with Swiping & Collapsible Date Sections
+          // Activity List with Swiping & Collapsible Date / Trip Sections
           Expanded(
             child: RefreshIndicator(
               onRefresh: () async {
@@ -283,10 +389,22 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                 ref.read(tripListProvider.notifier).reload();
               },
               child: ListView.builder(
+                controller: _scrollController,
                 physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                itemCount: listItems.length,
+                itemCount: (listItems.length > _displayedLimit) ? (_displayedLimit + 1) : listItems.length,
                 itemBuilder: (context, index) {
+                  if (index >= _displayedLimit) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      child: Center(
+                        child: Text(
+                          'Showing $_displayedLimit of ${listItems.length} activities • Scroll for more',
+                          style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : const Color(0xFF94A3B8)),
+                        ),
+                      ),
+                    );
+                  }
                   final item = listItems[index];
                   if (item is _PendingInvitesHeaderItem) {
                     return Padding(
@@ -306,6 +424,10 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                     return _buildInviteCard(context, item.invitation, isDark);
                   } else if (item is _DateHeaderItem) {
                     return _buildDateHeader(item, isDark);
+                  } else if (item is _MonthHeaderItem) {
+                    return _buildMonthHeader(item, isDark);
+                  } else if (item is _TripHeaderItem) {
+                    return _buildTripHeader(item, isDark);
                   } else if (item is _AlertCardItem) {
                     return _buildAlertCard(context, item.alert, isDark, trip: item.trip);
                   } else if (item is _EmptyStateItem) {
@@ -337,24 +459,33 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
           inv.inviterName.toLowerCase().contains(searchQuery);
     }).toList();
 
-    // Show pending invites exclusively under the second filter tab ("Invitations", index 1)
-    if (selectedFilter == 1 && filteredInvites.isNotEmpty) {
+    // Show pending invites at the top under Invitations tab (2) and All tab (0)
+    if ((selectedFilter == 0 || selectedFilter == 2) && filteredInvites.isNotEmpty) {
       items.add(_PendingInvitesHeaderItem(filteredInvites.length));
       for (final inv in filteredInvites) {
         items.add(_PendingInviteCardItem(inv));
       }
     }
 
-    // Filter alerts by tab and search
-    final filteredAlerts = alerts.where((alert) {
+    // Deduplicate alerts by unique id
+    final seenIds = <String>{};
+    final uniqueAlerts = <ProximityAlert>[];
+    for (final alert in alerts) {
+      if (seenIds.add(alert.id)) {
+        uniqueAlerts.add(alert);
+      }
+    }
+
+    // Filter generalized activities by tab and search
+    final filteredAlerts = uniqueAlerts.where((alert) {
       final isInviteAlert = alert.type == AlertType.invitation ||
           alert.type == AlertType.invitationAccepted ||
           alert.type == AlertType.invitationRejected;
 
-      if (selectedFilter == 1 && !isInviteAlert) {
+      if (selectedFilter == 1 && isInviteAlert) {
         return false;
       }
-      if (selectedFilter == 2 && isInviteAlert) {
+      if (selectedFilter == 2 && !isInviteAlert) {
         return false;
       }
 
@@ -378,7 +509,7 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
       return true;
     }).toList();
 
-    // Strict reverse chronological order (Points 2 & 5: most recent first)
+    // Sort in strict reverse chronological order
     filteredAlerts.sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
     if (filteredAlerts.isEmpty && filteredInvites.isEmpty) {
@@ -388,7 +519,7 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
           message: 'Try searching with another keyword or clear the search filter.',
           icon: Icons.search_off_rounded,
         ));
-      } else if (selectedFilter == 1) {
+      } else if (selectedFilter == 2) {
         items.add(_EmptyStateItem(
           title: 'No pending trip invitations',
           message: 'When friends invite you to a journey, they will appear here.',
@@ -397,22 +528,115 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
       } else {
         items.add(_EmptyStateItem(
           title: 'No new alerts or updates',
-          message: 'Trip activity, invitations, and proximity alerts will appear here.',
+          message: 'Trip activity, bills, settlements, budget changes, and proximity alerts will appear here.',
           icon: Icons.notifications_none_rounded,
         ));
       }
       return items;
     }
 
-    // Group date-wise with most recent dates first (Point 6)
+    if (_groupByTrip) {
+      // Group trip-wise (Sort trips start date descending & group under collapsible Month/Year sections)
+      final Map<String, List<ProximityAlert>> tripGroups = {};
+      final List<ProximityAlert> generalEntries = [];
+
+      for (final alert in filteredAlerts) {
+        if (alert.tripId.isNotEmpty && alert.tripId != 'trip_general') {
+          tripGroups.putIfAbsent(alert.tripId, () => []).add(alert);
+        } else {
+          generalEntries.add(alert);
+        }
+      }
+
+      // Collect all trips that have alerts, sorted by startDate descending
+      final relevantTrips = trips.where((t) => tripGroups.containsKey(t.id)).toList()
+        ..sort((a, b) => b.startDate.compareTo(a.startDate));
+
+      for (final tripId in tripGroups.keys) {
+        if (!relevantTrips.any((t) => t.id == tripId)) {
+          final dummy = trips.where((t) => t.id == tripId).firstOrNull;
+          if (dummy != null) relevantTrips.add(dummy);
+        }
+      }
+
+      // Group trips by Month/Year
+      final Map<String, List<Trip>> monthGroups = {};
+      final Map<String, String> monthLabels = {};
+      for (final t in relevantTrips) {
+        final monthKey = '${t.startDate.year}-${t.startDate.month.toString().padLeft(2, '0')}';
+        monthGroups.putIfAbsent(monthKey, () => []).add(t);
+        monthLabels[monthKey] = DateFormatter.formatMonthYear(t.startDate);
+      }
+
+      for (final monthEntry in monthGroups.entries) {
+        final monthKey = monthEntry.key;
+        final monthTripList = monthEntry.value;
+        final monthLabel = monthLabels[monthKey] ?? monthKey;
+        final isMonthCollapsed = _collapsedMonths.contains(monthKey);
+
+        final totalAlertsInMonth = monthTripList.fold<int>(
+          0,
+          (sum, t) => sum + (tripGroups[t.id]?.length ?? 0),
+        );
+
+        items.add(_MonthHeaderItem(
+          monthLabel: monthLabel,
+          monthKey: monthKey,
+          tripCount: monthTripList.length,
+          alertCount: totalAlertsInMonth,
+          isCollapsed: isMonthCollapsed,
+        ));
+
+        if (!isMonthCollapsed) {
+          for (final t in monthTripList) {
+            final groupAlerts = tripGroups[t.id] ?? [];
+            final isTripCollapsed = _collapsedTrips.contains(t.id);
+
+            items.add(_TripHeaderItem(
+              tripTitle: t.title,
+              tripId: t.id,
+              alertCount: groupAlerts.length,
+              isCollapsed: isTripCollapsed,
+            ));
+
+            if (!isTripCollapsed) {
+              for (final alert in groupAlerts) {
+                items.add(_AlertCardItem(alert, t));
+              }
+            }
+          }
+        }
+      }
+
+      if (generalEntries.isNotEmpty) {
+        final isCollapsed = _collapsedTrips.contains('general_system');
+        items.add(_TripHeaderItem(
+          tripTitle: 'General & System Updates',
+          tripId: 'general_system',
+          alertCount: generalEntries.length,
+          isCollapsed: isCollapsed,
+        ));
+
+        if (!isCollapsed) {
+          for (final alert in generalEntries) {
+            items.add(_AlertCardItem(alert, null));
+          }
+        }
+      }
+
+      return items;
+    }
+
+    // Group date-wise with most recent dates first
     final Map<String, List<ProximityAlert>> dateGroups = {};
     final Map<String, String> dateLabels = {};
 
     for (final alert in filteredAlerts) {
-      final dateKey = '${alert.timestamp.year}-${alert.timestamp.month.toString().padLeft(2, '0')}-${alert.timestamp.day.toString().padLeft(2, '0')}';
+      final dt = alert.timestamp;
+      final dateKey = '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
       if (!dateGroups.containsKey(dateKey)) {
         dateGroups[dateKey] = [];
-        dateLabels[dateKey] = _getDateHeader(alert.timestamp);
+        dateLabels[dateKey] = _getDateHeader(dt);
       }
       dateGroups[dateKey]!.add(alert);
     }
@@ -421,7 +645,7 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
       final dateKey = entry.key;
       final groupAlerts = entry.value;
       final dateLabel = dateLabels[dateKey] ?? dateKey;
-      final isCollapsed = _collapsedDates.contains(dateKey);
+      final isCollapsed = _isDateCollapsed(dateKey);
 
       items.add(_DateHeaderItem(
         dateLabel: dateLabel,
@@ -495,17 +719,72 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
     );
   }
 
-  Widget _buildDateHeader(_DateHeaderItem item, bool isDark) {
+  Widget _buildMonthHeader(_MonthHeaderItem item, bool isDark) {
     return InkWell(
       onTap: () {
         setState(() {
-          if (_collapsedDates.contains(item.dateKey)) {
-            _collapsedDates.remove(item.dateKey);
+          if (_collapsedMonths.contains(item.monthKey)) {
+            _collapsedMonths.remove(item.monthKey);
           } else {
-            _collapsedDates.add(item.dateKey);
+            _collapsedMonths.add(item.monthKey);
           }
         });
       },
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        margin: const EdgeInsets.only(top: 14, bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isDark ? Colors.white12 : const Color(0xFFCBD5E1),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.date_range_rounded, size: 16, color: AppTheme.primary),
+            const SizedBox(width: 8),
+            Text(
+              item.monthLabel,
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w900,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                letterSpacing: -0.2,
+              ),
+            ),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withAlpha(20),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '${item.tripCount} trip${item.tripCount == 1 ? "" : "s"} • ${item.alertCount} events',
+                style: const TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.primary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Icon(
+              item.isCollapsed ? Icons.expand_more_rounded : Icons.expand_less_rounded,
+              size: 20,
+              color: Colors.grey,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDateHeader(_DateHeaderItem item, bool isDark) {
+    return InkWell(
+      onTap: () => _toggleDate(item.dateKey),
       borderRadius: BorderRadius.circular(10),
       child: Container(
         margin: const EdgeInsets.only(top: 10, bottom: 6),
@@ -530,6 +809,72 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
               ),
             ),
             const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withAlpha(20),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '${item.alertCount} events',
+                style: const TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.primary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Icon(
+              item.isCollapsed ? Icons.expand_more_rounded : Icons.expand_less_rounded,
+              size: 18,
+              color: Colors.grey,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTripHeader(_TripHeaderItem item, bool isDark) {
+    return InkWell(
+      onTap: () {
+        setState(() {
+          if (_collapsedTrips.contains(item.tripId)) {
+            _collapsedTrips.remove(item.tripId);
+          } else {
+            _collapsedTrips.add(item.tripId);
+          }
+        });
+      },
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        margin: const EdgeInsets.only(top: 12, bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFEEF2F6),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isDark ? Colors.white12 : const Color(0xFFCBD5E1),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.near_me_rounded, size: 15, color: AppTheme.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                item.tripTitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
@@ -731,6 +1076,7 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
     final isSender = alert.senderMemberId == currentUser.id || alert.isOutgoing;
     final isAcceptedInvite = alert.type == AlertType.invitationAccepted ||
         (alert.type == AlertType.invitation && (trip?.hasMember(currentUser.id, currentUser.email) ?? false));
+    final nature = ActivityNature.fromAlertType(alert.type);
 
     return Dismissible(
       key: ValueKey('activity_alert_${alert.id}'),
@@ -769,9 +1115,24 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
             ref.read(proximityAlertServiceProvider).markAsRead(alert.id);
           }
           if (alert.tripId.isNotEmpty && alert.tripId != 'trip_general') {
-            final tripExists = ref.read(tripListProvider).any((t) => t.id == alert.tripId);
-            if (tripExists) {
-              AppNavigator.push(context, TripDetailScreen(tripId: alert.tripId));
+            final matchingTrip = trip ?? ref.read(tripListProvider).where((t) => t.id == alert.tripId).firstOrNull;
+            if (matchingTrip != null) {
+              int targetTab = 0;
+              if (alert.type == AlertType.billAdded) {
+                targetTab = 3; // Bills / Budget tab
+              } else if (alert.type == AlertType.settlementRecorded) {
+                targetTab = matchingTrip.isSolo ? 3 : 4; // Settle tab
+              } else if (alert.type == AlertType.stoppageAdded || alert.type == AlertType.stoppageArrival || alert.type == AlertType.stoppageDeparture) {
+                targetTab = 0; // Timeline / Stoppages tab
+              } else if (alert.type == AlertType.locationShared || alert.type == AlertType.companionStray) {
+                targetTab = 1; // Route Map tab
+              } else if (alert.type == AlertType.memberJoined || alert.type == AlertType.memberLeft || alert.type == AlertType.invitationAccepted || alert.type == AlertType.invitation) {
+                targetTab = 2; // Members tab
+              } else if (alert.type == AlertType.memoryAdded) {
+                targetTab = matchingTrip.isSolo ? 4 : 5; // Memories tab
+              }
+              ref.read(selectedTripIdProvider.notifier).state = matchingTrip.id;
+              AppNavigator.push(context, TripDetailScreen(tripId: matchingTrip.id, initialTabIndex: targetTab));
             }
           }
         },
@@ -804,76 +1165,72 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                   children: [
                     Row(
                       children: [
-                        Expanded(
-                          child: Text(
-                            alert.title,
-                            style: TextStyle(
-                              fontWeight: alert.isRead ? FontWeight.w600 : FontWeight.w800,
-                              fontSize: 13,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: nature.color.withAlpha(25),
+                            borderRadius: BorderRadius.circular(5),
+                            border: Border.all(color: nature.color.withAlpha(80), width: 0.8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(nature.icon, size: 9, color: nature.color),
+                              const SizedBox(width: 2.5),
+                              Text(
+                                nature.label,
+                                style: TextStyle(
+                                  fontSize: 8.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: nature.color,
+                                  letterSpacing: 0.3,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(width: 6),
-                        // Status badge (Point 3: Accepted vs Received vs Sent)
-                        if (isAcceptedInvite)
+                        if (isAcceptedInvite) ...[
+                          const SizedBox(width: 4),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
                             decoration: BoxDecoration(
                               color: const Color(0xFF10B981).withAlpha(25),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: const Color(0xFF10B981).withAlpha(80)),
+                              borderRadius: BorderRadius.circular(4),
                             ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.check_circle_rounded, size: 9, color: Color(0xFF10B981)),
-                                SizedBox(width: 2),
-                                Text('ACCEPTED', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
-                              ],
-                            ),
-                          )
-                        else if (isSender)
+                            child: const Text('ACCEPTED', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+                          ),
+                        ] else if (isSender) ...[
+                          const SizedBox(width: 4),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
                             decoration: BoxDecoration(
                               color: Colors.blueGrey.withAlpha(25),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: Colors.blueGrey.withAlpha(60)),
+                              borderRadius: BorderRadius.circular(4),
                             ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.arrow_outward_rounded, size: 9, color: Colors.blueGrey),
-                                SizedBox(width: 2),
-                                Text('SENT', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
-                              ],
-                            ),
-                          )
-                        else
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                            decoration: BoxDecoration(
-                              color: Colors.teal.withAlpha(25),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: Colors.teal.withAlpha(60)),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.arrow_downward_rounded, size: 9, color: Colors.teal),
-                                SizedBox(width: 2),
-                                Text('RECEIVED', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.teal)),
-                              ],
-                            ),
+                            child: const Text('SENT', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
                           ),
-                        const SizedBox(width: 6),
+                        ],
+                        const Spacer(),
                         Text(
                           _formatTime(alert.timestamp),
-                          style: TextStyle(fontSize: 10, color: isDark ? Colors.grey[400] : const Color(0xFF94A3B8)),
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                            color: isDark ? Colors.grey[400] : const Color(0xFF94A3B8),
+                          ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      alert.title,
+                      style: TextStyle(
+                        fontWeight: alert.isRead ? FontWeight.w600 : FontWeight.w800,
+                        fontSize: 13,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 3),
                     Text(
@@ -937,11 +1294,7 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
   }
 
   String _formatTime(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${dt.day}/${dt.month}';
+    return DateFormatter.formatDateTime(dt);
   }
 }
 
@@ -970,10 +1323,38 @@ class _DateHeaderItem extends _ActivityListItem {
   });
 }
 
+class _TripHeaderItem extends _ActivityListItem {
+  final String tripTitle;
+  final String tripId;
+  final int alertCount;
+  final bool isCollapsed;
+  _TripHeaderItem({
+    required this.tripTitle,
+    required this.tripId,
+    required this.alertCount,
+    required this.isCollapsed,
+  });
+}
+
 class _AlertCardItem extends _ActivityListItem {
   final ProximityAlert alert;
   final Trip? trip;
   _AlertCardItem(this.alert, [this.trip]);
+}
+
+class _MonthHeaderItem extends _ActivityListItem {
+  final String monthLabel;
+  final String monthKey;
+  final int tripCount;
+  final int alertCount;
+  final bool isCollapsed;
+  _MonthHeaderItem({
+    required this.monthLabel,
+    required this.monthKey,
+    required this.tripCount,
+    required this.alertCount,
+    required this.isCollapsed,
+  });
 }
 
 class _EmptyStateItem extends _ActivityListItem {
@@ -981,4 +1362,46 @@ class _EmptyStateItem extends _ActivityListItem {
   final String message;
   final IconData icon;
   _EmptyStateItem({required this.title, required this.message, required this.icon});
+}
+
+enum ActivityNature {
+  safety('SAFETY ALERT', Icons.warning_amber_rounded, Color(0xFFEF4444)),
+  finance('EXPENSE', Icons.receipt_long_rounded, Color(0xFF10B981)),
+  itinerary('ITINERARY', Icons.place_rounded, Color(0xFF3B82F6)),
+  invitation('INVITATION', Icons.mail_rounded, Color(0xFF8B5CF6)),
+  memory('MEMORY', Icons.photo_camera_rounded, Color(0xFFEC4899)),
+  general('UPDATE', Icons.notifications_active_rounded, Color(0xFFF59E0B));
+
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  const ActivityNature(this.label, this.icon, this.color);
+
+  static ActivityNature fromAlertType(AlertType type) {
+    switch (type) {
+      case AlertType.sosEmergency:
+      case AlertType.companionStray:
+        return ActivityNature.safety;
+      case AlertType.billAdded:
+      case AlertType.settlementRecorded:
+        return ActivityNature.finance;
+      case AlertType.stoppageArrival:
+      case AlertType.stoppageDeparture:
+      case AlertType.stoppageAdded:
+        return ActivityNature.itinerary;
+      case AlertType.invitation:
+      case AlertType.invitationAccepted:
+      case AlertType.invitationRejected:
+      case AlertType.memberJoined:
+      case AlertType.memberLeft:
+        return ActivityNature.invitation;
+      case AlertType.memoryAdded:
+        return ActivityNature.memory;
+      case AlertType.locationShared:
+      case AlertType.general:
+      default:
+        return ActivityNature.general;
+    }
+  }
 }

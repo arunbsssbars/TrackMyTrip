@@ -714,8 +714,9 @@ class LocalStorageService {
     final list = List<TripInvitation>.from(_cachedInvitations);
     list.removeWhere((i) => i.id == invitationId);
     _cachedInvitations = list;
-      await _db.deleteInvitation(invitationId);
+    await _db.deleteInvitation(invitationId);
   }
+
 
   Future<void> _purgeDummyData() async {
     final dummyTrips = _cachedTrips.where((t) =>

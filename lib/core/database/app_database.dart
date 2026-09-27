@@ -131,6 +131,22 @@ class AppDatabase {
       )
     ''');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_tombstone_tripId ON tombstoned_trips(tripId)');
+    // Non-destructive multi-currency migrations
+    try {
+      await db.execute('ALTER TABLE expenses ADD COLUMN originalCurrency TEXT');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE expenses ADD COLUMN originalAmount REAL');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE expenses ADD COLUMN exchangeRate REAL');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE trips ADD COLUMN memberRatingsJson TEXT');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE trips ADD COLUMN memberReviewsJson TEXT');
+    } catch (_) {}
   }
 
   /// Schema creation
@@ -155,7 +171,9 @@ class AppDatabase {
         isCompleted INTEGER NOT NULL DEFAULT 0,
         rating REAL,
         experienceReview TEXT,
-        completedAt TEXT
+        completedAt TEXT,
+        memberRatingsJson TEXT,
+        memberReviewsJson TEXT
       )
     ''');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_trips_startDate ON trips(startDate)');
@@ -195,7 +213,10 @@ class AppDatabase {
         splitsJson TEXT NOT NULL,
         receiptImagePath TEXT,
         notes TEXT,
-        createdAt TEXT NOT NULL
+        createdAt TEXT NOT NULL,
+        originalCurrency TEXT,
+        originalAmount REAL,
+        exchangeRate REAL
       )
     ''');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_expenses_tripId ON expenses(tripId)');
@@ -601,15 +622,20 @@ class AppDatabase {
   }
 
   Future<void> saveAllMutations(List<SyncMutation> mutations) async {
-    final batch = _db.batch();
-    for (final mut in mutations) {
-      batch.insert(
-        'sync_mutations',
-        _mutationToRow(mut),
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-    }
-    await batch.commit(noResult: true);
+    await _db.transaction((txn) async {
+      await txn.delete('sync_mutations');
+      if (mutations.isNotEmpty) {
+        final batch = txn.batch();
+        for (final mut in mutations) {
+          batch.insert(
+            'sync_mutations',
+            _mutationToRow(mut),
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+        await batch.commit(noResult: true);
+      }
+    });
   }
 
   Future<void> removeMutation(String mutationId) async {
@@ -696,12 +722,33 @@ class AppDatabase {
   }
 
   Future<void> saveRegisteredUser(Map<String, dynamic> userRecord) async {
+    final email = (userRecord['email'] as String).toLowerCase();
+    final username = (userRecord['username'] as String).toLowerCase();
+    final recordToSave = Map<String, dynamic>.from(userRecord);
+
+    if (!recordToSave.containsKey('password')) {
+      final existing = await _db.query(
+        'registered_users',
+        where: 'email = ? OR username = ?',
+        whereArgs: [email, username],
+        limit: 1,
+      );
+      if (existing.isNotEmpty) {
+        try {
+          final prevJson = jsonDecode(existing.first['userRecordJson'] as String) as Map<String, dynamic>;
+          if (prevJson.containsKey('password')) {
+            recordToSave['password'] = prevJson['password'];
+          }
+        } catch (_) {}
+      }
+    }
+
     await _db.insert(
       'registered_users',
       {
-        'email': (userRecord['email'] as String).toLowerCase(),
-        'username': (userRecord['username'] as String).toLowerCase(),
-        'userRecordJson': jsonEncode(userRecord),
+        'email': email,
+        'username': username,
+        'userRecordJson': jsonEncode(recordToSave),
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -796,10 +843,32 @@ class AppDatabase {
     'rating': t.rating,
     'experienceReview': t.experienceReview,
     'completedAt': t.completedAt?.toIso8601String(),
+    'memberRatingsJson': jsonEncode(t.memberRatings),
+    'memberReviewsJson': jsonEncode(t.memberReviews),
   };
 
   Trip _tripFromRow(Map<String, dynamic> r) {
     final membersRaw = jsonDecode(r['membersJson'] as String) as List<dynamic>;
+    Map<String, double> parsedMemberRatings = {};
+    if (r['memberRatingsJson'] != null) {
+      try {
+        final decoded = jsonDecode(r['memberRatingsJson'] as String) as Map<String, dynamic>;
+        parsedMemberRatings = decoded.map((k, v) => MapEntry(k, (v as num).toDouble()));
+      } catch (_) {}
+    } else if (r['rating'] != null) {
+      parsedMemberRatings['default'] = (r['rating'] as num).toDouble();
+    }
+
+    Map<String, String> parsedMemberReviews = {};
+    if (r['memberReviewsJson'] != null) {
+      try {
+        final decoded = jsonDecode(r['memberReviewsJson'] as String) as Map<String, dynamic>;
+        parsedMemberReviews = decoded.map((k, v) => MapEntry(k, v.toString()));
+      } catch (_) {}
+    } else if (r['experienceReview'] != null) {
+      parsedMemberReviews['default'] = r['experienceReview'] as String;
+    }
+
     return Trip(
       id: r['id'] as String,
       title: r['title'] as String,
@@ -818,6 +887,8 @@ class AppDatabase {
       rating: (r['rating'] as num?)?.toDouble(),
       experienceReview: r['experienceReview'] as String?,
       completedAt: r['completedAt'] != null ? DateTime.parse(r['completedAt'] as String) : null,
+      memberRatings: parsedMemberRatings,
+      memberReviews: parsedMemberReviews,
     );
   }
 
@@ -865,6 +936,9 @@ class AppDatabase {
     'receiptImagePath': e.receiptImagePath,
     'notes': e.notes,
     'createdAt': e.createdAt.toIso8601String(),
+    'originalCurrency': e.originalCurrency,
+    'originalAmount': e.originalAmount,
+    'exchangeRate': e.exchangeRate,
   };
 
   Expense _expenseFromRow(Map<String, dynamic> r) => Expense(
@@ -883,6 +957,9 @@ class AppDatabase {
     receiptImagePath: r['receiptImagePath'] as String?,
     notes: r['notes'] as String?,
     createdAt: DateTime.parse(r['createdAt'] as String),
+    originalCurrency: r['originalCurrency'] as String?,
+    originalAmount: (r['originalAmount'] as num?)?.toDouble(),
+    exchangeRate: (r['exchangeRate'] as num?)?.toDouble(),
   );
 
   Map<String, dynamic> _memoryToRow(Memory m) => {

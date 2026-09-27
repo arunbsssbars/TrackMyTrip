@@ -5,7 +5,6 @@ import '../core/services/push_notification_service.dart';
 import 'activity/activity_hub_tab.dart';
 import 'common/universal_bottom_bar.dart';
 import 'home/home_screen.dart';
-import 'memories/global_memories_tab.dart';
 import 'notifications/in_app_notification_banner.dart';
 import 'profile/profile_tab.dart';
 import 'trip/current_trip_tab.dart';
@@ -62,7 +61,6 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
     HomeScreen(),
     CurrentTripTab(),
     ActivityHubTab(),
-    GlobalMemoriesTab(),
     ProfileTab(),
   ];
 

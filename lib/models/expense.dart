@@ -12,8 +12,8 @@ class Expense {
   final String tripId;
   final String? stoppageId; // Anchored to a stoppage / stop
   final String title;
-  final double totalAmount;
-  final String currency;
+  final double totalAmount; // Converted / stored in trip base currency
+  final String currency; // Base trip currency
   final String category;
   final String paidByMemberId;
   final SplitType splitType;
@@ -21,6 +21,11 @@ class Expense {
   final String? receiptImagePath;
   final String? notes;
   final DateTime createdAt;
+
+  // Multi-Currency / Foreign Exchange fields
+  final String? originalCurrency;
+  final double? originalAmount;
+  final double? exchangeRate;
 
   const Expense({
     required this.id,
@@ -36,7 +41,17 @@ class Expense {
     this.receiptImagePath,
     this.notes,
     required this.createdAt,
+    this.originalCurrency,
+    this.originalAmount,
+    this.exchangeRate,
   });
+
+  bool get hasForeignConversion =>
+      originalCurrency != null &&
+      originalCurrency!.isNotEmpty &&
+      originalCurrency!.toUpperCase() != currency.toUpperCase() &&
+      originalAmount != null &&
+      originalAmount! > 0;
 
   String? get locationName {
     if (notes == null) return null;
@@ -58,6 +73,9 @@ class Expense {
     String? receiptImagePath,
     String? notes,
     DateTime? createdAt,
+    String? originalCurrency,
+    double? originalAmount,
+    double? exchangeRate,
   }) {
     return Expense(
       id: id ?? this.id,
@@ -73,6 +91,9 @@ class Expense {
       receiptImagePath: receiptImagePath ?? this.receiptImagePath,
       notes: notes ?? this.notes,
       createdAt: createdAt ?? this.createdAt,
+      originalCurrency: originalCurrency ?? this.originalCurrency,
+      originalAmount: originalAmount ?? this.originalAmount,
+      exchangeRate: exchangeRate ?? this.exchangeRate,
     );
   }
 
@@ -91,6 +112,9 @@ class Expense {
       'receiptImagePath': receiptImagePath,
       'notes': notes,
       'createdAt': createdAt.toIso8601String(),
+      'originalCurrency': originalCurrency,
+      'originalAmount': originalAmount,
+      'exchangeRate': exchangeRate,
     };
   }
 
@@ -115,6 +139,9 @@ class Expense {
       receiptImagePath: json['receiptImagePath'] as String?,
       notes: json['notes'] as String?,
       createdAt: DateTime.parse(json['createdAt'] as String),
+      originalCurrency: json['originalCurrency'] as String?,
+      originalAmount: (json['originalAmount'] as num?)?.toDouble(),
+      exchangeRate: (json['exchangeRate'] as num?)?.toDouble(),
     );
   }
 }

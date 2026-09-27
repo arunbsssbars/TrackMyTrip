@@ -1,13 +1,17 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/services/user_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/user_profile.dart';
+import '../../models/auth_user.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/trip_provider.dart';
+import '../../providers/expense_provider.dart';
+import '../../core/utils/currency_formatter.dart';
 
 class ProfileTab extends ConsumerStatefulWidget {
   const ProfileTab({super.key});
@@ -24,11 +28,6 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
   late TextEditingController _emailController;
   bool _isSaving = false;
   bool _isSigningOut = false;
-
-  Timer? _debounceTimer;
-  bool _isCheckingUsername = false;
-  bool? _isUsernameAvailable;
-  String? _usernameFeedback;
   bool _hasInitializedValues = false;
 
   @override
@@ -41,7 +40,47 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
     _bioController = TextEditingController(text: user.bio ?? '');
     _emailController = TextEditingController(text: user.email ?? '');
 
-    _usernameController.addListener(_onUsernameChanged);
+    // Fetch latest cloud profile in background to populate any remote phone/bio
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchCloudProfile();
+    });
+  }
+
+  Future<void> _fetchCloudProfile() async {
+    try {
+      final fbUser = FirebaseAuth.instance.currentUser;
+      final session = ref.read(authServiceProvider).currentSession;
+      final current = UserService.getCurrentUser();
+      final docId = fbUser?.uid ?? session?.id ?? current.id;
+
+      if (docId.isNotEmpty) {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(docId).get();
+        if (doc.exists && doc.data() != null && mounted) {
+          final data = doc.data()!;
+          final cloudPhone = data['phone'] as String?;
+          final cloudBio = data['bio'] as String?;
+          final cloudName = data['displayName'] as String?;
+
+          bool shouldUpdate = false;
+          if (_phoneController.text.isEmpty && cloudPhone != null && cloudPhone.isNotEmpty) {
+            _phoneController.text = cloudPhone;
+            shouldUpdate = true;
+          }
+          if (_bioController.text.isEmpty && cloudBio != null && cloudBio.isNotEmpty) {
+            _bioController.text = cloudBio;
+            shouldUpdate = true;
+          }
+          if (_nameController.text.isEmpty && cloudName != null && cloudName.isNotEmpty && cloudName != 'Traveler') {
+            _nameController.text = cloudName;
+            shouldUpdate = true;
+          }
+
+          if (shouldUpdate) {
+            setState(() {});
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   void _populateIfEmpty(UserProfile user) {
@@ -82,63 +121,8 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
     }
   }
 
-  void _onUsernameChanged() {
-    final raw = _usernameController.text.trim().replaceAll('@', '').toLowerCase();
-    final current = UserService.getCurrentUser();
-    final session = ref.read(authServiceProvider).currentSession;
-    final myUsername = (session?.username ?? current.username).trim().replaceAll('@', '').toLowerCase();
-
-    _debounceTimer?.cancel();
-    if (raw.isEmpty) {
-      setState(() {
-        _isCheckingUsername = false;
-        _isUsernameAvailable = null;
-        _usernameFeedback = null;
-      });
-      return;
-    }
-
-    if (raw == myUsername) {
-      setState(() {
-        _isCheckingUsername = false;
-        _isUsernameAvailable = true;
-        _usernameFeedback = '✓ Your current handle';
-      });
-      return;
-    }
-
-    if (raw.length < 3) {
-      setState(() {
-        _isCheckingUsername = false;
-        _isUsernameAvailable = false;
-        _usernameFeedback = 'Handle must be at least 3 characters';
-      });
-      return;
-    }
-
-    setState(() {
-      _isCheckingUsername = true;
-      _usernameFeedback = 'Checking availability...';
-    });
-
-    _debounceTimer = Timer(const Duration(milliseconds: 350), () async {
-      final available = await UserService.isUsernameAvailable(
-        raw,
-        excludeUserId: session?.id ?? current.id,
-      );
-      if (mounted && _usernameController.text.trim().replaceAll('@', '').toLowerCase() == raw) {
-        setState(() {
-          _isCheckingUsername = false;
-          _isUsernameAvailable = available;
-          _usernameFeedback = available ? '✓ Handle is available' : '✗ Handle is already taken';
-        });
-      }
-    });
-  }
-
   @override
   void dispose() {
-    _debounceTimer?.cancel();
     _nameController.dispose();
     _usernameController.dispose();
     _phoneController.dispose();
@@ -161,33 +145,9 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
     final authService = ref.read(authServiceProvider);
     final currentSession = authService.currentSession;
 
-    final enteredUsername = _usernameController.text.trim().replaceAll('@', '');
-    final effectiveUsername = enteredUsername.isNotEmpty
-        ? enteredUsername
-        : (currentSession?.username ?? current.username).replaceAll('@', '');
-
-    // Check availability if changed
-    final myCurrentUsername = (currentSession?.username ?? current.username).replaceAll('@', '').toLowerCase();
-    if (effectiveUsername.toLowerCase() != myCurrentUsername) {
-      final available = await UserService.isUsernameAvailable(
-        effectiveUsername,
-        excludeUserId: currentSession?.id ?? current.id,
-      );
-      if (!available) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('The handle @$effectiveUsername is already taken. Please choose another handle.'),
-              backgroundColor: Colors.red,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-        return;
-      }
-    }
-
     setState(() => _isSaving = true);
+    HapticFeedback.lightImpact();
+
     try {
       final enteredName = _nameController.text.trim();
       final enteredPhone = _phoneController.text.trim();
@@ -202,9 +162,14 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
       final updatedBio = enteredBio.isNotEmpty ? enteredBio : (currentSession?.bio ?? current.bio);
       final updatedEmail = enteredEmail.isNotEmpty ? enteredEmail : (currentSession?.email ?? current.email);
 
+      // Handle is immutable
+      final permanentUsername = (currentSession?.username.isNotEmpty == true && currentSession!.username != 'traveler')
+          ? currentSession.username.replaceAll('@', '')
+          : current.username.replaceAll('@', '');
+
       final updated = current.copyWith(
         displayName: updatedName.isNotEmpty ? updatedName : 'Traveler',
-        username: effectiveUsername.isNotEmpty ? effectiveUsername : 'traveler',
+        username: permanentUsername.isNotEmpty ? permanentUsername : 'traveler',
         phone: updatedPhone?.isNotEmpty == true ? updatedPhone : null,
         bio: updatedBio?.isNotEmpty == true ? updatedBio : null,
         email: updatedEmail?.isNotEmpty == true ? updatedEmail : null,
@@ -214,22 +179,35 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
       UserService.updateCurrentUser(updated);
       ref.read(currentUserProvider.notifier).state = updated;
 
-      // 2. Persist updated profile to local Auth session
-      if (currentSession != null) {
-        final updatedAuth = currentSession.copyWith(
-          displayName: updated.displayName,
-          username: updated.username,
-          phone: updated.phone,
-          bio: updated.bio,
-        );
-        final storage = ref.read(localStorageServiceProvider);
-        await storage.saveAuthSession(updatedAuth);
-      }
+      // 2. Persist updated profile to local Auth session and update AuthNotifier
+      final updatedAuth = (currentSession != null)
+          ? currentSession.copyWith(
+              displayName: updated.displayName,
+              username: updated.username,
+              phone: updated.phone,
+              bio: updated.bio,
+              email: updated.email,
+            )
+          : AuthUser(
+              id: current.id,
+              email: updated.email ?? '',
+              displayName: updated.displayName,
+              username: updated.username,
+              phone: updated.phone,
+              bio: updated.bio,
+              colorHex: updated.colorHex,
+              photoUrl: updated.avatarUrl,
+              provider: currentSession?.provider ?? AuthProviderType.guest,
+              createdAt: DateTime.now(),
+            );
+      await ref.read(authNotifierProvider.notifier).updateUser(updatedAuth);
 
-      // 3. Sync to Firebase if connected
+      // 3. Reliable synchronization to Cloud Firestore (Item 6)
       try {
         final fbUser = FirebaseAuth.instance.currentUser;
-        if (fbUser != null) {
+        final docId = fbUser?.uid ?? currentSession?.id ?? current.id;
+
+        if (docId.isNotEmpty) {
           final searchTokens = UserService.generateSearchTokens(
             username: updated.username,
             displayName: updated.displayName,
@@ -237,20 +215,34 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
             phone: updated.phone,
           );
 
-          await FirebaseFirestore.instance.collection('users').doc(fbUser.uid).set({
-            'id': fbUser.uid,
+          final profilePayload = {
+            'id': docId,
             'displayName': updated.displayName,
             'username': updated.username.toLowerCase(),
             'email': updated.email?.toLowerCase(),
-            'phone': updated.phone,
-            'bio': updated.bio,
+            'phone': updated.phone ?? '',
+            'bio': updated.bio ?? '',
             'colorHex': updated.colorHex,
             'searchTokens': searchTokens.toList(),
             'updatedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
+          };
+
+          // Primary doc write
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(docId)
+              .set(profilePayload, SetOptions(merge: true));
+
+          // Also mirror to fbUser.uid if different
+          if (fbUser != null && fbUser.uid != docId) {
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(fbUser.uid)
+                .set(profilePayload, SetOptions(merge: true));
+          }
         }
-      } catch (_) {
-        // Ignored if offline or Firebase not configured
+      } catch (cloudErr) {
+        debugPrint('Cloud profile sync deferred: $cloudErr');
       }
 
       if (mounted) {
@@ -267,6 +259,7 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to save profile: $e'),
+            backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -281,134 +274,196 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final currentUser = ref.watch(currentUserProvider);
     final authService = ref.watch(authServiceProvider);
+    final userTrips = ref.watch(tripListProvider);
+    final userExpenses = ref.watch(allExpensesProvider);
+    final totalExpenseAmount = userExpenses.fold<double>(0.0, (acc, e) => acc + e.totalAmount);
     final completeness = _calculateCompleteness(currentUser);
 
     _populateIfEmpty(currentUser);
 
+    final completedTrips = userTrips.where((t) => t.isCompleted || t.status == 'completed').length;
+
     return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text('Profile & Account'),
+        title: const Text(
+          'Executive Profile',
+          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, letterSpacing: -0.3),
+        ),
         elevation: 0,
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
       ),
       body: SingleChildScrollView(
         physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        child: TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0.0, end: 1.0),
-          duration: const Duration(milliseconds: 380),
-          curve: Curves.easeOutCubic,
-          builder: (context, value, child) {
-            return Transform.translate(
-              offset: Offset(0, 16 * (1 - value)),
-              child: Opacity(
-                opacity: value.clamp(0.0, 1.0),
-                child: child,
-              ),
-            );
-          },
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-            // Header Profile Card
-            Center(
-              child: Stack(
-                children: [
-                  CircleAvatar(
-                    radius: 46,
-                    backgroundColor: AppTheme.primary,
-                    child: Text(
-                      currentUser.initials,
-                      style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold),
-                    ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Executive Profile Header Card (Item 7)
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isDark
+                      ? [const Color(0xFF1E293B), const Color(0xFF0F172A)]
+                      : [Colors.white, const Color(0xFFF1F5F9)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(isDark ? 50 : 15),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
                   ),
-                  Positioned(
-                    bottom: 0,
-                    right: 0,
+                ],
+              ),
+              child: Column(
+                children: [
+                  Center(
                     child: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: isDark ? AppTheme.surfaceDark : Colors.white,
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
                         shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withAlpha(30),
-                            blurRadius: 6,
-                          ),
-                        ],
+                        gradient: LinearGradient(
+                          colors: [AppTheme.primary, Color(0xFF06B6D4)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
                       ),
-                      child: const Icon(Icons.edit_rounded, size: 16, color: AppTheme.primary),
+                      child: CircleAvatar(
+                        radius: 44,
+                        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+                        child: Text(
+                          currentUser.initials,
+                          style: const TextStyle(
+                            color: AppTheme.primary,
+                            fontSize: 32,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            Center(
-              child: Text(
-                currentUser.displayName,
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-              ),
-            ),
-            const SizedBox(height: 2),
-            Center(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
+                  const SizedBox(height: 12),
                   Text(
-                    currentUser.handle,
-                    style: const TextStyle(fontSize: 14, color: AppTheme.primary, fontWeight: FontWeight.bold),
+                    currentUser.displayName,
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
                   ),
-                  if (authService.isEmailVerified) ...[
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF10B981).withAlpha(25),
-                        borderRadius: BorderRadius.circular(6),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withAlpha(20),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppTheme.primary.withAlpha(50)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.lock_outline_rounded, size: 12, color: AppTheme.primary),
+                            const SizedBox(width: 4),
+                            Text(
+                              currentUser.handle,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.primary,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.verified_rounded, size: 12, color: Color(0xFF10B981)),
-                          SizedBox(width: 3),
-                          Text(
-                            'Verified',
-                            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                      if (authService.isEmailVerified) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withAlpha(20),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFF10B981).withAlpha(60)),
                           ),
-                        ],
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.verified_rounded, size: 12, color: Color(0xFF10B981)),
+                              SizedBox(width: 3),
+                              Text(
+                                'Verified',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF10B981),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Traveler Stats Ribbon
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _buildHeaderStat('Journeys', '${userTrips.length}', Icons.flight_takeoff_rounded, isDark),
+                      Container(height: 24, width: 1, color: isDark ? Colors.white12 : Colors.black12),
+                      _buildHeaderStat('Completed', '$completedTrips', Icons.check_circle_outline_rounded, isDark),
+                      Container(height: 24, width: 1, color: isDark ? Colors.white12 : Colors.black12),
+                      _buildHeaderStat(
+                        'Expenses',
+                        totalExpenseAmount > 99999
+                            ? CurrencyFormatter.formatCompact(totalExpenseAmount)
+                            : CurrencyFormatter.format(totalExpenseAmount),
+                        Icons.account_balance_wallet_rounded,
+                        isDark,
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ],
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
 
-            // Profile Completion Progress Banner (Only show if not 100% completed)
+            // Profile Completion Progress (Only if < 100)
             if (completeness < 100) ...[
               Container(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                    color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
                   ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Icon(
-                          Icons.account_box_outlined,
-                          size: 20,
-                          color: AppTheme.primary,
+                        const Row(
+                          children: [
+                            Icon(Icons.assignment_turned_in_outlined, size: 18, color: AppTheme.primary),
+                            SizedBox(width: 8),
+                            Text(
+                              'Profile Completeness',
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 8),
                         Text(
-                          'Profile Completion ($completeness%)',
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                          '$completeness%',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: AppTheme.primary),
                         ),
                       ],
                     ),
@@ -422,118 +477,147 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                         minHeight: 6,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Complete your profile details below (full name, phone, bio) so travel companions easily recognize you.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
-                        height: 1.3,
-                      ),
-                    ),
                   ],
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 14),
             ],
 
-            const Text(
-              'Personal Details',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-
-            // Display Name
-            TextFormField(
-              controller: _nameController,
-              decoration: const InputDecoration(
-                labelText: 'Full / Display Name',
-                hintText: 'Enter your full name',
-                prefixIcon: Icon(Icons.badge_rounded),
-              ),
-            ),
-            const SizedBox(height: 14),
-
-            // Username / Handle
-            TextFormField(
-              controller: _usernameController,
-              decoration: InputDecoration(
-                labelText: 'Username Handle',
-                hintText: 'Choose a unique username handle',
-                prefixIcon: const Icon(Icons.alternate_email_rounded),
-                prefixText: '@',
-                suffixIcon: _isCheckingUsername
-                    ? const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      )
-                    : (_isUsernameAvailable == true
-                        ? const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 20)
-                        : (_isUsernameAvailable == false
-                            ? const Icon(Icons.cancel_rounded, color: Colors.red, size: 20)
-                            : null)),
-                helperText: _usernameFeedback,
-                helperStyle: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                  color: _isUsernameAvailable == true
-                      ? const Color(0xFF10B981)
-                      : (_isUsernameAvailable == false ? Colors.red : Colors.grey),
+            // Section 1: Identification & Contact
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
                 ),
               ),
-            ),
-            const SizedBox(height: 14),
-
-            // Mobile Phone Number
-            TextFormField(
-              controller: _phoneController,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(
-                labelText: 'Mobile Phone Number',
-                hintText: 'Enter mobile phone number',
-                prefixIcon: Icon(Icons.phone_outlined),
-              ),
-            ),
-            const SizedBox(height: 14),
-
-            // Email Address (Read only with verified indicator)
-            TextFormField(
-              controller: _emailController,
-              readOnly: true,
-              decoration: InputDecoration(
-                labelText: 'Email Address',
-                prefixIcon: const Icon(Icons.email_outlined),
-                suffixIcon: authService.isEmailVerified
-                    ? const Tooltip(
-                        message: 'Email Verified',
-                        child: Icon(Icons.check_circle_rounded, color: Color(0xFF10B981)),
-                      )
-                    : const Tooltip(
-                        message: 'Unverified',
-                        child: Icon(Icons.warning_amber_rounded, color: Colors.amber),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.badge_rounded, size: 16, color: AppTheme.primary),
+                      SizedBox(width: 8),
+                      Text(
+                        'Identity & Contact Details',
+                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Display Name
+                  TextFormField(
+                    controller: _nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Full / Display Name',
+                      hintText: 'Enter your full name',
+                      prefixIcon: Icon(Icons.person_rounded, size: 20),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Username / Handle (IMMUTABLE per Item 7)
+                  TextFormField(
+                    controller: _usernameController,
+                    readOnly: true,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.grey[300] : const Color(0xFF334155),
+                    ),
+                    decoration: InputDecoration(
+                      labelText: 'Companion Handle (Permanent)',
+                      prefixIcon: const Icon(Icons.alternate_email_rounded, size: 20),
+                      prefixText: '@',
+                      suffixIcon: const Tooltip(
+                        message: 'Handle is locked and cannot be modified',
+                        child: Icon(Icons.lock_rounded, size: 18, color: Colors.grey),
+                      ),
+                      helperText: 'Assigned companion handle (immutable)',
+                      helperStyle: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? Colors.grey[500] : const Color(0xFF94A3B8),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Mobile Phone Number (Item 6)
+                  TextFormField(
+                    controller: _phoneController,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'Mobile Phone Number',
+                      hintText: 'e.g. +1 555-0199',
+                      prefixIcon: Icon(Icons.phone_outlined, size: 20),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Email Address (Read-only verified status)
+                  TextFormField(
+                    controller: _emailController,
+                    readOnly: true,
+                    decoration: InputDecoration(
+                      labelText: 'Registered Email',
+                      prefixIcon: const Icon(Icons.email_outlined, size: 20),
+                      suffixIcon: authService.isEmailVerified
+                          ? const Tooltip(
+                              message: 'Email Verified',
+                              child: Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 20),
+                            )
+                          : const Tooltip(
+                              message: 'Unverified',
+                              child: Icon(Icons.warning_amber_rounded, color: Colors.amber, size: 20),
+                            ),
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 14),
 
-            // Bio & Status
-            TextFormField(
-              controller: _bioController,
-              maxLines: 2,
-              decoration: const InputDecoration(
-                labelText: 'Traveler Bio & Status',
-                hintText: 'Add a short bio or status',
-                prefixIcon: Icon(Icons.mode_comment_outlined),
+            // Section 2: Traveler Bio & Status
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.edit_note_rounded, size: 18, color: AppTheme.primary),
+                      SizedBox(width: 8),
+                      Text(
+                        'Traveler Bio & Status',
+                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _bioController,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'Bio / Status',
+                      hintText: 'Share a note about your travel philosophy or status...',
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                ],
               ),
             ),
+            const SizedBox(height: 20),
 
-            const SizedBox(height: 28),
-
-            // Save Profile Button
+            // Action: Save Profile & Sync
             FilledButton.icon(
               onPressed: _isSaving ? null : _saveProfile,
               icon: _isSaving
@@ -542,10 +626,10 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                     )
-                  : const Icon(Icons.check_rounded, size: 20),
+                  : const Icon(Icons.cloud_done_rounded, size: 20),
               label: Text(
-                _isSaving ? 'Saving Changes...' : 'Save Profile & Changes',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                _isSaving ? 'Synchronizing Cloud Profile...' : 'Save Profile Changes',
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
               ),
               style: FilledButton.styleFrom(
                 backgroundColor: AppTheme.primary,
@@ -553,20 +637,41 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
             ),
+            const SizedBox(height: 12),
 
-            const SizedBox(height: 14),
-
-            // Sign Out Button
+            // Action: Sign Out
             OutlinedButton.icon(
               onPressed: _isSigningOut
                   ? null
                   : () async {
-                      setState(() => _isSigningOut = true);
-                      try {
-                        await ref.read(authNotifierProvider.notifier).logout();
-                      } finally {
-                        if (mounted) {
-                          setState(() => _isSigningOut = false);
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          title: const Text('Confirm Sign Out', style: TextStyle(fontWeight: FontWeight.bold)),
+                          content: const Text('Are you sure you want to sign out from your travel session?'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(false),
+                              child: const Text('Cancel'),
+                            ),
+                            FilledButton(
+                              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                              onPressed: () => Navigator.of(ctx).pop(true),
+                              child: const Text('Sign Out'),
+                            ),
+                          ],
+                        ),
+                      );
+
+                      if (confirm == true) {
+                        setState(() => _isSigningOut = true);
+                        try {
+                          await ref.read(authNotifierProvider.notifier).logout();
+                        } finally {
+                          if (mounted) {
+                            setState(() => _isSigningOut = false);
+                          }
                         }
                       }
                     },
@@ -578,12 +683,12 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                     )
                   : const Icon(Icons.logout_rounded, size: 18, color: Colors.red),
               label: Text(
-                _isSigningOut ? 'Signing Out...' : 'Sign Out',
+                _isSigningOut ? 'Signing Out...' : 'Sign Out of Account',
                 style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
               ),
               style: OutlinedButton.styleFrom(
                 side: BorderSide(color: Colors.red.withAlpha(80)),
-                padding: const EdgeInsets.symmetric(vertical: 13),
+                padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
             ),
@@ -591,7 +696,27 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
           ],
         ),
       ),
-    ),
-  );
+    );
+  }
+
+  Widget _buildHeaderStat(String label, String value, IconData icon, bool isDark) {
+    return Column(
+      children: [
+        Icon(icon, size: 18, color: AppTheme.primary),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+        ),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
   }
 }

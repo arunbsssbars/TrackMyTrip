@@ -195,6 +195,30 @@ void main() {
       expect(hasPending('u2', 'bob@example.com', 'bob'), isTrue);
       expect(hasPending('u3', 'charlie@example.com', 'charlie'), isFalse);
     });
+
+    test('Trip isEnded accurately identifies completed and concluded journeys', () {
+      final runningTrip = Trip(
+        id: 'trip-running',
+        title: 'Running Trip',
+        startDate: DateTime.now(),
+        endDate: DateTime.now().add(const Duration(days: 3)),
+        defaultCurrency: 'INR',
+        members: const [],
+        createdByMemberId: 'user-1',
+        createdAt: DateTime.now(),
+        isCompleted: false,
+      );
+      expect(runningTrip.isRunning, isTrue);
+      expect(runningTrip.isEnded, isFalse);
+
+      final completedTrip = runningTrip.copyWith(isCompleted: true, status: 'completed');
+      expect(completedTrip.isRunning, isFalse);
+      expect(completedTrip.isEnded, isTrue);
+
+      final concludedTrip = runningTrip.copyWith(status: 'concluded');
+      expect(concludedTrip.isRunning, isFalse);
+      expect(concludedTrip.isEnded, isTrue);
+    });
   });
 }
 

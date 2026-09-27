@@ -13,6 +13,7 @@ import '../../providers/trip_provider.dart';
 import '../stats/trip_analytics_screen.dart';
 import '../trip_detail/edit_trip_dialog.dart';
 import '../trip_detail/share_trip_sheet.dart';
+import '../../core/services/user_service.dart';
 
 /// Unified senior-developer trip options menu button.
 /// Provides identical, clean trip management capabilities on both
@@ -44,8 +45,9 @@ class TripMenuButton extends ConsumerWidget {
   }
 
   void _showEndTripExperienceDialog(BuildContext context, WidgetRef ref) {
-    double rating = trip.rating ?? 5.0;
-    final reviewController = TextEditingController(text: trip.experienceReview ?? '');
+    final currentUserId = ref.read(authNotifierProvider).valueOrNull?.id ?? UserService.getCurrentUser().id;
+    double rating = trip.memberRatings[currentUserId] ?? trip.rating ?? 5.0;
+    final reviewController = TextEditingController(text: trip.memberReviews[currentUserId] ?? trip.experienceReview ?? '');
     final quickHighlights = [
       '⛰️ Scenic Views',
       '🍜 Delicious Food',
@@ -125,7 +127,7 @@ class TripMenuButton extends ConsumerWidget {
                   ),
                   const SizedBox(height: 16),
 
-                  // Rating Stars
+                  // Rating Stars with FittedBox (Item 13 & 14)
                   Container(
                     padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
                     decoration: BoxDecoration(
@@ -140,24 +142,45 @@ class TripMenuButton extends ConsumerWidget {
                           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                         ),
                         const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: List.generate(5, (index) {
-                            final starValue = (index + 1).toDouble();
-                            final isFilled = rating >= starValue;
-                            return GestureDetector(
-                              onTap: () => setSheetState(() => rating = starValue),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 4),
-                                child: Icon(
-                                  isFilled ? Icons.star_rounded : Icons.star_border_rounded,
-                                  size: 34,
-                                  color: isFilled ? Colors.amber[600] : Colors.grey[400],
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: List.generate(5, (index) {
+                              final starValue = (index + 1).toDouble();
+                              final isFilled = rating >= starValue;
+                              return GestureDetector(
+                                onTap: () => setSheetState(() => rating = starValue),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                                  child: Icon(
+                                    isFilled ? Icons.star_rounded : Icons.star_border_rounded,
+                                    size: 32,
+                                    color: isFilled ? Colors.amber[600] : Colors.grey[400],
+                                  ),
+                                ),
+                              );
+                            }),
+                          ),
+                        ),
+                        if (trip.reviewCount > 0) ...[
+                          const SizedBox(height: 6),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.star_rounded, size: 14, color: Colors.amber),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${trip.averageRating ?? 0.0} avg • Reviewed by ${trip.reviewCount} of ${trip.members.length} traveler${trip.members.length == 1 ? "" : "s"}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark ? Colors.grey[300] : const Color(0xFF64748B),
                                 ),
                               ),
-                            );
-                          }),
-                        ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -209,10 +232,24 @@ class TripMenuButton extends ConsumerWidget {
                   // Save & Complete Button
                   FilledButton.icon(
                     onPressed: () {
+                      final updatedMemberRatings = Map<String, double>.from(trip.memberRatings);
+                      updatedMemberRatings[currentUserId] = rating;
+
+                      final updatedMemberReviews = Map<String, String>.from(trip.memberReviews);
+                      final reviewText = reviewController.text.trim();
+                      if (reviewText.isNotEmpty) {
+                        updatedMemberReviews[currentUserId] = reviewText;
+                      }
+
+                      final totalStars = updatedMemberRatings.values.fold<double>(0.0, (sum, r) => sum + r);
+                      final avgRating = double.parse((totalStars / updatedMemberRatings.length).toStringAsFixed(1));
+
                       final updated = trip.copyWith(
                         isCompleted: true,
-                        rating: rating,
-                        experienceReview: reviewController.text.trim(),
+                        rating: avgRating,
+                        experienceReview: reviewText.isNotEmpty ? reviewText : trip.experienceReview,
+                        memberRatings: updatedMemberRatings,
+                        memberReviews: updatedMemberReviews,
                         completedAt: trip.completedAt ?? DateTime.now(),
                       );
                       ref.read(tripListProvider.notifier).updateTrip(updated);
@@ -309,6 +346,16 @@ class TripMenuButton extends ConsumerWidget {
   }
 
   void _confirmDeleteTrip(BuildContext context, WidgetRef ref) {
+    if (trip.isCompleted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('🔒 Concluded journeys are permanently preserved for auditing and cannot be deleted.'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
     final expenses = ref.read(allExpensesProvider).where((e) => e.tripId == trip.id).toList();
     final companionCount = trip.members.where((m) => m.id != trip.createdByMemberId).length;
     final hasExpenses = expenses.isNotEmpty;
@@ -390,7 +437,16 @@ class TripMenuButton extends ConsumerWidget {
   }
 
   void _confirmLeaveTrip(BuildContext context, WidgetRef ref) {
-        
+    if (trip.isCompleted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('🔒 Concluded journeys cannot be abandoned. All splits and member records are preserved.'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -502,31 +558,32 @@ class TripMenuButton extends ConsumerWidget {
       },
       itemBuilder: (context) {
         return [
-          // 1. Share & Sync
-          PopupMenuItem(
-            height: 42,
-            value: 'share',
-            child: Row(
-              children: [
-                const Icon(Icons.share_outlined, color: AppTheme.secondary, size: 18),
-                const SizedBox(width: 10),
-                const Expanded(
-                  child: Text('Share Trip', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF10B981).withAlpha(20),
-                    borderRadius: BorderRadius.circular(6),
+          // 1. Share & Sync (Disabled if trip is concluded - Item 11)
+          if (!trip.isCompleted)
+            PopupMenuItem(
+              height: 42,
+              value: 'share',
+              child: Row(
+                children: [
+                  const Icon(Icons.share_outlined, color: AppTheme.secondary, size: 18),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text('Share Trip', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                   ),
-                  child: Text(
-                    CloudTripSyncService.getRoomCode(trip.id, trip: trip).replaceAll('TRIP-', ''),
-                    style: const TextStyle(fontSize: 10, color: Color(0xFF10B981), fontWeight: FontWeight.w800),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withAlpha(20),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      CloudTripSyncService.getRoomCode(trip.id, trip: trip).replaceAll('TRIP-', ''),
+                      style: const TextStyle(fontSize: 10, color: Color(0xFF10B981), fontWeight: FontWeight.w800),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
 
           // 2. Edit Trip Details & Companions
           const PopupMenuItem(
@@ -618,33 +675,35 @@ class TripMenuButton extends ConsumerWidget {
             ),
           ),
 
-          const PopupMenuDivider(height: 8),
-
           // 6. Role-based: Delete for Everyone (Creator) vs Leave Trip (Companion)
-          if (isLead)
-            const PopupMenuItem(
-              height: 38,
-              value: 'delete',
-              child: Row(
-                children: [
-                  Icon(Icons.delete_forever_rounded, color: Colors.red, size: 18),
-                  SizedBox(width: 10),
-                  Text('Delete for Everyone', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.red)),
-                ],
+          // Concluded trips cannot be deleted or abandoned (Items 9 & 10)
+          if (!trip.isCompleted) ...[
+            const PopupMenuDivider(height: 8),
+            if (isLead)
+              const PopupMenuItem(
+                height: 38,
+                value: 'delete',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete_forever_rounded, color: Colors.red, size: 18),
+                    SizedBox(width: 10),
+                    Text('Delete for Everyone', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.red)),
+                  ],
+                ),
+              )
+            else
+              const PopupMenuItem(
+                height: 38,
+                value: 'leave',
+                child: Row(
+                  children: [
+                    Icon(Icons.exit_to_app_rounded, color: Color(0xFFFF6F00), size: 18),
+                    SizedBox(width: 10),
+                    Text('Leave Trip', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFFFF6F00))),
+                  ],
+                ),
               ),
-            )
-          else
-            const PopupMenuItem(
-              height: 38,
-              value: 'leave',
-              child: Row(
-                children: [
-                  Icon(Icons.exit_to_app_rounded, color: Color(0xFFFF6F00), size: 18),
-                  SizedBox(width: 10),
-                  Text('Leave Trip', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFFFF6F00))),
-                ],
-              ),
-            ),
+          ],
         ];
       },
     );

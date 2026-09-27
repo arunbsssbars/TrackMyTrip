@@ -3,16 +3,19 @@ import 'dart:convert';
 import 'dart:io' show File;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/services/location_service.dart';
+import '../../core/services/ocr_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../models/expense.dart';
 import '../../models/expense_split.dart';
+import '../../models/trip.dart';
 import '../../models/trip_member.dart';
 import '../../models/trip_audit_log.dart';
 import '../../providers/audit_log_provider.dart';
@@ -28,6 +31,8 @@ class AddExpenseScreen extends ConsumerStatefulWidget {
   final String? prefillTitle;
   final double? prefillAmount;
   final String? prefillImagePath;
+  final String? prefillCategory;
+  final String? prefillDescription;
 
   const AddExpenseScreen({
     super.key,
@@ -37,6 +42,8 @@ class AddExpenseScreen extends ConsumerStatefulWidget {
     this.prefillTitle,
     this.prefillAmount,
     this.prefillImagePath,
+    this.prefillCategory,
+    this.prefillDescription,
   });
 
   @override
@@ -53,7 +60,9 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
   String _selectedCategory = AppConstants.expenseCategories.first;
   String? _paidByMemberId;
   SplitType _splitType = SplitType.equal;
+  bool _isSplitExpanded = false; // Folded by default
   String? _receiptImagePath;
+  bool _isScanningOcr = false;
 
   // Location tagging state
   bool _attachLocation = false;
@@ -67,6 +76,12 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
   final Map<String, TextEditingController> _exactControllers = {};
   final Map<String, TextEditingController> _percentControllers = {};
   final Map<String, TextEditingController> _sharesControllers = {};
+
+  // Multi-currency / Foreign conversion state (Issue 8)
+  bool _useForeignCurrency = false;
+  String _foreignCurrency = 'USD';
+  final _foreignAmountController = TextEditingController();
+  final _exchangeRateController = TextEditingController();
 
   @override
   void initState() {
@@ -100,6 +115,14 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
         _percentControllers[s.memberId] = TextEditingController(text: (s.percentage ?? 0).toStringAsFixed(1));
         _sharesControllers[s.memberId] = TextEditingController(text: (s.shares ?? 1.0).toStringAsFixed(0));
       }
+
+      // Restore foreign conversion state if present
+      if (exp.hasForeignConversion) {
+        _useForeignCurrency = true;
+        _foreignCurrency = exp.originalCurrency ?? 'USD';
+        _foreignAmountController.text = exp.originalAmount != null ? exp.originalAmount!.toStringAsFixed(2) : '';
+        _exchangeRateController.text = exp.exchangeRate != null ? exp.exchangeRate!.toStringAsFixed(4) : '';
+      }
     } else {
       _selectedStoppageId = widget.initialStoppageId;
       if (widget.prefillTitle != null) {
@@ -110,6 +133,12 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
       }
       if (widget.prefillImagePath != null) {
         _receiptImagePath = widget.prefillImagePath;
+      }
+      if (widget.prefillCategory != null && AppConstants.expenseCategories.contains(widget.prefillCategory)) {
+        _selectedCategory = widget.prefillCategory!;
+      }
+      if (widget.prefillDescription != null && widget.prefillDescription!.isNotEmpty) {
+        _notesController.text = widget.prefillDescription!;
       }
     }
   }
@@ -128,6 +157,8 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
     for (final c in _sharesControllers.values) {
       c.dispose();
     }
+    _foreignAmountController.dispose();
+    _exchangeRateController.dispose();
     super.dispose();
   }
 
@@ -302,31 +333,163 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
     return splits;
   }
 
-  Future<void> _pickReceiptImage(ImageSource source) async {
+  Future<void> _scanReceiptWithOcr([ImageSource source = ImageSource.camera]) async {
     try {
       final picker = ImagePicker();
       final picked = await picker.pickImage(
         source: source,
-        maxWidth: 1200,
-        maxHeight: 1200,
-        imageQuality: 80,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 85,
       );
-      if (picked != null) {
-        if (kIsWeb) {
-          final bytes = await picked.readAsBytes();
-          final base64String = 'data:image/jpeg;base64,${base64Encode(bytes)}';
-          setState(() => _receiptImagePath = base64String);
-        } else {
-          setState(() => _receiptImagePath = picked.path);
-        }
+      if (picked == null) return;
+
+      setState(() => _isScanningOcr = true);
+
+      String savedPath;
+      if (kIsWeb) {
+        final bytes = await picked.readAsBytes();
+        savedPath = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+      } else {
+        savedPath = picked.path;
+      }
+
+      // Run on-device Google ML Kit OCR
+      OcrResult? ocrResult;
+      if (!kIsWeb) {
+        ocrResult = await OcrService.extractFromReceipt(picked.path);
+      }
+
+      if (mounted) {
+        setState(() {
+          _receiptImagePath = savedPath;
+          if (ocrResult != null) {
+            if (ocrResult.title.isNotEmpty && ocrResult.title != 'Unknown Receipt') {
+              _titleController.text = ocrResult.title;
+            }
+            if (ocrResult.amount > 0) {
+              _amountController.text = ocrResult.amount.toStringAsFixed(2);
+            }
+            if (AppConstants.expenseCategories.contains(ocrResult.category)) {
+              _selectedCategory = ocrResult.category;
+            }
+            if (ocrResult.description.isNotEmpty && _notesController.text.isEmpty) {
+              _notesController.text = ocrResult.description;
+            }
+          }
+          _isScanningOcr = false;
+        });
+
+        HapticFeedback.mediumImpact();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.auto_awesome, color: Colors.amber, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    ocrResult != null && ocrResult.amount > 0
+                        ? 'Scanned: ${ocrResult.title} • ${CurrencyFormatter.format(ocrResult.amount)}'
+                        : 'Receipt attached. You can review or edit amount.',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: const Color(0xFF1E293B),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _isScanningOcr = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not attach image: $e')),
+          SnackBar(content: Text('OCR scanning error: $e')),
         );
       }
     }
+  }
+
+  void _showOcrSourceDialog() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary.withAlpha(25),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.document_scanner_rounded, color: AppTheme.primary, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Smart Receipt OCR',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                      Text(
+                        'Auto-fill title, amount & attach image',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withAlpha(25),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.camera_alt_rounded, color: Colors.blue),
+                ),
+                title: const Text('Capture with Camera', style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: const Text('Snap a picture of your paper bill or receipt', style: TextStyle(fontSize: 12)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _scanReceiptWithOcr(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.purple.withAlpha(25),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.photo_library_rounded, color: Colors.purple),
+                ),
+                title: const Text('Select from Gallery', style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: const Text('Choose a receipt screenshot or photo', style: TextStyle(fontSize: 12)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _scanReceiptWithOcr(ImageSource.gallery);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildReceiptThumbnail(String path) {
@@ -485,6 +648,174 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
     }
   }
 
+  void _recalculateFromForeign() {
+    final foreignAmt = double.tryParse(_foreignAmountController.text.trim()) ?? 0.0;
+    final rate = double.tryParse(_exchangeRateController.text.trim()) ?? 0.0;
+    if (foreignAmt > 0 && rate > 0) {
+      final converted = foreignAmt * rate;
+      _amountController.text = converted.toStringAsFixed(2);
+      setState(() {});
+    }
+  }
+
+  Widget _buildCurrencyConversionCard(Trip trip) {
+    final baseCurrency = trip.defaultCurrency;
+    final baseSymbol = CurrencyFormatter.getCurrencySymbol(baseCurrency);
+    final foreignSymbol = CurrencyFormatter.getCurrencySymbol(_foreignCurrency);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _useForeignCurrency ? Colors.blue.withAlpha(15) : Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _useForeignCurrency ? Colors.blue.withAlpha(80) : Colors.grey.withAlpha(40),
+        ),
+      ),
+      child: Column(
+        children: [
+          SwitchListTile.adaptive(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+            value: _useForeignCurrency,
+            title: Row(
+              children: [
+                const Icon(Icons.currency_exchange_rounded, size: 20, color: Colors.blue),
+                const SizedBox(width: 8),
+                Text(
+                  'Paid in Foreign Currency?',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: _useForeignCurrency ? Colors.blue : null,
+                  ),
+                ),
+              ],
+            ),
+            subtitle: Text(
+              _useForeignCurrency
+                  ? 'Auto-convert to trip currency ($baseCurrency $baseSymbol)'
+                  : 'Enable if spending in another country\'s currency',
+              style: const TextStyle(fontSize: 12),
+            ),
+            onChanged: (val) {
+              setState(() {
+                _useForeignCurrency = val;
+                if (!_useForeignCurrency) {
+                  _foreignAmountController.clear();
+                  _exchangeRateController.clear();
+                } else if (_foreignCurrency.toUpperCase() == baseCurrency.toUpperCase()) {
+                  _foreignCurrency = baseCurrency.toUpperCase() == 'USD' ? 'EUR' : 'USD';
+                }
+              });
+            },
+          ),
+          if (_useForeignCurrency) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Divider(height: 1),
+                  const SizedBox(height: 12),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Foreign currency selector
+                      Expanded(
+                        flex: 4,
+                        child: DropdownButtonFormField<String>(
+                          value: CurrencyFormatter.commonCurrencies.contains(_foreignCurrency)
+                              ? _foreignCurrency
+                              : 'USD',
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Spent In',
+                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                          ),
+                          items: CurrencyFormatter.commonCurrencies
+                              .where((c) => c.toUpperCase() != baseCurrency.toUpperCase())
+                              .map((c) => DropdownMenuItem(
+                                    value: c,
+                                    child: Text(
+                                      '$c (${CurrencyFormatter.getCurrencySymbol(c)})',
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                    ),
+                                  ))
+                              .toList(),
+                          onChanged: (c) {
+                            if (c != null) {
+                              setState(() => _foreignCurrency = c);
+                              _recalculateFromForeign();
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      // Foreign amount
+                      Expanded(
+                        flex: 6,
+                        child: TextFormField(
+                          controller: _foreignAmountController,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: InputDecoration(
+                            labelText: 'Foreign Amount',
+                            hintText: '0.00',
+                            prefixText: '$foreignSymbol ',
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                          ),
+                          onChanged: (_) => _recalculateFromForeign(),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  // Exchange rate input
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _exchangeRateController,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: InputDecoration(
+                            labelText: 'Exchange Rate',
+                            hintText: 'e.g. 90.50',
+                            helperText: '1 $_foreignCurrency = [Rate] $baseCurrency',
+                            prefixIcon: const Icon(Icons.swap_horiz_rounded, size: 18),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                          ),
+                          onChanged: (_) => _recalculateFromForeign(),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withAlpha(25),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline_rounded, size: 16, color: Colors.blue),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Calculated in Trip Currency: $baseSymbol${_amountController.text.isEmpty ? '0.00' : _amountController.text}',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.blue),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
 
@@ -576,6 +907,20 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
       }
     }
 
+    // Prepare foreign currency conversion values if enabled
+    double? originalAmount;
+    String? originalCurrency;
+    double? exchangeRate;
+    if (_useForeignCurrency) {
+      final parsedForeignAmt = double.tryParse(_foreignAmountController.text.trim());
+      final parsedRate = double.tryParse(_exchangeRateController.text.trim());
+      if (parsedForeignAmt != null && parsedForeignAmt > 0) {
+        originalAmount = parsedForeignAmt;
+        originalCurrency = _foreignCurrency;
+        exchangeRate = (parsedRate != null && parsedRate > 0) ? parsedRate : null;
+      }
+    }
+
     final isEditing = widget.initialExpense != null;
 
     if (isEditing) {
@@ -593,6 +938,9 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
         splits: splits,
         receiptImagePath: _receiptImagePath,
         notes: finalNotes,
+        originalCurrency: originalCurrency,
+        originalAmount: originalAmount,
+        exchangeRate: exchangeRate,
         createdAt: oldExp.createdAt,
       );
 
@@ -664,6 +1012,9 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
         splits: splits,
         receiptImagePath: _receiptImagePath,
         notes: finalNotes,
+        originalCurrency: originalCurrency,
+        originalAmount: originalAmount,
+        exchangeRate: exchangeRate,
         createdAt: DateTime.now(),
       );
 
@@ -709,6 +1060,11 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
       appBar: AppBar(
         title: Text(isEditing ? 'Edit Activity Bill' : 'Add Activity Bill / Expense'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.document_scanner_rounded),
+            tooltip: 'Scan Receipt with OCR',
+            onPressed: _isScanningOcr ? null : _showOcrSourceDialog,
+          ),
           TextButton(
             onPressed: _submit,
             child: Text(isEditing ? 'Update' : 'Save', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
@@ -720,6 +1076,95 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
+            // Smart OCR Quick-Fill Banner
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isDark
+                      ? [const Color(0xFF1E293B), const Color(0xFF0F172A)]
+                      : [const Color(0xFFEEF2FF), const Color(0xFFE0E7FF)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: AppTheme.primary.withAlpha(isDark ? 90 : 60),
+                ),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: _isScanningOcr ? null : _showOcrSourceDialog,
+                  borderRadius: BorderRadius.circular(14),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(9),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withAlpha(isDark ? 50 : 35),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: _isScanningOcr
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary),
+                                )
+                              : const Icon(Icons.document_scanner_rounded, color: AppTheme.primary, size: 22),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    _isScanningOcr ? 'Scanning Receipt...' : 'Scan Bill with Smart OCR',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                    decoration: BoxDecoration(
+                                      color: Colors.amber.withAlpha(isDark ? 40 : 30),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'AI / FAST',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w900,
+                                        color: Colors.amber,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _isScanningOcr
+                                    ? 'Extracting merchant, total amount & text...'
+                                    : 'Auto-fills merchant & amount directly from photo',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isDark ? Colors.grey[400] : const Color(0xFF475569),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppTheme.primary),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
             // Title & Amount
             TextFormField(
               controller: _titleController,
@@ -781,32 +1226,14 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
 
-            // Payer & Split Section
-            if (trip.isSolo) ...[
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withAlpha(20),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.blue.withAlpha(60)),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.backpack_rounded, color: Colors.blue, size: 22),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        '🎒 Solo Journey: 100% of this expense is tracked directly for your personal budget.',
-                        style: TextStyle(fontSize: 12, color: Colors.blue, height: 1.3),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-            ] else ...[
+            // Multi-Currency / Foreign Exchange Conversion Card (Issue 8)
+            _buildCurrencyConversionCard(trip),
+            const SizedBox(height: 14),
+
+            // Payer & Split Section (Omitted for solo trips to maintain clean, professional UX)
+            if (!trip.isSolo) ...[
               if (trip.isFamily) ...[
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -867,235 +1294,379 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                   },
                 ),
               ),
-              const SizedBox(height: 20),
-
-              // Split Mode Selector
-              const Text('Split Method:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              const SizedBox(height: 8),
-              SegmentedButton<SplitType>(
-                segments: [
-                  const ButtonSegment(value: SplitType.equal, label: Text('Equally')),
-                  ButtonSegment(
-                    value: SplitType.exact,
-                    label: Text('Exact ${CurrencyFormatter.getCurrencySymbol(trip.defaultCurrency)}'),
-                  ),
-                  const ButtonSegment(value: SplitType.percentage, label: Text('Percent %')),
-                  const ButtonSegment(value: SplitType.shares, label: Text('Shares')),
-                ],
-                selected: {_splitType},
-                onSelectionChanged: (val) {
-                  setState(() => _splitType = val.first);
-                },
-              ),
               const SizedBox(height: 16),
             ],
 
-            // Split Breakdown Card (Group & Family only)
+            // Collapsible Split Method & Breakdown Card (Folded by default)
             if (!trip.isSolo) ...[
               Container(
-                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.grey.withAlpha(50)),
+                  border: Border.all(
+                    color: _isSplitExpanded
+                        ? AppTheme.primary.withAlpha(isDark ? 160 : 120)
+                        : (isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+                    width: _isSplitExpanded ? 1.4 : 1.0,
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Member Cost Shares', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                    const SizedBox(height: 12),
-                    ...trip.members.map((m) {
-                      final isIncluded = _equalIncluded[m.id] ?? true;
-                      final total = double.tryParse(_amountController.text) ?? 0.0;
+                    // Folded Summary Header (Always visible - tap to expand/collapse)
+                    InkWell(
+                      onTap: () {
+                        setState(() => _isSplitExpanded = !_isSplitExpanded);
+                        HapticFeedback.lightImpact();
+                      },
+                      borderRadius: BorderRadius.circular(16),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primary.withAlpha(isDark ? 35 : 20),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(Icons.call_split_rounded, color: AppTheme.primary, size: 20),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Text(
+                                        'Split Method',
+                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.primary.withAlpha(isDark ? 35 : 20),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Text(
+                                          _splitType == SplitType.equal
+                                              ? 'Equally'
+                                              : (_splitType == SplitType.exact
+                                                  ? 'Exact'
+                                                  : (_splitType == SplitType.percentage ? 'Percent %' : 'Shares')),
+                                          style: const TextStyle(
+                                            color: AppTheme.primary,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 10.5,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Builder(
+                                    builder: (context) {
+                                      final total = double.tryParse(_amountController.text.trim()) ?? 0.0;
+                                      if (_splitType == SplitType.equal) {
+                                        final incCount = _equalIncluded.values.where((v) => v).length;
+                                        final perPerson = incCount > 0 ? (total / incCount) : 0.0;
+                                        return Text(
+                                          'Split among $incCount member${incCount == 1 ? "" : "s"}${total > 0 ? " • ${CurrencyFormatter.format(perPerson, currency: trip.defaultCurrency)} each" : ""}',
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                          ),
+                                        );
+                                      } else if (_splitType == SplitType.exact) {
+                                        return Text(
+                                          'Custom exact amounts assigned',
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                          ),
+                                        );
+                                      } else if (_splitType == SplitType.percentage) {
+                                        return Text(
+                                          'Percentage ratio allocation',
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                          ),
+                                        );
+                                      } else {
+                                        return Text(
+                                          'Weighted shares allocation',
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                          ),
+                                        );
+                                      }
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
+                              decoration: BoxDecoration(
+                                color: isDark ? Colors.white10 : Colors.black.withAlpha(10),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _isSplitExpanded ? 'Fold' : 'Customize',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: isDark ? Colors.grey[300] : const Color(0xFF475569),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Icon(
+                                    _isSplitExpanded
+                                        ? Icons.keyboard_arrow_up_rounded
+                                        : Icons.keyboard_arrow_down_rounded,
+                                    size: 16,
+                                    color: isDark ? Colors.grey[300] : const Color(0xFF475569),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
 
-                      if (_splitType == SplitType.equal) {
-                        final incCount = _equalIncluded.values.where((v) => v).length;
-                        final perPerson = incCount > 0 ? (total / incCount) : 0.0;
-                        return CheckboxListTile(
-                          value: isIncluded,
-                          title: Text(m.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                          subtitle: Text(
-                            isIncluded
-                                ? CurrencyFormatter.format(perPerson, currency: trip.defaultCurrency)
-                                : 'Excluded from bill',
-                            style: TextStyle(
-                              color: isIncluded ? AppTheme.primary : Colors.grey,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          activeColor: AppTheme.primary,
-                          contentPadding: EdgeInsets.zero,
-                          onChanged: (val) {
-                            setState(() => _equalIncluded[m.id] = val ?? false);
-                          },
-                        );
-                      } else if (_splitType == SplitType.exact) {
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Row(
-                            children: [
-                              Expanded(child: Text(m.name, style: const TextStyle(fontWeight: FontWeight.w600))),
-                              SizedBox(
-                                width: 110,
-                                child: TextField(
-                                  controller: _exactControllers[m.id],
-                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                  onChanged: (_) => setState(() {}),
-                                  decoration: InputDecoration(
-                                    prefixText: '${CurrencyFormatter.getCurrencySymbol(trip.defaultCurrency)} ',
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                  ),
+                    // Expandable Configuration Body
+                    if (_isSplitExpanded) ...[
+                      const Divider(height: 1),
+                      Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Select Split Calculation:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            const SizedBox(height: 8),
+                            SegmentedButton<SplitType>(
+                              segments: [
+                                const ButtonSegment(value: SplitType.equal, label: Text('Equally')),
+                                ButtonSegment(
+                                  value: SplitType.exact,
+                                  label: Text('Exact ${CurrencyFormatter.getCurrencySymbol(trip.defaultCurrency)}'),
                                 ),
-                              ),
-                            ],
-                          ),
-                        );
-                      } else if (_splitType == SplitType.shares) {
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Row(
-                            children: [
-                              Expanded(child: Text(m.name, style: const TextStyle(fontWeight: FontWeight.w600))),
-                              SizedBox(
-                                width: 100,
-                                child: TextField(
-                                  controller: _sharesControllers[m.id],
-                                  keyboardType: const TextInputType.numberWithOptions(decimal: false),
-                                  onChanged: (_) => setState(() {}),
-                                  decoration: const InputDecoration(
-                                    suffixText: 'share(s)',
-                                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                const ButtonSegment(value: SplitType.percentage, label: Text('Percent %')),
+                                const ButtonSegment(value: SplitType.shares, label: Text('Shares')),
+                              ],
+                              selected: {_splitType},
+                              onSelectionChanged: (val) {
+                                setState(() => _splitType = val.first);
+                              },
+                            ),
+                            const SizedBox(height: 14),
+
+                            const Text('Member Cost Shares', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            const SizedBox(height: 10),
+                            ...trip.members.map((m) {
+                              final isIncluded = _equalIncluded[m.id] ?? true;
+                              final total = double.tryParse(_amountController.text) ?? 0.0;
+
+                              if (_splitType == SplitType.equal) {
+                                final incCount = _equalIncluded.values.where((v) => v).length;
+                                final perPerson = incCount > 0 ? (total / incCount) : 0.0;
+                                return CheckboxListTile(
+                                  value: isIncluded,
+                                  title: Text(m.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                  subtitle: Text(
+                                    isIncluded
+                                        ? CurrencyFormatter.format(perPerson, currency: trip.defaultCurrency)
+                                        : 'Excluded from bill',
+                                    style: TextStyle(
+                                      color: isIncluded ? AppTheme.primary : Colors.grey,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      } else {
-                        // Percentage
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Row(
-                            children: [
-                              Expanded(child: Text(m.name, style: const TextStyle(fontWeight: FontWeight.w600))),
-                              SizedBox(
-                                width: 90,
-                                child: TextField(
-                                  controller: _percentControllers[m.id],
-                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                  onChanged: (_) => setState(() {}),
-                                  decoration: const InputDecoration(
-                                    suffixText: '%',
-                                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                  activeColor: AppTheme.primary,
+                                  contentPadding: EdgeInsets.zero,
+                                  onChanged: (val) {
+                                    setState(() => _equalIncluded[m.id] = val ?? false);
+                                  },
+                                );
+                              } else if (_splitType == SplitType.exact) {
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: Row(
+                                    children: [
+                                      Expanded(child: Text(m.name, style: const TextStyle(fontWeight: FontWeight.w600))),
+                                      SizedBox(
+                                        width: 110,
+                                        child: TextField(
+                                          controller: _exactControllers[m.id],
+                                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                          onChanged: (_) => setState(() {}),
+                                          decoration: InputDecoration(
+                                            prefixText: '${CurrencyFormatter.getCurrencySymbol(trip.defaultCurrency)} ',
+                                            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }
-                    }),
-                    const SizedBox(height: 8),
-                    const Divider(height: 1),
-                    const SizedBox(height: 8),
-                    Builder(builder: (context) {
-                      final total = double.tryParse(_amountController.text.trim()) ?? 0.0;
-                      if (_splitType == SplitType.exact) {
-                        double allocated = 0.0;
-                        for (final m in trip.members) {
-                          allocated += double.tryParse(_exactControllers[m.id]?.text ?? '0') ?? 0.0;
-                        }
-                        final diff = allocated - total;
-                        final isBalanced = (diff).abs() < 0.01;
-                        return Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Allocated: ${CurrencyFormatter.format(allocated, currency: trip.defaultCurrency)} / ${CurrencyFormatter.format(total, currency: trip.defaultCurrency)}',
-                              style: TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.bold,
-                                color: isBalanced ? Colors.green : Colors.red,
-                              ),
-                            ),
-                            Text(
-                              isBalanced ? '✓ Balanced' : (diff > 0 ? '+${CurrencyFormatter.format(diff, currency: trip.defaultCurrency)} over' : '-${CurrencyFormatter.format(-diff, currency: trip.defaultCurrency)} remaining'),
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: isBalanced ? Colors.green : Colors.red,
-                              ),
-                            ),
+                                );
+                              } else if (_splitType == SplitType.shares) {
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: Row(
+                                    children: [
+                                      Expanded(child: Text(m.name, style: const TextStyle(fontWeight: FontWeight.w600))),
+                                      SizedBox(
+                                        width: 100,
+                                        child: TextField(
+                                          controller: _sharesControllers[m.id],
+                                          keyboardType: const TextInputType.numberWithOptions(decimal: false),
+                                          onChanged: (_) => setState(() {}),
+                                          decoration: const InputDecoration(
+                                            suffixText: 'share(s)',
+                                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              } else {
+                                // Percentage
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: Row(
+                                    children: [
+                                      Expanded(child: Text(m.name, style: const TextStyle(fontWeight: FontWeight.w600))),
+                                      SizedBox(
+                                        width: 90,
+                                        child: TextField(
+                                          controller: _percentControllers[m.id],
+                                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                          onChanged: (_) => setState(() {}),
+                                          decoration: const InputDecoration(
+                                            suffixText: '%',
+                                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+                            }),
+                            const SizedBox(height: 8),
+                            const Divider(height: 1),
+                            const SizedBox(height: 8),
+                            Builder(builder: (context) {
+                              final total = double.tryParse(_amountController.text.trim()) ?? 0.0;
+                              if (_splitType == SplitType.exact) {
+                                double allocated = 0.0;
+                                for (final m in trip.members) {
+                                  allocated += double.tryParse(_exactControllers[m.id]?.text ?? '0') ?? 0.0;
+                                }
+                                final diff = allocated - total;
+                                final isBalanced = (diff).abs() < 0.01;
+                                return Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'Allocated: ${CurrencyFormatter.format(allocated, currency: trip.defaultCurrency)} / ${CurrencyFormatter.format(total, currency: trip.defaultCurrency)}',
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: isBalanced ? Colors.green : Colors.red,
+                                      ),
+                                    ),
+                                    Text(
+                                      isBalanced ? '✓ Balanced' : (diff > 0 ? '+${CurrencyFormatter.format(diff, currency: trip.defaultCurrency)} over' : '-${CurrencyFormatter.format(-diff, currency: trip.defaultCurrency)} remaining'),
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: isBalanced ? Colors.green : Colors.red,
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              } else if (_splitType == SplitType.percentage) {
+                                double totalPct = 0.0;
+                                for (final m in trip.members) {
+                                  totalPct += double.tryParse(_percentControllers[m.id]?.text ?? '0') ?? 0.0;
+                                }
+                                final isBalanced = (totalPct - 100.0).abs() < 0.1;
+                                return Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'Total: ${totalPct.toStringAsFixed(1)}% / 100.0%',
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: isBalanced ? Colors.green : Colors.orange[800],
+                                      ),
+                                    ),
+                                    Text(
+                                      isBalanced ? '✓ 100% Allocated' : '${(100.0 - totalPct).toStringAsFixed(1)}% remaining',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: isBalanced ? Colors.green : Colors.orange[800],
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              } else if (_splitType == SplitType.shares) {
+                                double totalShares = 0.0;
+                                for (final m in trip.members) {
+                                  totalShares += double.tryParse(_sharesControllers[m.id]?.text ?? '0') ?? 0.0;
+                                }
+                                final perShare = totalShares > 0 ? (total / totalShares) : 0.0;
+                                return Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'Total Shares: ${totalShares.toStringAsFixed(0)}',
+                                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                                    ),
+                                    Text(
+                                      '${CurrencyFormatter.format(perShare, currency: trip.defaultCurrency)} / share',
+                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                                    ),
+                                  ],
+                                );
+                              } else {
+                                final incCount = _equalIncluded.values.where((v) => v).length;
+                                final perPerson = incCount > 0 ? (total / incCount) : 0.0;
+                                return Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'Splitting among $incCount member${incCount == 1 ? "" : "s"}',
+                                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                                    ),
+                                    Text(
+                                      '${CurrencyFormatter.format(perPerson, currency: trip.defaultCurrency)} each',
+                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                                    ),
+                                  ],
+                                );
+                              }
+                            }),
                           ],
-                        );
-                      } else if (_splitType == SplitType.percentage) {
-                        double totalPct = 0.0;
-                        for (final m in trip.members) {
-                          totalPct += double.tryParse(_percentControllers[m.id]?.text ?? '0') ?? 0.0;
-                        }
-                        final isBalanced = (totalPct - 100.0).abs() < 0.1;
-                        return Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Total: ${totalPct.toStringAsFixed(1)}% / 100.0%',
-                              style: TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.bold,
-                                color: isBalanced ? Colors.green : Colors.orange[800],
-                              ),
-                            ),
-                            Text(
-                              isBalanced ? '✓ 100% Allocated' : '${(100.0 - totalPct).toStringAsFixed(1)}% remaining',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: isBalanced ? Colors.green : Colors.orange[800],
-                              ),
-                            ),
-                          ],
-                        );
-                      } else if (_splitType == SplitType.shares) {
-                        double totalShares = 0.0;
-                        for (final m in trip.members) {
-                          totalShares += double.tryParse(_sharesControllers[m.id]?.text ?? '0') ?? 0.0;
-                        }
-                        final perShare = totalShares > 0 ? (total / totalShares) : 0.0;
-                        return Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Total Shares: ${totalShares.toStringAsFixed(0)}',
-                              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppTheme.primary),
-                            ),
-                            Text(
-                              '${CurrencyFormatter.format(perShare, currency: trip.defaultCurrency)} / share',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primary),
-                            ),
-                          ],
-                        );
-                      } else {
-                        final incCount = _equalIncluded.values.where((v) => v).length;
-                        final perPerson = incCount > 0 ? (total / incCount) : 0.0;
-                        return Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Splitting among $incCount member${incCount == 1 ? "" : "s"}',
-                              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppTheme.primary),
-                            ),
-                            Text(
-                              '${CurrencyFormatter.format(perPerson, currency: trip.defaultCurrency)} each',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primary),
-                            ),
-                          ],
-                        );
-                      }
-                    }),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
             ],
 
             // Location Tagging Section (Toggle)
@@ -1326,7 +1897,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                               Row(
                                 children: [
                                   TextButton.icon(
-                                    onPressed: () => _pickReceiptImage(ImageSource.gallery),
+                                    onPressed: _isScanningOcr ? null : _showOcrSourceDialog,
                                     icon: const Icon(Icons.refresh_rounded, size: 14),
                                     label: const Text('Change', style: TextStyle(fontSize: 11)),
                                     style: TextButton.styleFrom(
@@ -1358,20 +1929,21 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                       children: [
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () => _pickReceiptImage(ImageSource.camera),
-                            icon: const Icon(Icons.camera_alt_rounded, size: 16),
-                            label: const Text('Take Photo', style: TextStyle(fontSize: 12)),
+                            onPressed: _isScanningOcr ? null : () => _scanReceiptWithOcr(ImageSource.camera),
+                            icon: const Icon(Icons.camera_alt_rounded, size: 16, color: AppTheme.primary),
+                            label: const Text('Scan with Camera', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.primary)),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 10),
+                              side: BorderSide(color: AppTheme.primary.withAlpha(120)),
                             ),
                           ),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () => _pickReceiptImage(ImageSource.gallery),
+                            onPressed: _isScanningOcr ? null : () => _scanReceiptWithOcr(ImageSource.gallery),
                             icon: const Icon(Icons.photo_library_rounded, size: 16),
-                            label: const Text('Choose Gallery', style: TextStyle(fontSize: 12)),
+                            label: const Text('Upload from Gallery', style: TextStyle(fontSize: 12)),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 10),
                             ),

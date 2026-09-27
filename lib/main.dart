@@ -13,6 +13,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_database/firebase_database.dart';
 
 import 'screens/auth/email_verification_screen.dart';
 import 'models/auth_user.dart';
@@ -40,6 +41,11 @@ void main() async {
     persistenceEnabled: true,
     cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
   );
+  try {
+    FirebaseDatabase.instance.setPersistenceEnabled(true);
+  } catch (e) {
+    AppLogger.warn('Firebase RTDB persistence: $e');
+  }
 
   await MapTileCacheService.purgeLegacyCache();
   await AppDatabase.purgeLegacyDatabase();

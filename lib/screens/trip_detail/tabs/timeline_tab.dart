@@ -366,78 +366,60 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
         ? [_selectedDateFilterKey!]
         : sortedDateKeys;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 80),
-      children: [
-        // Tag Stoppage Action Bar
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: isDark ? AppTheme.surfaceDark : Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: isDark ? AppTheme.borderDark : AppTheme.borderLight, width: 1.1),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withAlpha(15),
-                blurRadius: 8,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withAlpha(25),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.timeline_rounded, size: 18, color: AppTheme.primary),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Journey Timeline & Stops',
-                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, letterSpacing: -0.2),
-                      ),
-                    ],
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary.withAlpha(20),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      '${stoppages.length} Stoppages',
-                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primary),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              FilledButton.icon(
-                onPressed: () => _openAddStoppageDialog(context, autoDetectGps: true),
-                icon: const Icon(Icons.add_location_alt_rounded, size: 18),
-                label: const Text(
-                  'Tag Stoppage',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
+        children: [
+          // Timeline Overview Header Card
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: isDark ? AppTheme.surfaceDark : Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: isDark ? AppTheme.borderDark : AppTheme.borderLight, width: 1.1),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withAlpha(15),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
                 ),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 11),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ],
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withAlpha(25),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.timeline_rounded, size: 18, color: AppTheme.primary),
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Journey Timeline & Stops',
+                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, letterSpacing: -0.2),
+                    ),
+                  ],
                 ),
-              ),
-            ],
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withAlpha(20),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '${stoppages.length} Stoppages',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
         const SizedBox(height: 14),
 
         // Sticky Horizontal Day Navigation Bar
@@ -765,8 +747,8 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                                                   ),
                                                   const Text(' • ', style: TextStyle(color: Colors.grey)),
                                                   Text(
-                                                    DateFormatter.formatTimeOnly(stop.arrivedAt),
-                                                    style: TextStyle(fontSize: 10.5, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+                                                    DateFormatter.formatDateTime(stop.arrivedAt),
+                                                    style: TextStyle(fontSize: 10.5, color: isDark ? Colors.grey[400] : Colors.grey[600], fontWeight: FontWeight.w500),
                                                   ),
                                                 ],
                                               ),
@@ -1046,6 +1028,54 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
         ),
       ),
     ],
-  );
-}
+  ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      floatingActionButton: (!widget.trip.isCompleted && MediaQuery.of(context).viewInsets.bottom == 0)
+          ? Container(
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF0D9488), Color(0xFF0F766E)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(28),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF0D9488).withAlpha(110),
+                    blurRadius: 14,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+                border: Border.all(color: Colors.white.withAlpha(45), width: 1),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => _openAddStoppageDialog(context, autoDetectGps: true),
+                  borderRadius: BorderRadius.circular(28),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.add_location_alt_rounded, color: Colors.white, size: 18),
+                        SizedBox(width: 6.5),
+                        Text(
+                          'Tag Stoppage',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            )
+          : null,
+    );
+  }
 }

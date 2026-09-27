@@ -19,6 +19,8 @@ class Trip {
   final double? rating;
   final String? experienceReview;
   final DateTime? completedAt;
+  final Map<String, double> memberRatings;
+  final Map<String, String> memberReviews;
 
   const Trip({
     required this.id,
@@ -39,14 +41,16 @@ class Trip {
     this.rating,
     this.experienceReview,
     this.completedAt,
+    this.memberRatings = const {},
+    this.memberReviews = const {},
   });
 
   bool get isSolo => tripType == 'solo' || members.length <= 1;
   bool get isFamily => tripType == 'family';
   bool get isGroup => tripType == 'group' && !isSolo;
   bool get hasSettlements => isGroup;
-  bool get isRunning => !isCompleted && !isDeleted;
-  bool get isEnded => isCompleted || status == 'completed';
+  bool get isRunning => !isCompleted && !isDeleted && status != 'completed' && status != 'concluded' && status != 'ended';
+  bool get isEnded => isCompleted || status == 'completed' || status == 'concluded' || status == 'ended';
   bool get isDeleted => status == 'deleted';
 
   TripMember? get currentUserMember {
@@ -84,6 +88,16 @@ class Trip {
   }
 
 
+  int get reviewCount => memberRatings.length;
+
+  double? get averageRating {
+    if (memberRatings.isNotEmpty) {
+      final total = memberRatings.values.fold<double>(0.0, (sum, r) => sum + r);
+      return double.parse((total / memberRatings.length).toStringAsFixed(1));
+    }
+    return rating;
+  }
+
   Trip copyWith({
     String? id,
     String? title,
@@ -103,6 +117,8 @@ class Trip {
     double? rating,
     String? experienceReview,
     DateTime? completedAt,
+    Map<String, double>? memberRatings,
+    Map<String, String>? memberReviews,
   }) {
     return Trip(
       id: id ?? this.id,
@@ -123,6 +139,8 @@ class Trip {
       rating: rating ?? this.rating,
       experienceReview: experienceReview ?? this.experienceReview,
       completedAt: completedAt ?? this.completedAt,
+      memberRatings: memberRatings ?? this.memberRatings,
+      memberReviews: memberReviews ?? this.memberReviews,
     );
   }
 
@@ -146,14 +164,34 @@ class Trip {
       'createdAt': createdAt.toIso8601String(),
       'isCompleted': isCompleted,
       'status': status,
-      'rating': rating,
+      'rating': rating ?? averageRating,
       'experienceReview': experienceReview,
       'completedAt': completedAt?.toIso8601String(),
+      'memberRatings': memberRatings,
+      'memberReviews': memberReviews,
     };
   }
 
   factory Trip.fromJson(Map<String, dynamic> json) {
     final isCompletedVal = json['isCompleted'] as bool? ?? false;
+    final Map<String, double> parsedMemberRatings = {};
+    if (json['memberRatings'] is Map) {
+      (json['memberRatings'] as Map).forEach((k, v) {
+        if (v is num) parsedMemberRatings[k.toString()] = v.toDouble();
+      });
+    } else if (json['rating'] != null && json['rating'] is num) {
+      parsedMemberRatings['default'] = (json['rating'] as num).toDouble();
+    }
+
+    final Map<String, String> parsedMemberReviews = {};
+    if (json['memberReviews'] is Map) {
+      (json['memberReviews'] as Map).forEach((k, v) {
+        if (v != null) parsedMemberReviews[k.toString()] = v.toString();
+      });
+    } else if (json['experienceReview'] != null) {
+      parsedMemberReviews['default'] = json['experienceReview'].toString();
+    }
+
     return Trip(
       id: json['id'] as String,
       title: json['title'] as String,
@@ -182,6 +220,8 @@ class Trip {
       completedAt: json['completedAt'] != null
           ? DateTime.parse(json['completedAt'] as String)
           : null,
+      memberRatings: parsedMemberRatings,
+      memberReviews: parsedMemberReviews,
     );
   }
 }

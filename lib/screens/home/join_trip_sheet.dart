@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 import '../../core/services/cloud_trip_sync_service.dart';
 import '../../core/services/trip_share_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../models/trip_member.dart';
+import '../../models/trip_audit_log.dart';
+import '../../providers/audit_log_provider.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/settlement_provider.dart';
@@ -18,6 +21,7 @@ import '../../core/services/user_service.dart';
 import '../../core/services/proximity_alert_service.dart';
 import '../../models/proximity_alert.dart';
 import 'qr_scanner_screen.dart';
+import '../common/sheet_drag_handle.dart';
 
 class _UpperCaseTextFormatter extends TextInputFormatter {
   @override
@@ -247,11 +251,27 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
       );
     } catch (_) {}
 
+    try {
+      ref.read(allAuditLogsProvider.notifier).logAction(
+        TripAuditLog(
+          id: 'log_${const Uuid().v4().substring(0, 8)}',
+          tripId: importedTrip.id,
+          actionType: 'join_trip',
+          itemTitle: importedTrip.title,
+          performedByMemberId: activeMemberId,
+          performedByName: currentDisplayName.isNotEmpty ? currentDisplayName : 'Traveler',
+          timestamp: DateTime.now(),
+          changeDetails: 'Joined expedition "${importedTrip.title}" using room code',
+        ),
+      );
+    } catch (_) {}
+
     // Refresh child providers
     ref.read(allStoppagesProvider.notifier).reload();
     ref.read(allExpensesProvider.notifier).reload();
     ref.read(allMemoriesProvider.notifier).reload();
     ref.read(allSettlementsProvider.notifier).reload();
+    ref.read(allAuditLogsProvider.notifier).reload();
 
     if (!mounted) return;
     Navigator.of(context).pop(); // Close bottom sheet
@@ -304,17 +324,7 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Drag handle
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey.withAlpha(80),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 14),
+            const SheetDragHandle(margin: EdgeInsets.only(bottom: 14)),
 
             // Header Banner
             Row(
@@ -604,7 +614,7 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
                                 controller: _displayNameController,
                                 decoration: const InputDecoration(
                                   labelText: 'Your Trip Nickname',
-                                  hintText: 'e.g. Liam, Maya',
+                                  hintText: 'e.g. Enter your nickname',
                                   prefixIcon: Icon(Icons.badge_rounded, color: AppTheme.secondary, size: 20),
                                   isDense: true,
                                 ),

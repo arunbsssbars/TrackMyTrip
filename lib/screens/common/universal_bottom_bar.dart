@@ -19,7 +19,7 @@ class UniversalBottomBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final activeTab = ref.watch(activeMainTabProvider);
-    final currentIndex = (selectedIndexOverride ?? activeTab).clamp(0, 4);
+    final currentIndex = (selectedIndexOverride ?? activeTab).clamp(0, 3);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final unreadAlerts = ref.watch(proximityAlertServiceProvider).unreadCount;
     final pendingInvites = ref.watch(invitationProvider).length;
@@ -63,9 +63,9 @@ class UniversalBottomBar extends ConsumerWidget {
                 ref: ref,
                 index: 1,
                 selectedIndex: currentIndex,
-                tooltip: 'Current Trip',
-                selectedIcon: Icons.explore_rounded,
-                unselectedIcon: Icons.explore_outlined,
+                tooltip: 'Live',
+                selectedIcon: Icons.card_travel_rounded,
+                unselectedIcon: Icons.card_travel_outlined,
                 isDark: isDark,
               ),
               _buildNavItem(
@@ -74,8 +74,8 @@ class UniversalBottomBar extends ConsumerWidget {
                 index: 2,
                 selectedIndex: currentIndex,
                 tooltip: 'Activity Hub',
-                selectedIcon: Icons.bolt_rounded,
-                unselectedIcon: Icons.bolt_outlined,
+                selectedIcon: Icons.local_activity_rounded,
+                unselectedIcon: Icons.local_activity_outlined,
                 isDark: isDark,
                 badgeCount: totalActivityUnread,
               ),
@@ -83,16 +83,6 @@ class UniversalBottomBar extends ConsumerWidget {
                 context: context,
                 ref: ref,
                 index: 3,
-                selectedIndex: currentIndex,
-                tooltip: 'Memories',
-                selectedIcon: Icons.photo_library_rounded,
-                unselectedIcon: Icons.photo_library_outlined,
-                isDark: isDark,
-              ),
-              _buildNavItem(
-                context: context,
-                ref: ref,
-                index: 4,
                 selectedIndex: currentIndex,
                 tooltip: 'Profile',
                 selectedIcon: Icons.person_rounded,

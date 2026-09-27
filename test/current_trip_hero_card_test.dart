@@ -213,8 +213,8 @@ void main() {
         ),
       );
 
-      // Tap on "Ledger & Splits" or the financial glance card
-      await tester.tap(find.text('Ledger & Splits'));
+      // Tap on the financial glance expenditure block
+      await tester.tap(find.text('TOTAL EXPENDITURE'));
       await tester.pumpAndSettle();
 
       expect(ledgerTapped, isTrue);

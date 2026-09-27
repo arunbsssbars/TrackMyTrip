@@ -32,12 +32,6 @@ class LocationService {
   static final ValueNotifier<String> currencyNotifier = ValueNotifier<String>(_initialLocaleCurrency());
 
   static String _initialLocaleCurrency() {
-    try {
-      final countryCode = WidgetsBinding.instance.platformDispatcher.locale.countryCode;
-      if (countryCode != null && countryCode.isNotEmpty) {
-        return getCurrencyForCountryCode(countryCode);
-      }
-    } catch (_) {}
     return 'INR';
   }
 

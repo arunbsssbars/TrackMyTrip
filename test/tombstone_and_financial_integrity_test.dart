@@ -189,5 +189,30 @@ void main() {
       expect(balances['memB'], 0.00);
       expect(balances['memC'], -33.33);
     });
+
+    test('Settlement serialization and mutation actions roundtrip properly', () {
+      final settlement = Settlement(
+        id: 'set_test_1',
+        tripId: 'trip_100',
+        payerMemberId: 'memA',
+        receiverMemberId: 'memB',
+        amount: 45.50,
+        currency: 'USD',
+        settledAt: DateTime(2026, 9, 27, 14, 0),
+        paymentMethod: 'UPI',
+        notes: 'Dinner split',
+        isAdvance: false,
+      );
+
+      final json = settlement.toJson();
+      final revived = Settlement.fromJson(json);
+
+      expect(revived.id, 'set_test_1');
+      expect(revived.tripId, 'trip_100');
+      expect(revived.payerMemberId, 'memA');
+      expect(revived.receiverMemberId, 'memB');
+      expect(revived.amount, 45.50);
+      expect(revived.paymentMethod, 'UPI');
+    });
   });
 }

@@ -23,7 +23,15 @@ class MembersTab extends ConsumerStatefulWidget {
 }
 
 class _MembersTabState extends ConsumerState<MembersTab> {
-  void _openCompanionSearch() {
+  void _openCompanionSearch() async {
+    final canProceed = await TripGuardHelper.ensureTripOpenForEdit(
+      context,
+      ref,
+      widget.trip,
+      actionLabel: 'invite companions',
+    );
+    if (!canProceed || !mounted) return;
+
     final currentTrip = ref.read(tripListProvider).where((t) => t.id == widget.trip.id).firstOrNull ?? widget.trip;
     CompanionSearchDialog.show(
       context,
@@ -118,7 +126,13 @@ class _MembersTabState extends ConsumerState<MembersTab> {
           children: [
             Icon(Icons.person_add_alt_1_rounded, color: AppTheme.primary),
             SizedBox(width: 8),
-            Text('Add Custom Member'),
+            Expanded(
+              child: Text(
+                'Add Custom Member',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
         content: SingleChildScrollView(
@@ -137,7 +151,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                 textCapitalization: TextCapitalization.words,
                 decoration: InputDecoration(
                   labelText: 'Companion Name',
-                  hintText: 'e.g. Maya, Driver Ramesh',
+                  hintText: 'e.g. Driver Ramesh, Tour Guide',
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
               ),
@@ -240,6 +254,16 @@ class _MembersTabState extends ConsumerState<MembersTab> {
   }
 
   void _confirmLeaveTrip() {
+    if (widget.trip.isCompleted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('🔒 Concluded journeys cannot be abandoned. All splits and member records are preserved.'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -634,10 +658,14 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                   title: Text(
                     inv.inviteeEmail ?? inv.inviteeUsername,
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   subtitle: Text(
                     'Status: Pending • Sent recently',
                     style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : AppTheme.textMutedLight),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   trailing: TextButton(
                     onPressed: () {

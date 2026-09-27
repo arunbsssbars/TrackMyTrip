@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../../core/services/cloud_trip_sync_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../models/trip.dart';
+import '../../models/trip_member.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/settlement_provider.dart';
@@ -18,10 +20,17 @@ import 'create_trip_sheet.dart';
 import 'join_trip_sheet.dart';
 import '../common/sync_status_badge.dart';
 import '../common/sos_badge_icon.dart';
+import '../common/pulsing_live_beacon.dart';
 import '../notifications/notification_center_sheet.dart';
+import '../main_scaffold.dart';
 import '../../providers/invitation_provider.dart';
 import 'widgets/trip_invitation_card.dart';
-import '../main_scaffold.dart';
+import '../expenses/global_expenses_sheet.dart';
+import '../../providers/audit_log_provider.dart';
+import '../../core/services/ocr_service.dart';
+import '../expenses/add_expense_screen.dart';
+import 'package:image_picker/image_picker.dart';
+import '../common/user_avatar.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -35,7 +44,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   String _sortBy = 'recent'; // recent, oldest, spend, stops
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
-  int _displayedCount = 10;
+  int _displayedCount = 15;
   final ScrollController _scrollController = ScrollController();
   int _totalFilteredCount = 0;
 
@@ -71,7 +80,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 250) {
       if (_displayedCount < _totalFilteredCount) {
         setState(() {
-          _displayedCount += 10;
+          _displayedCount += 15;
         });
       }
     }
@@ -90,6 +99,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ref.read(allExpensesProvider.notifier).reload();
           ref.read(allMemoriesProvider.notifier).reload();
           ref.read(allSettlementsProvider.notifier).reload();
+          ref.read(allAuditLogsProvider.notifier).reload();
           if (mounted) setState(() {});
         },
       );
@@ -193,7 +203,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     final userTripIds = trips.map((t) => t.id).toSet();
     final userExpenses = allExpenses.where((e) => userTripIds.contains(e.tripId)).toList();
-    final userStoppages = allStoppages.where((s) => userTripIds.contains(s.tripId)).toList();
+    final currentTrip = ref.watch(currentTripProvider);
 
     final groupCount = trips.where((t) => !t.isSolo && !t.isFamily).length;
     final familyCount = trips.where((t) => t.isFamily).length;
@@ -201,9 +211,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     final grandTotalSpent = userExpenses.fold<double>(0.0, (sum, e) => sum + e.totalAmount);
     final detectedCurr = ref.watch(currencyNotifierProvider).value;
-    final defaultCurr = detectedCurr.isNotEmpty
-        ? detectedCurr
-        : (trips.isNotEmpty ? trips.first.defaultCurrency : LocationService.currentDetectedCurrency);
+    final defaultCurr = trips.isNotEmpty
+        ? trips.first.defaultCurrency
+        : (detectedCurr.isNotEmpty ? detectedCurr : 'INR');
+
+    final Map<String, double> categoryBreakdown = {};
+    for (final e in userExpenses) {
+      final cat = e.category.isNotEmpty ? e.category : 'General';
+      categoryBreakdown[cat] = (categoryBreakdown[cat] ?? 0.0) + e.totalAmount;
+    }
+    final sortedCategories = categoryBreakdown.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
 
     return Scaffold(
       body: CustomScrollView(
@@ -336,38 +354,214 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ],
                     ),
                     const SizedBox(height: 10),
+                    const SizedBox(height: 10),
+                    // Tier 1: Journeys (50%) and Total Spend (50%)
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
-                        _buildHeroStat(
-                          icon: Icons.map_rounded,
-                          value: '${trips.length}',
-                          label: 'Trips',
+                        // Metric 1: Journeys / Trips
+                        Expanded(
+                          child: InkWell(
+                            onTap: trips.isNotEmpty
+                                ? () {
+                                    HapticFeedback.lightImpact();
+                                    if (_scrollController.hasClients) {
+                                      _scrollController.animateTo(
+                                        240,
+                                        duration: const Duration(milliseconds: 350),
+                                        curve: Curves.easeOutCubic,
+                                      );
+                                    }
+                                  }
+                                : null,
+                            borderRadius: BorderRadius.circular(10),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.explore_rounded, color: Colors.white70, size: 13),
+                                      SizedBox(width: 4),
+                                      Flexible(
+                                        child: Text(
+                                          'Journeys',
+                                          style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w700),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${trips.length}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: -0.3,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
                         Container(height: 28, width: 1, color: Colors.white24),
-                        _buildHeroStat(
-                          icon: Icons.place_rounded,
-                          value: '${userStoppages.length}',
-                          label: 'Stoppages',
-                          onTap: trips.isNotEmpty
-                              ? () {
-                                  HapticFeedback.lightImpact();
-                                  ref.read(activeMainTabProvider.notifier).state = 1;
-                                }
-                              : null,
-                        ),
-                        Container(height: 28, width: 1, color: Colors.white24),
-                        _buildHeroStat(
-                          icon: Icons.account_balance_wallet_rounded,
-                          value: CurrencyFormatter.format(grandTotalSpent, currency: defaultCurr),
-                          label: 'Total Spent',
-                          onTap: () {
-                            HapticFeedback.lightImpact();
-                            ref.read(activeMainTabProvider.notifier).state = 3;
-                          },
+
+                        // Metric 2: Total Spend
+                        Expanded(
+                          child: InkWell(
+                            onTap: trips.isNotEmpty
+                                ? () {
+                                    HapticFeedback.lightImpact();
+                                    GlobalExpensesSheet.show(context);
+                                  }
+                                : null,
+                            borderRadius: BorderRadius.circular(10),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.account_balance_wallet_rounded, color: Colors.white70, size: 13),
+                                      SizedBox(width: 4),
+                                      Flexible(
+                                        child: Text(
+                                          'Total Expense',
+                                          style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w700),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      SizedBox(width: 2),
+                                      Icon(Icons.chevron_right_rounded, color: Colors.white70, size: 14),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    CurrencyFormatter.format(grandTotalSpent, currency: defaultCurr),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: -0.3,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
                       ],
                     ),
+                    if (userExpenses.isNotEmpty && grandTotalSpent > 0) ...[
+                      const SizedBox(height: 10),
+                      InkWell(
+                        onTap: () {
+                          HapticFeedback.lightImpact();
+                          GlobalExpensesSheet.show(context);
+                        },
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withAlpha(22),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: Colors.white.withAlpha(40), width: 0.9),
+                          ),
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 44,
+                                height: 44,
+                                child: PieChart(
+                                  PieChartData(
+                                    sectionsSpace: 2,
+                                    centerSpaceRadius: 10,
+                                    sections: sortedCategories.map((entry) {
+                                      return PieChartSectionData(
+                                        color: _getCategoryColor(entry.key),
+                                        value: entry.value,
+                                        title: '',
+                                        radius: 12,
+                                      );
+                                    }).toList(),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Row(
+                                      children: [
+                                        Text(
+                                          'Category Expense Breakdown',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                        SizedBox(width: 4),
+                                        Icon(Icons.pie_chart_rounded, size: 12, color: Colors.white70),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Wrap(
+                                      spacing: 8,
+                                      runSpacing: 2,
+                                      children: sortedCategories.take(3).map((entry) {
+                                        final pct = (entry.value / grandTotalSpent * 100).toInt();
+                                        return Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Container(
+                                              width: 6,
+                                              height: 6,
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: _getCategoryColor(entry.key),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 3),
+                                            Text(
+                                              '${entry.key}: $pct%',
+                                              style: const TextStyle(
+                                                color: Colors.white70,
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(Icons.chevron_right_rounded, color: Colors.white70, size: 18),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -397,7 +591,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         onChanged: (val) {
                           setState(() {
                             _searchQuery = val;
-                            _displayedCount = 10;
+                            _displayedCount = 15;
                           });
                         },
                         decoration: InputDecoration(
@@ -414,7 +608,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                     _searchController.clear();
                                     setState(() {
                                       _searchQuery = '';
-                                      _displayedCount = 10;
+                                      _displayedCount = 15;
                                     });
                                   },
                                 )
@@ -712,12 +906,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         child: TextButton.icon(
                           onPressed: () {
                             setState(() {
-                              _displayedCount += 10;
+                              _displayedCount += 15;
                             });
                           },
                           icon: const Icon(Icons.expand_more_rounded, size: 18),
                           label: Text(
-                            'Load Next 10 Trips (${filteredTrips.length - visibleTrips.length} remaining)',
+                            'Load Next 15 Trips (${filteredTrips.length - visibleTrips.length} remaining)',
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
                           ),
                         ),
@@ -752,13 +946,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       expensesCount: expenses.length,
                       totalSpent: totalSpent,
                       distanceKm: distanceKm,
-                      onTap: () => _navigateToTripDetail(trip, initialTabIndex: 0),
+                      isActiveCockpit: currentTrip?.id == trip.id,
+                      onOpenCockpit: () {
+                        HapticFeedback.mediumImpact();
+                        ref.read(selectedTripIdProvider.notifier).state = trip.id;
+                        ref.read(activeMainTabProvider.notifier).state = 1;
+                      },
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        _navigateToTripDetail(trip);
+                      },
                       onStopsTap: () => _navigateToTripDetail(trip, initialTabIndex: 0),
                       onRouteTap: () => _navigateToTripDetail(trip, initialTabIndex: 1),
                       onMembersTap: () => _navigateToTripDetail(trip, initialTabIndex: 2),
                       onBillsTap: () => _navigateToTripDetail(trip, initialTabIndex: 3),
                       onSettleTap: trip.isSolo ? null : () => _navigateToTripDetail(trip, initialTabIndex: 4),
-
                     ),
                   );
                 },
@@ -771,118 +973,213 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ],
       ),
-      floatingActionButton: Container(
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF0D9488), Color(0xFF0F766E)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(28),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF0D9488).withAlpha(110),
-              blurRadius: 14,
-              offset: const Offset(0, 4),
-            ),
-          ],
-          border: Border.all(color: Colors.white.withAlpha(45), width: 1),
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () => _openCreateTripSheet(context),
-            borderRadius: BorderRadius.circular(28),
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 15, vertical: 10),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      floatingActionButton: MediaQuery.of(context).viewInsets.bottom > 0
+          ? null
+          : Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.add_location_alt_rounded, color: Colors.white, size: 18),
-                  SizedBox(width: 6.5),
-                  Text(
-                    'New Trip',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 13,
-                      letterSpacing: -0.2,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            if (trips.isNotEmpty)
+              Container(
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF0D9488), Color(0xFF0F766E)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(28),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF0D9488).withAlpha(110),
+                      blurRadius: 14,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                  border: Border.all(color: Colors.white.withAlpha(45), width: 1),
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => _openAddBillOcr(trips),
+                    borderRadius: BorderRadius.circular(28),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.post_add_rounded, color: Colors.white, size: 18),
+                          SizedBox(width: 6.5),
+                          Text(
+                            'Add Bill (OCR)',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
+                ),
+              )
+            else
+              const SizedBox.shrink(),
+            Container(
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF0D9488), Color(0xFF0F766E)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(28),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF0D9488).withAlpha(110),
+                    blurRadius: 14,
+                    offset: const Offset(0, 4),
+                  ),
                 ],
+                border: Border.all(color: Colors.white.withAlpha(45), width: 1),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => _openCreateTripSheet(context),
+                  borderRadius: BorderRadius.circular(28),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 15, vertical: 10),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.add_location_alt_rounded, color: Colors.white, size: 18),
+                        SizedBox(width: 6.5),
+                        Text(
+                          'New Trip',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
-          ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildHeroStat({required IconData icon, required String value, required String label, VoidCallback? onTap}) {
-    final content = Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, color: Colors.white, size: 16),
-        const SizedBox(height: 2),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Text(
-              value,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w900,
-                letterSpacing: -0.3,
-              ),
-            ),
-            if (onTap != null) ...[
-              const SizedBox(width: 3),
-              const Icon(
-                Icons.arrow_forward_ios_rounded,
-                color: Colors.white70,
-                size: 9,
-              ),
-            ],
-          ],
-        ),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 10,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            if (onTap != null) ...[
-              const SizedBox(width: 2),
-              const Icon(
-                Icons.touch_app_rounded,
-                color: Colors.white60,
-                size: 9,
-              ),
-            ],
-          ],
-        ),
-      ],
-    );
+  Future<void> _openAddBillOcr(List<Trip> trips) async {
+    final activeTrips = trips.where((t) => !t.isEnded && t.status != 'concluded').toList();
+    if (activeTrips.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No active trips available to add bills. Concluded trips are locked.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
 
-    if (onTap != null) {
-      return InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          child: content,
+    Trip? selectedTrip;
+    if (activeTrips.length == 1) {
+      selectedTrip = activeTrips.first;
+    } else {
+      if (!mounted) return;
+      selectedTrip = await showModalBottomSheet<Trip>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) => Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0F172A) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+                child: Text('Select Active Trip for Bill', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+              const Divider(),
+              ...activeTrips.map((t) => ListTile(
+                leading: const Icon(Icons.explore_rounded, color: AppTheme.primary),
+                title: Text(t.title, style: const TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: Text(DateFormatter.formatTripDateRange(t.startDate, t.endDate)),
+                onTap: () => Navigator.of(ctx).pop(t),
+              )),
+            ],
+          ),
         ),
       );
     }
-    return content;
+
+    if (selectedTrip == null || !mounted) return;
+
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(
+                title: Text('Scan Bill / Receipt', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                subtitle: Text('Choose source to auto-extract details with OCR'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.camera_alt_rounded, color: Colors.blue),
+                title: const Text('Capture with Camera', style: TextStyle(fontWeight: FontWeight.w600)),
+                onTap: () => Navigator.of(ctx).pop(ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_rounded, color: Colors.purple),
+                title: const Text('Select from Gallery', style: TextStyle(fontWeight: FontWeight.w600)),
+                onTap: () => Navigator.of(ctx).pop(ImageSource.gallery),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (source == null || !mounted) return;
+
+    final picked = await ImagePicker().pickImage(source: source);
+    if (picked == null || !mounted) return;
+
+    final ocr = await OcrService.extractFromReceipt(picked.path);
+    if (!mounted) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (ctx) => AddExpenseScreen(
+          tripId: selectedTrip!.id,
+          prefillTitle: ocr.title,
+          prefillAmount: ocr.amount,
+          prefillImagePath: picked.path,
+          prefillCategory: ocr.category,
+          prefillDescription: ocr.description,
+        ),
+      ),
+    );
   }
+
+
 
   Widget _buildPillFilter(String key, String title, int count, bool isDark) {
     final isSelected = _activeFilter == key;
@@ -946,6 +1243,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
     );
   }
+
+  Color _getCategoryColor(String category) {
+    switch (category.toLowerCase()) {
+      case 'food':
+      case 'dining':
+        return const Color(0xFFF59E0B);
+      case 'fuel':
+      case 'transport':
+      case 'transportation':
+        return const Color(0xFF0284C7);
+      case 'stay':
+      case 'hotel':
+      case 'lodging':
+      case 'accommodation':
+        return const Color(0xFF8B5CF6);
+      case 'activities':
+      case 'activity':
+      case 'sightseeing':
+        return const Color(0xFF10B981);
+      case 'shopping':
+        return const Color(0xFFEC4899);
+      case 'general':
+      default:
+        return const Color(0xFF0D9488);
+    }
+  }
 }
 
 class _TripCard extends StatelessWidget {
@@ -954,6 +1277,8 @@ class _TripCard extends StatelessWidget {
   final int expensesCount;
   final double totalSpent;
   final double distanceKm;
+  final bool isActiveCockpit;
+  final VoidCallback onOpenCockpit;
   final VoidCallback onTap;
   final VoidCallback onBillsTap;
   final VoidCallback onStopsTap;
@@ -967,6 +1292,8 @@ class _TripCard extends StatelessWidget {
     required this.expensesCount,
     required this.totalSpent,
     this.distanceKm = 0.0,
+    this.isActiveCockpit = false,
+    required this.onOpenCockpit,
     required this.onTap,
     required this.onBillsTap,
     required this.onStopsTap,
@@ -998,20 +1325,63 @@ class _TripCard extends StatelessWidget {
       modeIcon = Icons.group_rounded;
     }
 
+    final isEnded = trip.isEnded;
+    final isRunning = trip.isRunning;
+
+    final Color cardBackground;
+    final Color borderColor;
+    final double borderWidth;
+    final double elevation;
+
+    if (isEnded) {
+      if (isActiveCockpit) {
+        cardBackground = isDark ? const Color(0xFF181C24) : const Color(0xFFF8FAFC);
+        borderColor = isDark ? const Color(0xFFF59E0B) : const Color(0xFFD97706);
+        borderWidth = 2.0;
+        elevation = isDark ? 1.0 : 2.5;
+      } else {
+        cardBackground = isDark ? const Color(0xFF141923) : const Color(0xFFF8FAFC);
+        borderColor = isDark ? const Color(0xFFF59E0B).withAlpha(210) : const Color(0xFFD97706).withAlpha(190);
+        borderWidth = 1.6;
+        elevation = 0;
+      }
+    } else if (isActiveCockpit) {
+      cardBackground = isDark ? const Color(0xFF0C2424) : const Color(0xFFF0FDF9);
+      borderColor = isDark ? const Color(0xFF14B8A6) : const Color(0xFF0D9488);
+      borderWidth = 1.8;
+      elevation = isDark ? 1.0 : 3.0;
+    } else if (isRunning) {
+      cardBackground = isDark ? const Color(0xFF0F1E24) : const Color(0xFFF0FDF4);
+      borderColor = isDark ? const Color(0xFF10B981).withAlpha(170) : const Color(0xFF059669).withAlpha(150);
+      borderWidth = 1.4;
+      elevation = isDark ? 0 : 2.0;
+    } else {
+      cardBackground = isDark ? const Color(0xFF161E2E) : Colors.white;
+      borderColor = isDark ? const Color(0xFF334155).withAlpha(120) : const Color(0xFFE2E8F0);
+      borderWidth = 1.0;
+      elevation = 0;
+    }
+
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Material(
-        color: isDark ? AppTheme.surfaceDark : AppTheme.surfaceLight,
-        elevation: isDark ? 0 : 2,
-        shadowColor: Colors.black.withAlpha(isDark ? 45 : 18),
+        color: cardBackground,
+        elevation: elevation,
+        shadowColor: isEnded
+            ? (isDark ? const Color(0xFFF59E0B).withAlpha(35) : const Color(0xFFD97706).withAlpha(35))
+            : (isActiveCockpit
+                ? const Color(0xFF0D9488).withAlpha(isDark ? 60 : 40)
+                : (isRunning
+                    ? const Color(0xFF10B981).withAlpha(isDark ? 35 : 25)
+                    : Colors.black.withAlpha(isDark ? 45 : 18))),
         borderRadius: BorderRadius.circular(18),
         clipBehavior: Clip.antiAlias,
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: isDark ? AppTheme.borderDark : AppTheme.borderLight,
-              width: 1.1,
+              color: borderColor,
+              width: borderWidth,
             ),
           ),
           child: Padding(
@@ -1019,7 +1389,7 @@ class _TripCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Top Section (Header, Title, Dates, Description) wrapped in InkWell to open details
+                // Top Section (Header, Title, Dates, Details) wrapped in InkWell to open details
                 InkWell(
                   onTap: onTap,
                   borderRadius: BorderRadius.circular(12),
@@ -1028,9 +1398,9 @@ class _TripCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Header: Mode Tag, Sync Code & Right Arrow (replacing 3 dots)
+                      // Header: Mode Tag, Status Badges & Total Expense Pill
                       Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(
                             child: Wrap(
@@ -1063,24 +1433,50 @@ class _TripCard extends StatelessWidget {
                                   ),
                                 ),
 
-                                // Persistent Trip Ended Badge
-                                if (trip.isCompleted)
+                                // Live Active Badge
+                                if (isActiveCockpit)
+                                  const PulsingLiveBeacon(
+                                    label: 'LIVE',
+                                    color: Color(0xFF0D9488),
+                                    dotSize: 7,
+                                    labelStyle: TextStyle(
+                                      color: Color(0xFF0D9488),
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.3,
+                                    ),
+                                  )
+                                else if (!isEnded)
+                                  PulsingLiveBeacon(
+                                    label: isRunning ? 'LIVE TRIP' : 'ACTIVE',
+                                    color: const Color(0xFF10B981),
+                                    dotSize: 6,
+                                    labelStyle: const TextStyle(
+                                      color: Color(0xFF10B981),
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.3,
+                                    ),
+                                  ),
+
+                                // Concluded Trip Badge
+                                if (isEnded)
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 3),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFF64748B).withAlpha(isDark ? 40 : 25),
+                                      color: const Color(0xFFD97706).withAlpha(isDark ? 40 : 25),
                                       borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: const Color(0xFF64748B).withAlpha(isDark ? 90 : 60)),
+                                      border: Border.all(color: const Color(0xFFD97706).withAlpha(isDark ? 100 : 70)),
                                     ),
-                                    child: const Row(
+                                    child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Icon(Icons.flag_rounded, size: 10.5, color: Color(0xFF64748B)),
-                                        SizedBox(width: 3),
+                                        Icon(Icons.flag_rounded, size: 10.5, color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706)),
+                                        const SizedBox(width: 3),
                                         Text(
-                                          'ENDED',
+                                          'CONCLUDED',
                                           style: TextStyle(
-                                            color: Color(0xFF64748B),
+                                            color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706),
                                             fontSize: 9,
                                             fontWeight: FontWeight.w900,
                                             letterSpacing: 0.2,
@@ -1090,7 +1486,7 @@ class _TripCard extends StatelessWidget {
                                     ),
                                   ),
 
-                                // Distinct Rating Badge (Never replaces ENDED badge)
+                                // Star Rating Badge
                                 if (trip.rating != null)
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
@@ -1116,7 +1512,7 @@ class _TripCard extends StatelessWidget {
                                     ),
                                   ),
 
-                                // Trip ID / Share Room Code Badge
+                                // Room Code Chip
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 3),
                                   decoration: BoxDecoration(
@@ -1140,7 +1536,7 @@ class _TripCard extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
 
-                          // Interactive Clickable Total Spend in Top Header
+                          // Total Expense Pill in Top Header
                           Material(
                             color: Colors.transparent,
                             child: InkWell(
@@ -1150,7 +1546,7 @@ class _TripCard extends StatelessWidget {
                               },
                               borderRadius: BorderRadius.circular(8),
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
                                 decoration: BoxDecoration(
                                   color: AppTheme.secondary.withAlpha(isDark ? 30 : 18),
                                   borderRadius: BorderRadius.circular(8),
@@ -1167,11 +1563,11 @@ class _TripCard extends StatelessWidget {
                                       size: 12.5,
                                       color: AppTheme.secondary,
                                     ),
-                                    const SizedBox(width: 3.5),
+                                    const SizedBox(width: 4),
                                     Text(
                                       CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency),
                                       style: TextStyle(
-                                        fontSize: 13,
+                                        fontSize: 12.5,
                                         fontWeight: FontWeight.w900,
                                         letterSpacing: -0.3,
                                         color: isDark ? Colors.white : AppTheme.textMainLight,
@@ -1190,9 +1586,9 @@ class _TripCard extends StatelessWidget {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 10),
 
-                      // Middle Section: Trip Details on Left, Tactile > Chevron on Middle-Rightmost
+                      // Title & Date Range
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
@@ -1200,7 +1596,6 @@ class _TripCard extends StatelessWidget {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // Title
                                 Text(
                                   trip.title,
                                   style: TextStyle(
@@ -1212,9 +1607,7 @@ class _TripCard extends StatelessWidget {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                const SizedBox(height: 3.5),
-
-                                // Dates & Companions count
+                                const SizedBox(height: 4),
                                 Row(
                                   children: [
                                     const Icon(Icons.calendar_today_rounded, size: 12, color: AppTheme.primary),
@@ -1237,30 +1630,30 @@ class _TripCard extends StatelessWidget {
                                         color: Colors.transparent,
                                         child: Ink(
                                           decoration: BoxDecoration(
-                                            color: AppTheme.primary.withAlpha(18),
-                                            borderRadius: BorderRadius.circular(7),
-                                            border: Border.all(color: AppTheme.primary.withAlpha(50), width: 0.9),
+                                            color: AppTheme.primary.withAlpha(16),
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: Border.all(color: AppTheme.primary.withAlpha(45), width: 0.9),
                                           ),
                                           child: InkWell(
                                             onTap: onMembersTap,
-                                            borderRadius: BorderRadius.circular(7),
+                                            borderRadius: BorderRadius.circular(8),
                                             splashColor: AppTheme.primary.withAlpha(30),
                                             child: Padding(
                                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                               child: Row(
                                                 mainAxisSize: MainAxisSize.min,
                                                 children: [
-                                                  const Icon(Icons.people_outline_rounded, size: 12, color: AppTheme.primary),
-                                                  const SizedBox(width: 3.5),
+                                                  _buildAvatarStack(trip.members, isDark),
+                                                  const SizedBox(width: 4),
                                                   Text(
-                                                    '${trip.members.length} members',
+                                                    '${trip.members.length}',
                                                     style: const TextStyle(
                                                       fontSize: 11,
                                                       color: AppTheme.primary,
                                                       fontWeight: FontWeight.w800,
                                                     ),
                                                   ),
-                                                  const SizedBox(width: 2.5),
+                                                  const SizedBox(width: 2),
                                                   const Icon(Icons.chevron_right_rounded, size: 12, color: AppTheme.primary),
                                                 ],
                                               ),
@@ -1271,57 +1664,13 @@ class _TripCard extends StatelessWidget {
                                     ],
                                   ],
                                 ),
-
-                                if (trip.description != null && trip.description!.isNotEmpty) ...[
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    trip.description!,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      color: isDark ? Colors.grey[400] : AppTheme.textMutedLight,
-                                      height: 1.25,
-                                    ),
-                                  ),
-                                ],
-
-                                if (trip.experienceReview != null && trip.experienceReview!.isNotEmpty) ...[
-                                  const SizedBox(height: 6),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: Colors.amber.withAlpha(isDark ? 25 : 15),
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: Colors.amber.withAlpha(40)),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        const Icon(Icons.rate_review_rounded, size: 12, color: Colors.amber),
-                                        const SizedBox(width: 5),
-                                        Expanded(
-                                          child: Text(
-                                            '"${trip.experienceReview!}"',
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              fontStyle: FontStyle.italic,
-                                              color: isDark ? Colors.amber[200] : const Color(0xFFB45309),
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
                               ],
                             ),
                           ),
-                          const SizedBox(width: 10),
-                          // Middle-Rightmost > Chevron
+                          const SizedBox(width: 8),
+                          // Subtle chevron affordance
                           Container(
-                            padding: const EdgeInsets.all(5.5),
+                            padding: const EdgeInsets.all(5),
                             decoration: BoxDecoration(
                               color: isDark ? Colors.white.withAlpha(12) : const Color(0xFFF1F5F9),
                               shape: BoxShape.circle,
@@ -1332,18 +1681,135 @@ class _TripCard extends StatelessWidget {
                             ),
                             child: Icon(
                               Icons.chevron_right_rounded,
-                              size: 17,
+                              size: 16,
                               color: isDark ? Colors.grey[300] : const Color(0xFF475569),
                             ),
                           ),
                         ],
                       ),
+                      const SizedBox(height: 8),
+
+                      // Key Metrics Summary Chips
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          _buildMetricChip(
+                            icon: Icons.place_rounded,
+                            label: '$stoppagesCount ${stoppagesCount == 1 ? "Stop" : "Stops"}',
+                            color: AppTheme.primary,
+                            isDark: isDark,
+                          ),
+                          if (distanceKm > 0.05)
+                            _buildMetricChip(
+                              icon: Icons.route_rounded,
+                              label: '${distanceKm.toStringAsFixed(1)} km',
+                              color: const Color(0xFF0F766E),
+                              isDark: isDark,
+                            ),
+                          _buildMetricChip(
+                            icon: Icons.receipt_long_rounded,
+                            label: '$expensesCount ${expensesCount == 1 ? "Bill" : "Bills"}',
+                            color: AppTheme.secondary,
+                            isDark: isDark,
+                          ),
+                        ],
+                      ),
+
+                      // Budget Progress Bar (if budget is configured)
+                      if (trip.budget != null && trip.budget! > 0) ...[
+                        const SizedBox(height: 8),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Budget: ${CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency)} / ${CurrencyFormatter.format(trip.budget!, currency: trip.defaultCurrency)}',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                  ),
+                                ),
+                                Text(
+                                  '${(totalSpent / trip.budget! * 100).clamp(0, 999).toStringAsFixed(0)}%',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    color: (totalSpent > trip.budget!)
+                                        ? Colors.redAccent
+                                        : (isDark ? Colors.tealAccent : AppTheme.primary),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 3),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: (totalSpent / trip.budget!).clamp(0.0, 1.0),
+                                minHeight: 4,
+                                backgroundColor: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                                color: (totalSpent > trip.budget!)
+                                    ? Colors.redAccent
+                                    : (isDark ? const Color(0xFF2DD4BF) : AppTheme.primary),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+
+                      if (trip.description != null && trip.description!.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          trip.description!,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: isDark ? Colors.grey[400] : AppTheme.textMutedLight,
+                            height: 1.25,
+                          ),
+                        ),
+                      ],
+
+                      if (trip.experienceReview != null && trip.experienceReview!.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withAlpha(isDark ? 25 : 15),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.amber.withAlpha(40)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.rate_review_rounded, size: 12, color: Colors.amber),
+                              const SizedBox(width: 5),
+                              Expanded(
+                                child: Text(
+                                  '"${trip.experienceReview!}"',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontStyle: FontStyle.italic,
+                                    color: isDark ? Colors.amber[200] : const Color(0xFFB45309),
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
                 const SizedBox(height: 10),
 
-                // Thin border above all 4 subbuttons on the card
+                // Separator
                 Divider(
                   height: 1,
                   thickness: 0.8,
@@ -1351,229 +1817,271 @@ class _TripCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 9),
 
-                // Card Footer: Compact, Tactile Action Pills with Instant Touch Feedback
+                // Launchpad Action Bar: Primary Cockpit Launcher + Quick Utility Shortcuts
                 Row(
                   children: [
-                    // Route Map Pill Button
+                    // Primary Hero Action: Launch Cockpit
                     Expanded(
                       child: Material(
                         color: Colors.transparent,
-                        child: Ink(
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0F766E).withAlpha(isDark ? 28 : 18),
-                            borderRadius: BorderRadius.circular(9),
-                            border: Border.all(
-                              color: const Color(0xFF0F766E).withAlpha(isDark ? 80 : 55),
-                              width: 1.1,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF0F766E).withAlpha(isDark ? 16 : 8),
-                                blurRadius: 2,
-                                offset: const Offset(0, 1),
-                              ),
-                            ],
-                          ),
-                          child: InkWell(
-                            onTap: onRouteTap,
-                            borderRadius: BorderRadius.circular(9),
-                            splashColor: const Color(0xFF0F766E).withAlpha(35),
-                            highlightColor: const Color(0xFF0F766E).withAlpha(20),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(Icons.map_rounded, size: 12.5, color: Color(0xFF0F766E)),
-                                  const SizedBox(width: 3.5),
-                                  Flexible(
-                                    child: Text(
-                                      distanceKm > 0.05
-                                          ? '${distanceKm.toStringAsFixed(1)} km'
-                                          : 'Route',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Color(0xFF0F766E),
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: -0.2,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-
-                    // Stops / Timeline Pill Button
-                    Expanded(
-                      child: Material(
-                        color: Colors.transparent,
-                        child: Ink(
-                          decoration: BoxDecoration(
-                            color: AppTheme.primary.withAlpha(isDark ? 28 : 18),
-                            borderRadius: BorderRadius.circular(9),
-                            border: Border.all(
-                              color: AppTheme.primary.withAlpha(isDark ? 80 : 55),
-                              width: 1.1,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppTheme.primary.withAlpha(isDark ? 16 : 8),
-                                blurRadius: 2,
-                                offset: const Offset(0, 1),
-                              ),
-                            ],
-                          ),
-                          child: InkWell(
-                            onTap: onStopsTap,
-                            borderRadius: BorderRadius.circular(9),
-                            splashColor: AppTheme.primary.withAlpha(35),
-                            highlightColor: AppTheme.primary.withAlpha(20),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(Icons.place_rounded, size: 12.5, color: AppTheme.primary),
-                                  const SizedBox(width: 3.5),
-                                  Flexible(
-                                    child: Text(
-                                      '$stoppagesCount ${stoppagesCount == 1 ? "Stop" : "Stops"}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: AppTheme.primary,
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: -0.2,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-
-                    // Bills & Splits Pill Button
-                    Expanded(
-                      child: Material(
-                        color: Colors.transparent,
-                        child: Ink(
-                          decoration: BoxDecoration(
-                            color: AppTheme.secondary.withAlpha(isDark ? 28 : 18),
-                            borderRadius: BorderRadius.circular(9),
-                            border: Border.all(
-                              color: AppTheme.secondary.withAlpha(isDark ? 80 : 55),
-                              width: 1.1,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppTheme.secondary.withAlpha(isDark ? 16 : 8),
-                                blurRadius: 2,
-                                offset: const Offset(0, 1),
-                              ),
-                            ],
-                          ),
-                          child: InkWell(
-                            onTap: onBillsTap,
-                            borderRadius: BorderRadius.circular(9),
-                            splashColor: AppTheme.secondary.withAlpha(35),
-                            highlightColor: AppTheme.secondary.withAlpha(20),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(Icons.receipt_rounded, size: 12.5, color: AppTheme.secondary),
-                                  const SizedBox(width: 3.5),
-                                  Flexible(
-                                    child: Text(
-                                      '$expensesCount ${expensesCount == 1 ? "Bill" : "Bills"}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: AppTheme.secondary,
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: -0.2,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    // Settle Balances Pill Button (Group & Family mode)
-                    if (onSettleTap != null) ...[
-                      const SizedBox(width: 5),
-                      Expanded(
-                        child: Material(
-                          color: Colors.transparent,
-                          child: Ink(
+                        child: InkWell(
+                          onTap: onOpenCockpit,
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8.5),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFD97706).withAlpha(isDark ? 28 : 18),
-                              borderRadius: BorderRadius.circular(9),
+                              gradient: isActiveCockpit
+                                  ? const LinearGradient(
+                                      colors: [Color(0xFF0D9488), Color(0xFF0F766E)],
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                    )
+                                  : LinearGradient(
+                                      colors: isDark
+                                          ? [const Color(0xFF1E293B), const Color(0xFF0F172A)]
+                                          : [const Color(0xFFF1F5F9), const Color(0xFFE2E8F0)],
+                                    ),
+                              borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: const Color(0xFFD97706).withAlpha(isDark ? 80 : 55),
-                                width: 1.1,
+                                color: isActiveCockpit
+                                    ? const Color(0xFF14B8A6)
+                                    : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                                width: isActiveCockpit ? 1.2 : 0.9,
                               ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: const Color(0xFFD97706).withAlpha(isDark ? 16 : 8),
-                                  blurRadius: 2,
-                                  offset: const Offset(0, 1),
+                              boxShadow: isActiveCockpit
+                                  ? [
+                                      BoxShadow(
+                                        color: const Color(0xFF0D9488).withAlpha(80),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ]
+                                  : null,
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isActiveCockpit ? Icons.card_travel_rounded : Icons.explore_rounded,
+                                  size: 15,
+                                  color: isActiveCockpit
+                                      ? Colors.white
+                                      : (isDark ? Colors.tealAccent : const Color(0xFF0D9488)),
+                                ),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    isActiveCockpit ? 'Active Live' : (isRunning ? 'Launch Live' : 'Open Live'),
+                                    style: TextStyle(
+                                      color: isActiveCockpit
+                                          ? Colors.white
+                                          : (isDark ? Colors.white : AppTheme.textMainLight),
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.2,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                Icon(
+                                  Icons.arrow_forward_rounded,
+                                  size: 13,
+                                  color: isActiveCockpit
+                                      ? Colors.white70
+                                      : (isDark ? Colors.grey[400] : const Color(0xFF64748B)),
                                 ),
                               ],
                             ),
-                            child: InkWell(
-                              onTap: onSettleTap,
-                              borderRadius: BorderRadius.circular(9),
-                              splashColor: const Color(0xFFD97706).withAlpha(35),
-                              highlightColor: const Color(0xFFD97706).withAlpha(20),
-                              child: const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 7, horizontal: 4),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.account_balance_rounded, size: 12.5, color: Color(0xFFD97706)),
-                                    SizedBox(width: 3.5),
-                                    Flexible(
-                                      child: Text(
-                                        'Settle',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: Color(0xFFD97706),
-                                          fontSize: 10.5,
-                                          fontWeight: FontWeight.w800,
-                                          letterSpacing: -0.2,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
                           ),
                         ),
                       ),
+                    ),
+                    const SizedBox(width: 8),
+
+                    // Quick Utility 1: Route Map
+                    _buildActionIconButton(
+                      icon: Icons.map_rounded,
+                      color: const Color(0xFF0F766E),
+                      tooltip: distanceKm > 0.05 ? 'Route Map (${distanceKm.toStringAsFixed(1)} km)' : 'Route Map',
+                      onTap: onRouteTap,
+                      isDark: isDark,
+                    ),
+                    const SizedBox(width: 6),
+
+                    // Quick Utility 2: Stoppages
+                    _buildActionIconButton(
+                      icon: Icons.place_rounded,
+                      color: AppTheme.primary,
+                      tooltip: 'Stoppages ($stoppagesCount)',
+                      badgeCount: stoppagesCount,
+                      onTap: onStopsTap,
+                      isDark: isDark,
+                    ),
+
+                    // Quick Utility 3: Settle Balances (if group/family)
+                    if (onSettleTap != null) ...[
+                      const SizedBox(width: 6),
+                      _buildActionIconButton(
+                        icon: Icons.account_balance_wallet_rounded,
+                        color: const Color(0xFFD97706),
+                        tooltip: 'Settle Balances',
+                        onTap: onSettleTap,
+                        isDark: isDark,
+                      ),
                     ],
+
+                    const SizedBox(width: 6),
+
+                    // Quick Utility 4: Full Trip Management / Details
+                    _buildActionIconButton(
+                      icon: Icons.tune_rounded,
+                      color: isDark ? Colors.grey[300]! : const Color(0xFF475569),
+                      tooltip: 'Trip Management & Tabs',
+                      onTap: onTap,
+                      isDark: isDark,
+                    ),
                   ],
                 ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static Widget _buildAvatarStack(List<TripMember> members, bool isDark) {
+    if (members.isEmpty) return const SizedBox.shrink();
+    final displayed = members.take(3).toList();
+    final remaining = members.length - displayed.length;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (int i = 0; i < displayed.length; i++)
+          Align(
+            widthFactor: 0.72,
+            child: UserAvatar(
+              name: displayed[i].name,
+              colorHex: displayed[i].colorHex,
+              size: 20,
+              fontSize: 9,
+              border: Border.all(
+                color: isDark ? const Color(0xFF161E2E) : Colors.white,
+                width: 1.4,
+              ),
+            ),
+          ),
+        if (remaining > 0)
+          Align(
+            widthFactor: 0.72,
+            child: Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isDark ? const Color(0xFF161E2E) : Colors.white,
+                  width: 1.4,
+                ),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                '+$remaining',
+                style: TextStyle(
+                  color: isDark ? Colors.white70 : const Color(0xFF334155),
+                  fontSize: 8,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  static Widget _buildMetricChip({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required bool isDark,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withAlpha(isDark ? 28 : 16),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withAlpha(isDark ? 70 : 40), width: 0.9),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 11, color: color),
+          const SizedBox(width: 3.5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: isDark ? Colors.grey[200] : const Color(0xFF334155),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static Widget _buildActionIconButton({
+    required IconData icon,
+    required Color color,
+    required String tooltip,
+    required VoidCallback? onTap,
+    int? badgeCount,
+    required bool isDark,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: color.withAlpha(isDark ? 28 : 16),
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: onTap != null
+              ? () {
+                  HapticFeedback.lightImpact();
+                  onTap();
+                }
+              : null,
+          borderRadius: BorderRadius.circular(10),
+          splashColor: color.withAlpha(40),
+          highlightColor: color.withAlpha(25),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7.5),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: color.withAlpha(isDark ? 70 : 45),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 16, color: color),
+                if (badgeCount != null && badgeCount > 0) ...[
+                  const SizedBox(width: 4),
+                  Text(
+                    '$badgeCount',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                      color: color,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

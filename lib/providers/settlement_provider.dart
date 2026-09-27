@@ -1,14 +1,19 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/services/cloud_trip_sync_service.dart';
+import '../core/services/firestore_sync_service.dart';
 import '../core/services/local_storage_service.dart';
+import '../core/services/offline_sync_engine.dart';
+import '../core/services/proximity_alert_service.dart';
 import '../core/services/trip_share_service.dart';
+import '../core/services/user_service.dart';
 import '../core/utils/debt_simplifier.dart';
+import '../models/proximity_alert.dart';
 import '../models/settlement.dart';
+import '../models/sync_mutation.dart';
+import '../models/trip_audit_log.dart';
+import 'audit_log_provider.dart';
 import 'expense_provider.dart';
 import 'trip_provider.dart';
-
-import '../models/proximity_alert.dart';
-import '../core/services/proximity_alert_service.dart';
 
 class SettlementNotifier extends StateNotifier<List<Settlement>> {
   final LocalStorageService _storage;
@@ -32,15 +37,59 @@ class SettlementNotifier extends StateNotifier<List<Settlement>> {
     state = [];
   }
 
+  /// Ingests remote settlement from Firestore subscription
+  void receiveRemoteSettlement(Settlement settlement) {
+    final exists = state.any((s) => s.id == settlement.id);
+    if (exists) {
+      state = state.map((s) => s.id == settlement.id ? settlement : s).toList();
+    } else {
+      state = [settlement, ...state];
+    }
+    _storage.saveAllSettlements(state);
+  }
+
+  /// Removes settlement from local state without cloud push (e.g. on remote removal)
+  void deleteSettlementLocally(String settlementId) {
+    state = state.where((s) => s.id != settlementId).toList();
+    _storage.saveAllSettlements(state);
+  }
+
   Future<void> addSettlement(Settlement settlement) async {
-    state = [settlement, ...state];
+    state = [settlement, ...state.where((s) => s.id != settlement.id)];
     await _storage.saveAllSettlements(state);
     _syncToCloud(settlement.tripId);
+
+    try {
+      _ref.read(firestoreSyncServiceProvider).pushSettlement(settlement);
+    } catch (_) {}
+
+    try {
+      _ref.read(offlineSyncEngineProvider).enqueueMutation(
+        action: MutationAction.addSettlement,
+        entityType: 'settlement',
+        entityId: settlement.id,
+        tripId: settlement.tripId,
+        payload: settlement.toJson(),
+      );
+    } catch (_) {}
+
     try {
       final trips = _storage.getTrips();
       final trip = trips.where((t) => t.id == settlement.tripId).firstOrNull;
-      final payerName = trip?.getMember(settlement.payerMemberId)?.name ?? 'Member';
-      final payeeName = trip?.getMember(settlement.receiverMemberId)?.name ?? 'Member';
+      final payerName = trip?.getMemberName(settlement.payerMemberId) ?? 'Member';
+      final payeeName = trip?.getMemberName(settlement.receiverMemberId) ?? 'Member';
+
+      _ref.read(allAuditLogsProvider.notifier).logAction(TripAuditLog(
+        id: 'settle_${settlement.id}',
+        tripId: settlement.tripId,
+        actionType: 'settlement',
+        itemTitle: 'Settlement: $payerName → $payeeName (${settlement.currency} ${settlement.amount.toStringAsFixed(0)})',
+        performedByMemberId: settlement.payerMemberId,
+        performedByName: payerName,
+        timestamp: settlement.settledAt,
+        changeDetails: 'Payment recorded via ${settlement.paymentMethod}',
+      ));
+
       _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
         tripId: settlement.tripId,
         type: AlertType.settlementRecorded,
@@ -54,6 +103,37 @@ class SettlementNotifier extends StateNotifier<List<Settlement>> {
     state = state.map((s) => s.id == updated.id ? updated : s).toList();
     await _storage.saveAllSettlements(state);
     _syncToCloud(updated.tripId);
+
+    try {
+      _ref.read(firestoreSyncServiceProvider).pushSettlement(updated);
+    } catch (_) {}
+
+    try {
+      _ref.read(offlineSyncEngineProvider).enqueueMutation(
+        action: MutationAction.updateSettlement,
+        entityType: 'settlement',
+        entityId: updated.id,
+        tripId: updated.tripId,
+        payload: updated.toJson(),
+      );
+    } catch (_) {}
+
+    try {
+      final trips = _storage.getTrips();
+      final trip = trips.where((t) => t.id == updated.tripId).firstOrNull;
+      final payerName = trip?.getMemberName(updated.payerMemberId) ?? 'Member';
+
+      _ref.read(allAuditLogsProvider.notifier).logAction(TripAuditLog(
+        id: 'settle_edit_${updated.id}_${DateTime.now().millisecondsSinceEpoch}',
+        tripId: updated.tripId,
+        actionType: 'edit_settlement',
+        itemTitle: 'Updated Settlement: ${updated.currency} ${updated.amount.toStringAsFixed(0)}',
+        performedByMemberId: updated.payerMemberId,
+        performedByName: payerName,
+        timestamp: DateTime.now(),
+        changeDetails: 'Payment updated via ${updated.paymentMethod}',
+      ));
+    } catch (_) {}
   }
 
   Future<void> deleteSettlement(String settlementId) async {
@@ -61,6 +141,39 @@ class SettlementNotifier extends StateNotifier<List<Settlement>> {
     state = state.where((s) => s.id != settlementId).toList();
     await _storage.saveAllSettlements(state);
     _syncToCloud(existing.tripId);
+
+    try {
+      _ref.read(firestoreSyncServiceProvider).deleteSettlement(existing.tripId, settlementId);
+    } catch (_) {}
+
+    try {
+      _ref.read(offlineSyncEngineProvider).enqueueMutation(
+        action: MutationAction.deleteSettlement,
+        entityType: 'settlement',
+        entityId: settlementId,
+        tripId: existing.tripId,
+        payload: {'id': settlementId},
+      );
+    } catch (_) {}
+
+    try {
+      final trips = _storage.getTrips();
+      final trip = trips.where((t) => t.id == existing.tripId).firstOrNull;
+      final fromName = trip?.getMemberName(existing.payerMemberId) ?? 'Member';
+      final toName = trip?.getMemberName(existing.receiverMemberId) ?? 'Member';
+      final currentUser = UserService.getCurrentUser();
+
+      _ref.read(allAuditLogsProvider.notifier).logAction(TripAuditLog(
+        id: 'settle_del_${settlementId}_${DateTime.now().millisecondsSinceEpoch}',
+        tripId: existing.tripId,
+        actionType: 'delete_settlement',
+        itemTitle: 'Deleted Settlement (${existing.currency} ${existing.amount.toStringAsFixed(0)})',
+        performedByMemberId: currentUser.id,
+        performedByName: currentUser.displayName,
+        timestamp: DateTime.now(),
+        changeDetails: 'Settlement deleted between $fromName and $toName',
+      ));
+    } catch (_) {}
   }
 
   void _syncToCloud(String tripId) {
