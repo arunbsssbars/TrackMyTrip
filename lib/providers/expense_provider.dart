@@ -45,26 +45,26 @@ class ExpenseNotifier extends StateNotifier<List<Expense>> {
     state = [expense, ...state.where((e) => e.id != expense.id)];
     await _storage.saveAllExpenses(state);
 
-    try {
-      _ref.read(firestoreSyncServiceProvider).pushExpense(expense);
-    } catch (_) {}
-
-    final payerName = trip.getMember(expense.paidByMemberId)?.name ?? 'A companion';
-
-    try {
-      _ref.read(allAuditLogsProvider.notifier).logAction(TripAuditLog(
-        id: 'exp_${expense.id}',
-        tripId: expense.tripId,
-        actionType: 'add_expense',
-        itemTitle: '${expense.title} (${expense.currency} ${expense.totalAmount.toStringAsFixed(0)})',
-        performedByMemberId: expense.paidByMemberId,
-        performedByName: payerName,
-        timestamp: expense.createdAt,
-        changeDetails: 'Expense registered in category ${expense.category}',
-      ));
-    } catch (_) {}
-
     if (broadcast) {
+      try {
+        _ref.read(firestoreSyncServiceProvider).pushExpense(expense);
+      } catch (_) {}
+
+      final payerName = trip.getMember(expense.paidByMemberId)?.name ?? 'A companion';
+
+      try {
+        _ref.read(allAuditLogsProvider.notifier).logAction(TripAuditLog(
+          id: 'exp_${expense.id}',
+          tripId: expense.tripId,
+          actionType: 'add_expense',
+          itemTitle: '${expense.title} (${expense.currency} ${expense.totalAmount.toStringAsFixed(0)})',
+          performedByMemberId: expense.paidByMemberId,
+          performedByName: payerName,
+          timestamp: expense.createdAt,
+          changeDetails: 'Expense registered in category ${expense.category}',
+        ));
+      } catch (_) {}
+
       try {
         _ref.read(realtimeSyncServiceProvider).broadcastNewExpense(expense);
       } catch (_) {}
@@ -78,17 +78,17 @@ class ExpenseNotifier extends StateNotifier<List<Expense>> {
           senderName: payerName,
         );
       } catch (_) {}
-    }
 
-    try {
-      _ref.read(offlineSyncEngineProvider).enqueueMutation(
-        action: MutationAction.addExpense,
-        entityType: 'expense',
-        entityId: expense.id,
-        tripId: expense.tripId,
-        payload: expense.toJson(),
-      );
-    } catch (_) {}
+      try {
+        _ref.read(offlineSyncEngineProvider).enqueueMutation(
+          action: MutationAction.addExpense,
+          entityType: 'expense',
+          entityId: expense.id,
+          tripId: expense.tripId,
+          payload: expense.toJson(),
+        );
+      } catch (_) {}
+    }
   }
 
   Future<void> updateExpense(Expense updatedExpense) async {

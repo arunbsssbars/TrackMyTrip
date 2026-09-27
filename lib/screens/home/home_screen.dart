@@ -957,11 +957,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         HapticFeedback.lightImpact();
                         _navigateToTripDetail(trip);
                       },
-                      onStopsTap: () => _navigateToTripDetail(trip, initialTabIndex: 0),
-                      onRouteTap: () => _navigateToTripDetail(trip, initialTabIndex: 1),
-                      onMembersTap: () => _navigateToTripDetail(trip, initialTabIndex: 2),
                       onBillsTap: () => _navigateToTripDetail(trip, initialTabIndex: 3),
-                      onSettleTap: trip.isSolo ? null : () => _navigateToTripDetail(trip, initialTabIndex: 4),
+                      onMembersTap: () => _navigateToTripDetail(trip, initialTabIndex: 2),
                     ),
                   );
                 },
@@ -1282,9 +1279,6 @@ class _TripCard extends StatelessWidget {
   final VoidCallback onOpenCockpit;
   final VoidCallback onTap;
   final VoidCallback onBillsTap;
-  final VoidCallback onStopsTap;
-  final VoidCallback onRouteTap;
-  final VoidCallback? onSettleTap;
   final VoidCallback onMembersTap;
 
   const _TripCard({
@@ -1297,9 +1291,6 @@ class _TripCard extends StatelessWidget {
     required this.onOpenCockpit,
     required this.onTap,
     required this.onBillsTap,
-    required this.onStopsTap,
-    required this.onRouteTap,
-    this.onSettleTap,
     required this.onMembersTap,
   });
 
@@ -1816,135 +1807,84 @@ class _TripCard extends StatelessWidget {
                   thickness: 0.8,
                   color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0),
                 ),
-                const SizedBox(height: 9),
+                const SizedBox(height: 8),
 
-                // Launchpad Action Bar: Primary Cockpit Launcher + Quick Utility Shortcuts
-                Row(
-                  children: [
-                    // Primary Hero Action: Launch Cockpit
-                    Expanded(
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: onOpenCockpit,
-                          borderRadius: BorderRadius.circular(12),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8.5),
-                            decoration: BoxDecoration(
-                              gradient: isActiveCockpit
-                                  ? const LinearGradient(
-                                      colors: [Color(0xFF0D9488), Color(0xFF0F766E)],
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                    )
-                                  : LinearGradient(
-                                      colors: isDark
-                                          ? [const Color(0xFF1E293B), const Color(0xFF0F172A)]
-                                          : [const Color(0xFFF1F5F9), const Color(0xFFE2E8F0)],
-                                    ),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: isActiveCockpit
-                                    ? const Color(0xFF14B8A6)
-                                    : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
-                                width: isActiveCockpit ? 1.2 : 0.9,
+                // Clean Action Bar: Single unified modern Cockpit / Details button
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: onOpenCockpit,
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                      decoration: BoxDecoration(
+                        gradient: isActiveCockpit
+                            ? const LinearGradient(
+                                colors: [Color(0xFF0D9488), Color(0xFF0F766E)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              )
+                            : LinearGradient(
+                                colors: isDark
+                                    ? [const Color(0xFF1E293B), const Color(0xFF0F172A)]
+                                    : [const Color(0xFFF1F5F9), const Color(0xFFE2E8F0)],
                               ),
-                              boxShadow: isActiveCockpit
-                                  ? [
-                                      BoxShadow(
-                                        color: const Color(0xFF0D9488).withAlpha(80),
-                                        blurRadius: 8,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                    ]
-                                  : null,
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  isActiveCockpit ? Icons.card_travel_rounded : Icons.explore_rounded,
-                                  size: 15,
-                                  color: isActiveCockpit
-                                      ? Colors.white
-                                      : (isDark ? Colors.tealAccent : const Color(0xFF0D9488)),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: isActiveCockpit
+                              ? const Color(0xFF14B8A6)
+                              : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                          width: isActiveCockpit ? 1.2 : 0.8,
+                        ),
+                        boxShadow: isActiveCockpit
+                            ? [
+                                BoxShadow(
+                                  color: const Color(0xFF0D9488).withAlpha(60),
+                                  blurRadius: 6,
+                                  offset: const Offset(0, 2),
                                 ),
-                                const SizedBox(width: 6),
-                                Flexible(
-                                  child: Text(
-                                    isActiveCockpit ? 'Active Live' : (isRunning ? 'Launch Live' : 'Open Live'),
-                                    style: TextStyle(
-                                      color: isActiveCockpit
-                                          ? Colors.white
-                                          : (isDark ? Colors.white : AppTheme.textMainLight),
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: -0.2,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                Icon(
-                                  Icons.arrow_forward_rounded,
-                                  size: 13,
-                                  color: isActiveCockpit
-                                      ? Colors.white70
-                                      : (isDark ? Colors.grey[400] : const Color(0xFF64748B)),
-                                ),
-                              ],
+                              ]
+                            : null,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            isActiveCockpit
+                                ? Icons.card_travel_rounded
+                                : (isEnded ? Icons.visibility_rounded : Icons.explore_rounded),
+                            size: 14,
+                            color: isActiveCockpit
+                                ? Colors.white
+                                : (isDark ? Colors.tealAccent : const Color(0xFF0D9488)),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            isActiveCockpit
+                                ? 'Active Cockpit (Live)'
+                                : (isEnded ? 'View Trip Details & Summary' : 'Open Trip Cockpit'),
+                            style: TextStyle(
+                              color: isActiveCockpit
+                                  ? Colors.white
+                                  : (isDark ? Colors.white : AppTheme.textMainLight),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.2,
                             ),
                           ),
-                        ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.arrow_forward_rounded,
+                            size: 13,
+                            color: isActiveCockpit
+                                ? Colors.white70
+                                : (isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 8),
-
-                    // Quick Utility 1: Route Map
-                    _buildActionIconButton(
-                      icon: Icons.map_rounded,
-                      color: const Color(0xFF0F766E),
-                      tooltip: distanceKm > 0.05 ? 'Route Map (${distanceKm.toStringAsFixed(1)} km)' : 'Route Map',
-                      onTap: onRouteTap,
-                      isDark: isDark,
-                    ),
-                    const SizedBox(width: 6),
-
-                    // Quick Utility 2: Stoppages
-                    _buildActionIconButton(
-                      icon: Icons.place_rounded,
-                      color: AppTheme.primary,
-                      tooltip: 'Stoppages ($stoppagesCount)',
-                      badgeCount: stoppagesCount,
-                      onTap: onStopsTap,
-                      isDark: isDark,
-                    ),
-
-                    // Quick Utility 3: Settle Balances (if group/family)
-                    if (onSettleTap != null) ...[
-                      const SizedBox(width: 6),
-                      _buildActionIconButton(
-                        icon: Icons.account_balance_wallet_rounded,
-                        color: const Color(0xFFD97706),
-                        tooltip: 'Settle Balances',
-                        onTap: onSettleTap,
-                        isDark: isDark,
-                      ),
-                    ],
-
-                    const SizedBox(width: 6),
-
-                    // Quick Utility 4: Full Trip Management / Details
-                    _buildActionIconButton(
-                      icon: Icons.tune_rounded,
-                      color: isDark ? Colors.grey[300]! : const Color(0xFF475569),
-                      tooltip: 'Trip Management & Tabs',
-                      onTap: onTap,
-                      isDark: isDark,
-                    ),
-                  ],
+                  ),
                 ),
               ],
             ),
@@ -2032,61 +1972,6 @@ class _TripCard extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  static Widget _buildActionIconButton({
-    required IconData icon,
-    required Color color,
-    required String tooltip,
-    required VoidCallback? onTap,
-    int? badgeCount,
-    required bool isDark,
-  }) {
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: color.withAlpha(isDark ? 28 : 16),
-        borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          onTap: onTap != null
-              ? () {
-                  HapticFeedback.lightImpact();
-                  onTap();
-                }
-              : null,
-          borderRadius: BorderRadius.circular(10),
-          splashColor: color.withAlpha(40),
-          highlightColor: color.withAlpha(25),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7.5),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: color.withAlpha(isDark ? 70 : 45),
-                width: 1,
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 16, color: color),
-                if (badgeCount != null && badgeCount > 0) ...[
-                  const SizedBox(width: 4),
-                  Text(
-                    '$badgeCount',
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w800,
-                      color: color,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }

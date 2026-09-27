@@ -264,13 +264,16 @@ class ProximityAlertService extends ChangeNotifier {
       );
 
       if (distance <= _stoppageArrivalRadiusMeters) {
-        final debounceKey = 'arrival_${stop.id}';
+        final alertId = 'arrival_${tripId}_${stop.id}';
+        if (_alerts.any((a) => a.id == alertId)) continue;
+
+        final debounceKey = 'arrival_${tripId}_${stop.id}';
         final lastSent = _debounceTimestamps[debounceKey];
-        if (lastSent == null || DateTime.now().difference(lastSent).inMinutes >= 20) {
+        if (lastSent == null || DateTime.now().difference(lastSent).inHours >= 12) {
           _debounceTimestamps[debounceKey] = DateTime.now();
 
           final alert = ProximityAlert(
-            id: 'alert_${const Uuid().v4().substring(0, 8)}',
+            id: alertId,
             tripId: tripId,
             type: AlertType.stoppageArrival,
             title: 'Arrived at Stop',

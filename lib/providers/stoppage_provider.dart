@@ -34,52 +34,52 @@ class StoppageNotifier extends StateNotifier<List<Stoppage>> {
   }
 
   Future<void> addStoppage(Stoppage stoppage, {bool broadcast = true}) async {
-    state = [...state, stoppage];
+    state = [stoppage, ...state.where((s) => s.id != stoppage.id)];
     await _storage.saveAllStoppages(state);
-
-    try {
-      _ref.read(firestoreSyncServiceProvider).pushStoppage(stoppage);
-    } catch (_) {}
-
-    try {
-      final trip = _storage.getTrips().where((t) => t.id == stoppage.tripId).firstOrNull;
-      final creator = trip?.currentUserMember ?? (trip?.members.isNotEmpty == true ? trip!.members.first : null);
-      final authorName = creator?.name ?? 'Companion';
-
-      _ref.read(allAuditLogsProvider.notifier).logAction(TripAuditLog(
-        id: 'stop_${stoppage.id}',
-        tripId: stoppage.tripId,
-        actionType: 'add_stoppage',
-        itemTitle: stoppage.name,
-        performedByMemberId: stoppage.createdBy.isNotEmpty ? stoppage.createdBy : (creator?.id ?? 'usr_me'),
-        performedByName: authorName,
-        timestamp: stoppage.arrivedAt,
-        changeDetails: 'Waypoint stop marked on itinerary',
-      ));
-
-      _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
-        tripId: stoppage.tripId,
-        type: AlertType.stoppageArrival,
-        title: 'New Waypoint Added',
-        message: '$authorName added stop "${stoppage.name}"',
-      );
-    } catch (_) {}
 
     if (broadcast) {
       try {
+        _ref.read(firestoreSyncServiceProvider).pushStoppage(stoppage);
+      } catch (_) {}
+
+      try {
+        final trip = _storage.getTrips().where((t) => t.id == stoppage.tripId).firstOrNull;
+        final creator = trip?.currentUserMember ?? (trip?.members.isNotEmpty == true ? trip!.members.first : null);
+        final authorName = creator?.name ?? 'Companion';
+
+        _ref.read(allAuditLogsProvider.notifier).logAction(TripAuditLog(
+          id: 'stop_${stoppage.id}',
+          tripId: stoppage.tripId,
+          actionType: 'add_stoppage',
+          itemTitle: stoppage.name,
+          performedByMemberId: stoppage.createdBy.isNotEmpty ? stoppage.createdBy : (creator?.id ?? 'usr_me'),
+          performedByName: authorName,
+          timestamp: stoppage.arrivedAt,
+          changeDetails: 'Waypoint stop marked on itinerary',
+        ));
+
+        _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
+          tripId: stoppage.tripId,
+          type: AlertType.stoppageArrival,
+          title: 'New Waypoint Added',
+          message: '$authorName added stop "${stoppage.name}"',
+        );
+      } catch (_) {}
+
+      try {
         _ref.read(realtimeSyncServiceProvider).broadcastNewStoppage(stoppage);
       } catch (_) {}
-    }
 
-    try {
-      _ref.read(offlineSyncEngineProvider).enqueueMutation(
-        action: MutationAction.addStoppage,
-        entityType: 'stoppage',
-        entityId: stoppage.id,
-        tripId: stoppage.tripId,
-        payload: stoppage.toJson(),
-      );
-    } catch (_) {}
+      try {
+        _ref.read(offlineSyncEngineProvider).enqueueMutation(
+          action: MutationAction.addStoppage,
+          entityType: 'stoppage',
+          entityId: stoppage.id,
+          tripId: stoppage.tripId,
+          payload: stoppage.toJson(),
+        );
+      } catch (_) {}
+    }
   }
 
   Future<void> updateStoppage(Stoppage updatedStoppage) async {

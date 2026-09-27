@@ -221,11 +221,11 @@ class TripAnalyticsScreen extends ConsumerWidget {
                         ),
                         const SizedBox(height: 20),
                         SizedBox(
-                          height: 200,
+                          height: 220,
                           child: PieChart(
                             PieChartData(
                               sectionsSpace: 3,
-                              centerSpaceRadius: 40,
+                              centerSpaceRadius: 36,
                               sections: sortedCategories.map((entry) {
                                 final index = sortedCategories.indexOf(entry);
                                 final color = categoryColors[index % categoryColors.length];
@@ -234,12 +234,36 @@ class TripAnalyticsScreen extends ConsumerWidget {
                                   color: color,
                                   value: entry.value,
                                   title: percentage >= 5 ? '${percentage.toStringAsFixed(0)}%' : '',
-                                  radius: 50,
+                                  radius: 52,
                                   titleStyle: const TextStyle(
                                     fontSize: 11.5,
-                                    fontWeight: FontWeight.bold,
+                                    fontWeight: FontWeight.w900,
                                     color: Colors.white,
+                                    shadows: [Shadow(color: Colors.black45, blurRadius: 3)],
                                   ),
+                                  badgeWidget: percentage >= 8
+                                      ? Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: BoxDecoration(
+                                            color: color,
+                                            shape: BoxShape.circle,
+                                            border: Border.all(color: Colors.white, width: 1.5),
+                                            boxShadow: const [
+                                              BoxShadow(
+                                                color: Colors.black38,
+                                                blurRadius: 4,
+                                                offset: Offset(0, 1),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Icon(
+                                            _getCategoryIcon(entry.key),
+                                            size: 13,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                      : null,
+                                  badgePositionPercentageOffset: 1.05,
                                 );
                               }).toList(),
                             ),
@@ -525,11 +549,11 @@ class TripAnalyticsScreen extends ConsumerWidget {
                         ),
                         const SizedBox(height: 20),
                         SizedBox(
-                          height: 200,
+                          height: 220,
                           child: PieChart(
                             PieChartData(
                               sectionsSpace: 3,
-                              centerSpaceRadius: 40,
+                              centerSpaceRadius: 36,
                               sections: sortedCategories.map((entry) {
                                 final index = sortedCategories.indexOf(entry);
                                 final color = categoryColors[index % categoryColors.length];
@@ -538,12 +562,36 @@ class TripAnalyticsScreen extends ConsumerWidget {
                                   color: color,
                                   value: entry.value,
                                   title: percentage >= 5 ? '${percentage.toStringAsFixed(0)}%' : '',
-                                  radius: 50,
+                                  radius: 52,
                                   titleStyle: const TextStyle(
                                     fontSize: 11.5,
-                                    fontWeight: FontWeight.bold,
+                                    fontWeight: FontWeight.w900,
                                     color: Colors.white,
+                                    shadows: [Shadow(color: Colors.black45, blurRadius: 3)],
                                   ),
+                                  badgeWidget: percentage >= 8
+                                      ? Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: BoxDecoration(
+                                            color: color,
+                                            shape: BoxShape.circle,
+                                            border: Border.all(color: Colors.white, width: 1.5),
+                                            boxShadow: const [
+                                              BoxShadow(
+                                                color: Colors.black38,
+                                                blurRadius: 4,
+                                                offset: Offset(0, 1),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Icon(
+                                            _getCategoryIcon(entry.key),
+                                            size: 13,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                      : null,
+                                  badgePositionPercentageOffset: 1.05,
                                 );
                               }).toList(),
                             ),
@@ -758,5 +806,9 @@ class TripAnalyticsScreen extends ConsumerWidget {
         Text(label, style: TextStyle(color: color.withAlpha(180), fontSize: 10)),
       ],
     );
+  }
+
+  IconData _getCategoryIcon(String category) {
+    return AppConstants.getExpenseIcon(category);
   }
 }

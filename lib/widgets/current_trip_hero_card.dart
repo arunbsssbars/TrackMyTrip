@@ -495,30 +495,34 @@ class CurrentTripHeroCard extends StatelessWidget {
                   const SizedBox(height: 3),
                   Wrap(
                     spacing: 8,
-                    runSpacing: 2,
+                    runSpacing: 4,
                     children: sortedCategories.take(3).map((entry) {
                       final pct = (entry.value / totalSpent * 100).toInt();
-                      return Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black12,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _getCategoryIcon(entry.key),
+                              size: 11,
                               color: _getCategoryColor(entry.key),
                             ),
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            '${entry.key} ($pct%)',
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
+                            const SizedBox(width: 4),
+                            Text(
+                              '${entry.key} ($pct%)',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       );
                     }).toList(),
                   ),
@@ -530,6 +534,32 @@ class CurrentTripHeroCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  static IconData _getCategoryIcon(String category) {
+    final lower = category.toLowerCase();
+    if (lower.contains('food') || lower.contains('cafe') || lower.contains('dining') || lower.contains('drink')) {
+      return Icons.restaurant_rounded;
+    }
+    if (lower.contains('fuel') || lower.contains('gas') || lower.contains('petrol')) {
+      return Icons.local_gas_station_rounded;
+    }
+    if (lower.contains('hotel') || lower.contains('stay') || lower.contains('lodge')) {
+      return Icons.bed_rounded;
+    }
+    if (lower.contains('transit') || lower.contains('transport') || lower.contains('toll')) {
+      return Icons.directions_car_rounded;
+    }
+    if (lower.contains('activity') || lower.contains('ticket') || lower.contains('tour')) {
+      return Icons.confirmation_number_rounded;
+    }
+    if (lower.contains('shop') || lower.contains('store')) {
+      return Icons.shopping_cart_rounded;
+    }
+    if (lower.contains('snack') || lower.contains('coffee')) {
+      return Icons.coffee_rounded;
+    }
+    return Icons.receipt_long_rounded;
   }
 
   Color _getCategoryColor(String category) {
