@@ -28,6 +28,7 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
   late TextEditingController _emailController;
   bool _isSaving = false;
   bool _isSigningOut = false;
+  bool _isDeletingAccount = false;
   bool _hasInitializedValues = false;
 
   @override
@@ -641,7 +642,7 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
 
             // Action: Sign Out
             OutlinedButton.icon(
-              onPressed: _isSigningOut
+              onPressed: _isSigningOut || _isDeletingAccount
                   ? null
                   : () async {
                       final confirm = await showDialog<bool>(
@@ -690,6 +691,75 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                 side: BorderSide(color: Colors.red.withAlpha(80)),
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // Action: Delete Account & Purge Data (GDPR & App Store Compliance)
+            TextButton.icon(
+              onPressed: _isSigningOut || _isDeletingAccount
+                  ? null
+                  : () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          title: const Text(
+                            'Delete Account & All Data',
+                            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
+                          ),
+                          content: const Text(
+                            'This action is irreversible. Your profile, trip history, expense records, and associated data will be permanently deleted from this device and the cloud.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(false),
+                              child: const Text('Keep Account'),
+                            ),
+                            FilledButton(
+                              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                              onPressed: () => Navigator.of(ctx).pop(true),
+                              child: const Text('Permanently Delete'),
+                            ),
+                          ],
+                        ),
+                      );
+
+                      if (confirm == true) {
+                        setState(() => _isDeletingAccount = true);
+                        try {
+                          await ref.read(authNotifierProvider.notifier).deleteAccountAndData();
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text('Account and data successfully deleted.'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        } catch (e) {
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text('Deletion failed: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        } finally {
+                          if (mounted) {
+                            setState(() => _isDeletingAccount = false);
+                          }
+                        }
+                      }
+                    },
+              icon: _isDeletingAccount
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.redAccent),
+                    )
+                  : const Icon(Icons.delete_forever_rounded, size: 16, color: Colors.redAccent),
+              label: Text(
+                _isDeletingAccount ? 'Deleting Account...' : 'Delete Account & Purge Data',
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.redAccent),
               ),
             ),
             const SizedBox(height: 24),

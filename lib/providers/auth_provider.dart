@@ -208,6 +208,21 @@ class AuthNotifier extends StateNotifier<AsyncValue<AuthUser?>> {
       appNavigatorKey.currentState?.popUntil((route) => route.isFirst);
     } catch (_) {}
   }
+
+  Future<void> deleteAccountAndData() async {
+    state = const AsyncValue.loading();
+    try {
+      await _authService.deleteAccountAndData();
+      state = const AsyncValue.data(null);
+      await _onAuthChanged(null);
+      try {
+        appNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+      } catch (_) {}
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+      rethrow;
+    }
+  }
 }
 
 final authServiceProvider = Provider<AuthService>((ref) {

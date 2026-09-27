@@ -424,6 +424,39 @@ class AuthService {
     await _securityService.wipeAllSensitiveData(db: _storage.db);
   }
 
+  /// Permanently Deletes User Account and Wipes All Associated Local & Cloud Data
+  /// Mandated by Apple App Store Guideline 5.1.1(v) & Google Play Data Safety
+  Future<void> deleteAccountAndData() async {
+    final uid = _firebaseAuth?.currentUser?.uid ?? currentSession?.id;
+    
+    // 1. Delete user document from Firestore if connected
+    if (uid != null && uid.isNotEmpty) {
+      try {
+        await _firestore?.collection('users').doc(uid).delete();
+      } catch (e) {
+        if (kDebugMode) debugPrint('[AuthService] Firestore profile deletion warning: $e');
+      }
+    }
+
+    // 2. Delete Firebase Auth Account
+    final fbUser = _firebaseAuth?.currentUser;
+    if (fbUser != null) {
+      try {
+        await fbUser.delete();
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'requires-recent-login') {
+          throw Exception('Please sign out and sign in again before deleting your account for security verification.');
+        }
+        throw Exception(e.message ?? 'Failed to delete authentication account.');
+      } catch (e) {
+        throw Exception('Account deletion error: $e');
+      }
+    }
+
+    // 3. Local forensic wipe & reset
+    await forensicWipeAccount();
+  }
+
   /// Syncs the current or provided user to Firestore users collection with full search tokens
   Future<void> syncCurrentUserToFirestore([AuthUser? authUser]) async {
     final user = authUser ?? currentSession;

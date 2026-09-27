@@ -30,6 +30,17 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Production Global Error Telemetry & Crash Logging
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    AppLogger.error('Flutter Framework Error: ${details.exceptionAsString()}', details.exception, details.stack);
+  };
+
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    AppLogger.error('Unhandled Platform Exception: $error', error, stack);
+    return true;
+  };
+
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );

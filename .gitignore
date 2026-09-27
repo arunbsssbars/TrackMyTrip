@@ -42,3 +42,11 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 .kotlin/
+
+# Secrets, Keystores & Production Credentials
+**/key.properties
+*.jks
+*.keystore
+.env*
+google-services.json.secret
+GoogleService-Info.plist.secret
