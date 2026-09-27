@@ -57,10 +57,10 @@ void main() {
 
       // Verify title & journey type pill
       expect(find.text('Swiss Alps Expedition'), findsOneWidget);
-      expect(find.text('GROUP EXPEDITION'), findsOneWidget);
+      expect(find.text('GROUP'), findsOneWidget);
       expect(find.text('2 Travelers'), findsOneWidget);
       expect(find.text('ALPINE-99'), findsOneWidget);
-      expect(find.text('TOTAL EXPENDITURE'), findsOneWidget);
+      expect(find.text('JOURNEY EXPENDITURE'), findsOneWidget);
       expect(find.text('\$1,200.00'), findsOneWidget);
     });
 
@@ -126,7 +126,7 @@ void main() {
 
       // Should not show LinearProgressIndicator
       expect(find.byType(LinearProgressIndicator), findsNothing);
-      expect(find.text('3 expense entries logged • Tap to view ledger & splits'), findsOneWidget);
+      expect(find.text('3 entries logged • Tap to view ledger & analytics'), findsOneWidget);
     });
 
     testWidgets('correctly pluralizes single expense entry', (WidgetTester tester) async {
@@ -146,7 +146,7 @@ void main() {
         ),
       );
 
-      expect(find.text('1 expense entry logged • Tap to view ledger & splits'), findsOneWidget);
+      expect(find.text('1 entry logged • Tap to view ledger & analytics'), findsOneWidget);
     });
 
     testWidgets('displays CONCLUDED badge when trip is completed', (WidgetTester tester) async {
@@ -190,7 +190,7 @@ void main() {
         ),
       );
 
-      expect(find.text('SOLO JOURNEY'), findsOneWidget);
+      expect(find.text('SOLO'), findsOneWidget);
     });
 
     testWidgets('triggers onTapLedger callback when ledger block is tapped', (WidgetTester tester) async {
@@ -214,7 +214,7 @@ void main() {
       );
 
       // Tap on the financial glance expenditure block
-      await tester.tap(find.text('TOTAL EXPENDITURE'));
+      await tester.tap(find.text('JOURNEY EXPENDITURE'));
       await tester.pumpAndSettle();
 
       expect(ledgerTapped, isTrue);

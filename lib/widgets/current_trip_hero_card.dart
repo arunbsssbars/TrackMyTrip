@@ -1,8 +1,5 @@
-// A premium hero card for the Current Trip screen, extracted from CurrentTripTab.
-// Implements glass‑morphism style, dark‑mode aware gradient and micro‑animations.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fl_chart/fl_chart.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../core/utils/currency_formatter.dart';
@@ -33,7 +30,7 @@ class CurrentTripHeroCard extends StatelessWidget {
     this.onTapPieChart,
   });
 
-  bool get isEnded => trip.isCompleted || trip.status == 'completed';
+  bool get isEnded => trip.isCompleted || trip.status == 'completed' || trip.status == 'concluded' || trip.status == 'ended';
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +39,7 @@ class CurrentTripHeroCard extends StatelessWidget {
     final isOverBudget = hasBudget && totalSpent > trip.budget!;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: isDark
@@ -56,7 +53,7 @@ class CurrentTripHeroCard extends StatelessWidget {
           color: isEnded
               ? (isDark ? const Color(0xFFF59E0B) : const Color(0xFFD97706))
               : (isDark ? const Color(0xFF334155) : Colors.white.withAlpha(50)),
-          width: isEnded ? 2.0 : 1.0,
+          width: isEnded ? 1.8 : 1.0,
         ),
         boxShadow: [
           BoxShadow(
@@ -71,7 +68,7 @@ class CurrentTripHeroCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Top Row: Journey Type Pill, Pulsing Live Beacon & Share Code
+          // Top Row: Journey Type Pill, Status & Share Code
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -82,10 +79,11 @@ class CurrentTripHeroCard extends StatelessWidget {
               ],
             ],
           ),
-          const SizedBox(height: 8),
-          // Title & Sub‑metadata (Tap to view Trip Details)
+          const SizedBox(height: 10),
+
+          // Title & Sub-metadata (Tap to view Trip Details)
           InkWell(
-            onTap: onTapCard,
+            onTap: onTapCard ?? onTapLedger,
             borderRadius: BorderRadius.circular(12),
             splashColor: Colors.white.withAlpha(25),
             highlightColor: Colors.white.withAlpha(15),
@@ -99,23 +97,27 @@ class CurrentTripHeroCard extends StatelessWidget {
                       Expanded(
                         child: Text(
                           trip.title,
-                          style: const TextStyle(color: Colors.white, fontSize: 18.5, fontWeight: FontWeight.w900, letterSpacing: -0.3),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18.5,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.3,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      if (onTapCard != null)
-                        Container(
-                          padding: const EdgeInsets.all(4.5),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withAlpha(25),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.arrow_forward_ios_rounded, size: 11, color: Colors.white),
+                      Container(
+                        padding: const EdgeInsets.all(4.5),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withAlpha(25),
+                          shape: BoxShape.circle,
                         ),
+                        child: const Icon(Icons.arrow_forward_ios_rounded, size: 11, color: Colors.white),
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 4),
                   Wrap(
                     crossAxisAlignment: WrapCrossAlignment.center,
                     spacing: 4,
@@ -140,49 +142,10 @@ class CurrentTripHeroCard extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          // Integrated Financial Glance Block
+          const SizedBox(height: 10),
+
+          // Financial Glance & Analytics Link Block
           _financialGlance(context, hasBudget, totalSpent, budgetPercent, isOverBudget, isEnded),
-          if (categoryBreakdown != null && categoryBreakdown!.isNotEmpty && totalSpent > 0) ...[
-            const SizedBox(height: 10),
-            _categoryPieChartGlance(context),
-          ],
-          if (onTapAuditTrail != null) ...[
-            const SizedBox(height: 10),
-            InkWell(
-              onTap: () {
-                HapticFeedback.lightImpact();
-                onTapAuditTrail?.call();
-              },
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withAlpha(28),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white.withAlpha(50), width: 0.9),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.verified_user_rounded, size: 14, color: Colors.white),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Audit Trail & Trust History',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.2,
-                        ),
-                      ),
-                    ),
-                    Icon(Icons.arrow_forward_ios_rounded, size: 11, color: Colors.white70),
-                  ],
-                ),
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -195,7 +158,7 @@ class CurrentTripHeroCard extends StatelessWidget {
       runSpacing: 4,
       children: [
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
           decoration: BoxDecoration(
             color: Colors.white.withAlpha(35),
             borderRadius: BorderRadius.circular(20),
@@ -211,16 +174,16 @@ class CurrentTripHeroCard extends StatelessWidget {
                 size: 12,
                 color: Colors.white,
               ),
-              const SizedBox(width: 5),
+              const SizedBox(width: 4.5),
               Text(
                 trip.isSolo
-                    ? 'SOLO JOURNEY'
-                    : (trip.isFamily ? 'FAMILY CONVOY' : 'GROUP EXPEDITION'),
+                    ? 'SOLO'
+                    : (trip.isFamily ? 'FAMILY' : 'GROUP'),
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 10,
                   fontWeight: FontWeight.w900,
-                  letterSpacing: 0.6,
+                  letterSpacing: 0.5,
                 ),
               ),
             ],
@@ -230,7 +193,7 @@ class CurrentTripHeroCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
             decoration: BoxDecoration(
-              color: const Color(0xFFEF4444).withAlpha(50),
+              color: const Color(0xFFD97706).withAlpha(60),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: Colors.white38, width: 0.8),
             ),
@@ -247,12 +210,12 @@ class CurrentTripHeroCard extends StatelessWidget {
           const PulsingLiveBeacon(
             label: 'LIVE',
             color: Color(0xFF34D399),
-            dotSize: 9.0,
+            dotSize: 8.0,
             labelStyle: TextStyle(
               color: Colors.white,
               fontSize: 9.5,
               fontWeight: FontWeight.w900,
-              letterSpacing: 0.6,
+              letterSpacing: 0.5,
             ),
           ),
       ],
@@ -264,7 +227,7 @@ class CurrentTripHeroCard extends StatelessWidget {
       onTap: () => _copyShareCode(context, trip.shareCode!),
       borderRadius: BorderRadius.circular(10),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
         decoration: BoxDecoration(
           color: Colors.white.withAlpha(30),
           borderRadius: BorderRadius.circular(10),
@@ -295,7 +258,6 @@ class CurrentTripHeroCard extends StatelessWidget {
     );
   }
 
-  // Helper to copy share code – uses ScaffoldMessenger from the context.
   void _copyShareCode(BuildContext ctx, String code) {
     Clipboard.setData(ClipboardData(text: code));
     HapticFeedback.lightImpact();
@@ -312,7 +274,6 @@ class CurrentTripHeroCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Subtle integrated divider eliminating box-in-box look
         Container(
           height: 1,
           margin: const EdgeInsets.only(top: 2, bottom: 8),
@@ -341,17 +302,28 @@ class CurrentTripHeroCard extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.account_balance_wallet_rounded, size: 13, color: Colors.white.withAlpha(190)),
+                      Icon(Icons.account_balance_wallet_rounded, size: 13, color: Colors.white.withAlpha(200)),
                       const SizedBox(width: 5),
                       Text(
-                        'TOTAL EXPENDITURE',
+                        'JOURNEY EXPENDITURE',
                         style: TextStyle(
-                          color: Colors.white.withAlpha(190),
+                          color: Colors.white.withAlpha(200),
                           fontSize: 9.5,
                           fontWeight: FontWeight.w900,
                           letterSpacing: 0.7,
                         ),
                       ),
+                      const Spacer(),
+                      Text(
+                        'View Analytics & Ledger',
+                        style: TextStyle(
+                          color: Colors.white.withAlpha(180),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      const Icon(Icons.chevron_right_rounded, size: 14, color: Colors.white70),
                     ],
                   ),
                   const SizedBox(height: 4),
@@ -362,21 +334,28 @@ class CurrentTripHeroCard extends StatelessWidget {
                         CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency),
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 21,
+                          fontSize: 22,
                           fontWeight: FontWeight.w900,
                           letterSpacing: -0.5,
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.all(4),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                         decoration: BoxDecoration(
                           color: Colors.white.withAlpha(25),
-                          shape: BoxShape.circle,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white.withAlpha(40), width: 0.8),
                         ),
-                        child: const Icon(
-                          Icons.chevron_right_rounded,
-                          size: 18,
-                          color: Colors.white,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.receipt_long_rounded, size: 12, color: Colors.white),
+                            const SizedBox(width: 4),
+                            Text(
+                              '$expenseCount bill${expenseCount == 1 ? "" : "s"}',
+                              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -420,10 +399,10 @@ class CurrentTripHeroCard extends StatelessWidget {
                       ],
                     ),
                   ] else ...[
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     Text(
-                      '$expenseCount expense ${expenseCount == 1 ? "entry" : "entries"} logged • Tap to view ledger & splits',
-                      style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w600),
+                      '$expenseCount ${expenseCount == 1 ? "entry" : "entries"} logged • Tap to view ledger & analytics',
+                      style: const TextStyle(color: Colors.white70, fontSize: 10.5, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ],
@@ -433,155 +412,5 @@ class CurrentTripHeroCard extends StatelessWidget {
         ),
       ],
     );
-  }
-
-  Widget _categoryPieChartGlance(BuildContext context) {
-    final sortedCategories = categoryBreakdown!.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-
-    return InkWell(
-      onTap: () {
-        HapticFeedback.lightImpact();
-        onTapPieChart?.call();
-      },
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.white.withAlpha(22),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withAlpha(40), width: 0.9),
-        ),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 44,
-              height: 44,
-              child: PieChart(
-                PieChartData(
-                  sectionsSpace: 2,
-                  centerSpaceRadius: 10,
-                  sections: sortedCategories.map((entry) {
-                    return PieChartSectionData(
-                      color: _getCategoryColor(entry.key),
-                      value: entry.value,
-                      title: '',
-                      radius: 12,
-                    );
-                  }).toList(),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      Text(
-                        'Category Expense Breakdown',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      SizedBox(width: 4),
-                      Icon(Icons.pie_chart_rounded, size: 12, color: Colors.white70),
-                    ],
-                  ),
-                  const SizedBox(height: 3),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    children: sortedCategories.take(3).map((entry) {
-                      final pct = (entry.value / totalSpent * 100).toInt();
-                      return Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.black12,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              _getCategoryIcon(entry.key),
-                              size: 11,
-                              color: _getCategoryColor(entry.key),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              '${entry.key} ($pct%)',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right_rounded, color: Colors.white70, size: 18),
-          ],
-        ),
-      ),
-    );
-  }
-
-  static IconData _getCategoryIcon(String category) {
-    final lower = category.toLowerCase();
-    if (lower.contains('food') || lower.contains('cafe') || lower.contains('dining') || lower.contains('drink')) {
-      return Icons.restaurant_rounded;
-    }
-    if (lower.contains('fuel') || lower.contains('gas') || lower.contains('petrol')) {
-      return Icons.local_gas_station_rounded;
-    }
-    if (lower.contains('hotel') || lower.contains('stay') || lower.contains('lodge')) {
-      return Icons.bed_rounded;
-    }
-    if (lower.contains('transit') || lower.contains('transport') || lower.contains('toll')) {
-      return Icons.directions_car_rounded;
-    }
-    if (lower.contains('activity') || lower.contains('ticket') || lower.contains('tour')) {
-      return Icons.confirmation_number_rounded;
-    }
-    if (lower.contains('shop') || lower.contains('store')) {
-      return Icons.shopping_cart_rounded;
-    }
-    if (lower.contains('snack') || lower.contains('coffee')) {
-      return Icons.coffee_rounded;
-    }
-    return Icons.receipt_long_rounded;
-  }
-
-  Color _getCategoryColor(String category) {
-    switch (category.toLowerCase()) {
-      case 'food':
-      case 'dining':
-        return const Color(0xFFF97316);
-      case 'fuel':
-      case 'transport':
-        return const Color(0xFF3B82F6);
-      case 'stay':
-      case 'accommodation':
-      case 'hotel':
-        return const Color(0xFF8B5CF6);
-      case 'ticket':
-      case 'toll':
-      case 'entry':
-        return const Color(0xFF10B981);
-      case 'shopping':
-        return const Color(0xFFEC4899);
-      default:
-        return const Color(0xFFF59E0B);
-    }
   }
 }

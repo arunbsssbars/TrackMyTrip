@@ -25,7 +25,7 @@ import '../notifications/notification_center_sheet.dart';
 import '../main_scaffold.dart';
 import '../../providers/invitation_provider.dart';
 import 'widgets/trip_invitation_card.dart';
-import '../expenses/global_expenses_sheet.dart';
+import '../../core/constants/app_constants.dart';
 import '../../providers/audit_log_provider.dart';
 import '../../core/services/ocr_service.dart';
 import '../expenses/add_expense_screen.dart';
@@ -422,7 +422,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             onTap: trips.isNotEmpty
                                 ? () {
                                     HapticFeedback.lightImpact();
-                                    GlobalExpensesSheet.show(context);
+                                    AppNavigator.push(context, const TripAnalyticsScreen(initialTabIndex: 1));
                                   }
                                 : null,
                             borderRadius: BorderRadius.circular(10),
@@ -474,7 +474,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       InkWell(
                         onTap: () {
                           HapticFeedback.lightImpact();
-                          AppNavigator.push(context, const TripAnalyticsScreen());
+                          AppNavigator.push(context, const TripAnalyticsScreen(initialTabIndex: 0));
                         },
                         borderRadius: BorderRadius.circular(14),
                         child: Container(
@@ -496,7 +496,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                     centerSpaceRadius: 10,
                                     sections: sortedCategories.map((entry) {
                                       return PieChartSectionData(
-                                        color: _getCategoryColor(entry.key),
+                                        color: AppConstants.getExpenseCategoryColor(entry.key),
                                         value: entry.value,
                                         title: '',
                                         radius: 12,
@@ -1355,7 +1355,7 @@ class _TripCard extends StatelessWidget {
     }
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
       child: Material(
         color: cardBackground,
         elevation: elevation,
@@ -1366,18 +1366,18 @@ class _TripCard extends StatelessWidget {
                 : (isRunning
                     ? const Color(0xFF10B981).withAlpha(isDark ? 35 : 25)
                     : Colors.black.withAlpha(isDark ? 45 : 18))),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         clipBehavior: Clip.antiAlias,
         child: Container(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: borderColor,
               width: borderWidth,
             ),
           ),
           child: Padding(
-            padding: const EdgeInsets.all(13),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1402,7 +1402,7 @@ class _TripCard extends StatelessWidget {
                               children: [
                                 // Trip Mode Badge
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                                   decoration: BoxDecoration(
                                     color: modeColor.withAlpha(20),
                                     borderRadius: BorderRadius.circular(6),
@@ -1425,8 +1425,8 @@ class _TripCard extends StatelessWidget {
                                   ),
                                 ),
 
-                                // Live Active Badge
-                                if (isActiveCockpit)
+                                // Live Active Badge (Strictly only if journey is NOT ended)
+                                if (!isEnded && isActiveCockpit)
                                   const PulsingLiveBeacon(
                                     label: 'LIVE',
                                     color: Color(0xFF0D9488),
@@ -1454,7 +1454,7 @@ class _TripCard extends StatelessWidget {
                                 // Concluded Trip Badge
                                 if (isEnded)
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 3),
+                                    padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 2.5),
                                     decoration: BoxDecoration(
                                       color: const Color(0xFFD97706).withAlpha(isDark ? 40 : 25),
                                       borderRadius: BorderRadius.circular(6),
@@ -1481,7 +1481,7 @@ class _TripCard extends StatelessWidget {
                                 // Star Rating Badge
                                 if (trip.rating != null)
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
                                     decoration: BoxDecoration(
                                       color: Colors.amber.withAlpha(isDark ? 35 : 22),
                                       borderRadius: BorderRadius.circular(6),
@@ -1506,7 +1506,7 @@ class _TripCard extends StatelessWidget {
 
                                 // Room Code Chip
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 3),
+                                  padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 2.5),
                                   decoration: BoxDecoration(
                                     color: isDark ? Colors.black26 : const Color(0xFFF1F5F9),
                                     borderRadius: BorderRadius.circular(6),
@@ -1578,7 +1578,7 @@ class _TripCard extends StatelessWidget {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 8),
 
                       // Title & Date Range
                       Row(
@@ -1591,7 +1591,7 @@ class _TripCard extends StatelessWidget {
                                 Text(
                                   trip.title,
                                   style: TextStyle(
-                                    fontSize: 16.5,
+                                    fontSize: 16,
                                     fontWeight: FontWeight.w800,
                                     letterSpacing: -0.3,
                                     color: isDark ? Colors.white : AppTheme.textMainLight,
@@ -1599,16 +1599,16 @@ class _TripCard extends StatelessWidget {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                const SizedBox(height: 4),
+                                const SizedBox(height: 3),
                                 Row(
                                   children: [
-                                    const Icon(Icons.calendar_today_rounded, size: 12, color: AppTheme.primary),
+                                    const Icon(Icons.calendar_today_rounded, size: 11, color: AppTheme.primary),
                                     const SizedBox(width: 4),
                                     Flexible(
                                       child: Text(
                                         DateFormatter.formatTripDateRange(trip.startDate, trip.endDate),
                                         style: TextStyle(
-                                          fontSize: 11,
+                                          fontSize: 10.5,
                                           color: isDark ? Colors.grey[300] : const Color(0xFF475569),
                                           fontWeight: FontWeight.w600,
                                         ),
@@ -1631,22 +1631,22 @@ class _TripCard extends StatelessWidget {
                                             borderRadius: BorderRadius.circular(8),
                                             splashColor: AppTheme.primary.withAlpha(30),
                                             child: Padding(
-                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                                               child: Row(
                                                 mainAxisSize: MainAxisSize.min,
                                                 children: [
                                                   _buildAvatarStack(trip.members, isDark),
-                                                  const SizedBox(width: 4),
+                                                  const SizedBox(width: 3.5),
                                                   Text(
                                                     '${trip.members.length}',
                                                     style: const TextStyle(
-                                                      fontSize: 11,
+                                                      fontSize: 10.5,
                                                       color: AppTheme.primary,
                                                       fontWeight: FontWeight.w800,
                                                     ),
                                                   ),
                                                   const SizedBox(width: 2),
-                                                  const Icon(Icons.chevron_right_rounded, size: 12, color: AppTheme.primary),
+                                                  const Icon(Icons.chevron_right_rounded, size: 11, color: AppTheme.primary),
                                                 ],
                                               ),
                                             ),
@@ -1659,32 +1659,32 @@ class _TripCard extends StatelessWidget {
                               ],
                             ),
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 6),
                           // Subtle chevron affordance
                           Container(
-                            padding: const EdgeInsets.all(5),
+                            padding: const EdgeInsets.all(4.5),
                             decoration: BoxDecoration(
                               color: isDark ? Colors.white.withAlpha(12) : const Color(0xFFF1F5F9),
                               shape: BoxShape.circle,
                               border: Border.all(
                                 color: isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1),
-                                width: 0.9,
+                                width: 0.8,
                               ),
                             ),
                             child: Icon(
                               Icons.chevron_right_rounded,
-                              size: 16,
+                              size: 15,
                               color: isDark ? Colors.grey[300] : const Color(0xFF475569),
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 7),
 
                       // Key Metrics Summary Chips
                       Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
+                        spacing: 5,
+                        runSpacing: 3,
                         children: [
                           _buildMetricChip(
                             icon: Icons.place_rounded,
@@ -1710,7 +1710,7 @@ class _TripCard extends StatelessWidget {
 
                       // Budget Progress Bar (if budget is configured)
                       if (trip.budget != null && trip.budget! > 0) ...[
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 6),
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -1720,7 +1720,7 @@ class _TripCard extends StatelessWidget {
                                 Text(
                                   'Budget: ${CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency)} / ${CurrencyFormatter.format(trip.budget!, currency: trip.defaultCurrency)}',
                                   style: TextStyle(
-                                    fontSize: 10,
+                                    fontSize: 9.5,
                                     fontWeight: FontWeight.w700,
                                     color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                                   ),
@@ -1728,7 +1728,7 @@ class _TripCard extends StatelessWidget {
                                 Text(
                                   '${(totalSpent / trip.budget! * 100).clamp(0, 999).toStringAsFixed(0)}%',
                                   style: TextStyle(
-                                    fontSize: 10,
+                                    fontSize: 9.5,
                                     fontWeight: FontWeight.w800,
                                     color: (totalSpent > trip.budget!)
                                         ? Colors.redAccent
@@ -1737,12 +1737,12 @@ class _TripCard extends StatelessWidget {
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 3),
+                            const SizedBox(height: 2.5),
                             ClipRRect(
-                              borderRadius: BorderRadius.circular(4),
+                              borderRadius: BorderRadius.circular(3),
                               child: LinearProgressIndicator(
                                 value: (totalSpent / trip.budget!).clamp(0.0, 1.0),
-                                minHeight: 4,
+                                minHeight: 3.5,
                                 backgroundColor: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
                                 color: (totalSpent > trip.budget!)
                                     ? Colors.redAccent
@@ -1754,52 +1754,21 @@ class _TripCard extends StatelessWidget {
                       ],
 
                       if (trip.description != null && trip.description!.isNotEmpty) ...[
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 5),
                         Text(
                           trip.description!,
-                          maxLines: 2,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: 11.5,
+                            fontSize: 11,
                             color: isDark ? Colors.grey[400] : AppTheme.textMutedLight,
-                            height: 1.25,
-                          ),
-                        ),
-                      ],
-
-                      if (trip.experienceReview != null && trip.experienceReview!.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.amber.withAlpha(isDark ? 25 : 15),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.amber.withAlpha(40)),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.rate_review_rounded, size: 12, color: Colors.amber),
-                              const SizedBox(width: 5),
-                              Expanded(
-                                child: Text(
-                                  '"${trip.experienceReview!}"',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontStyle: FontStyle.italic,
-                                    color: isDark ? Colors.amber[200] : const Color(0xFFB45309),
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
                           ),
                         ),
                       ],
                     ],
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
 
                 // Separator
                 Divider(
@@ -1807,9 +1776,9 @@ class _TripCard extends StatelessWidget {
                   thickness: 0.8,
                   color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 7),
 
-                // Clean Action Bar: Single unified modern Cockpit / Details button
+                // Clean Action Bar: Indianized Yatra Cockpit button
                 Material(
                   color: Colors.transparent,
                   child: InkWell(
@@ -1817,9 +1786,9 @@ class _TripCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10),
                     child: Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                      padding: const EdgeInsets.symmetric(vertical: 7.5, horizontal: 12),
                       decoration: BoxDecoration(
-                        gradient: isActiveCockpit
+                        gradient: (!isEnded && isActiveCockpit)
                             ? const LinearGradient(
                                 colors: [Color(0xFF0D9488), Color(0xFF0F766E)],
                                 begin: Alignment.topLeft,
@@ -1832,12 +1801,12 @@ class _TripCard extends StatelessWidget {
                               ),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                          color: isActiveCockpit
+                          color: (!isEnded && isActiveCockpit)
                               ? const Color(0xFF14B8A6)
                               : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
-                          width: isActiveCockpit ? 1.2 : 0.8,
+                          width: (!isEnded && isActiveCockpit) ? 1.2 : 0.8,
                         ),
-                        boxShadow: isActiveCockpit
+                        boxShadow: (!isEnded && isActiveCockpit)
                             ? [
                                 BoxShadow(
                                   color: const Color(0xFF0D9488).withAlpha(60),
@@ -1851,24 +1820,24 @@ class _TripCard extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(
-                            isActiveCockpit
+                            (!isEnded && isActiveCockpit)
                                 ? Icons.card_travel_rounded
                                 : (isEnded ? Icons.visibility_rounded : Icons.explore_rounded),
-                            size: 14,
-                            color: isActiveCockpit
+                            size: 13.5,
+                            color: (!isEnded && isActiveCockpit)
                                 ? Colors.white
                                 : (isDark ? Colors.tealAccent : const Color(0xFF0D9488)),
                           ),
                           const SizedBox(width: 6),
                           Text(
-                            isActiveCockpit
-                                ? 'Active Cockpit (Live)'
-                                : (isEnded ? 'View Trip Details & Summary' : 'Open Trip Cockpit'),
+                            isEnded
+                                ? 'Yatra Summary & Details'
+                                : (isActiveCockpit ? 'Yatra Cockpit (Active)' : 'Yatra Cockpit'),
                             style: TextStyle(
-                              color: isActiveCockpit
+                              color: (!isEnded && isActiveCockpit)
                                   ? Colors.white
                                   : (isDark ? Colors.white : AppTheme.textMainLight),
-                              fontSize: 12,
+                              fontSize: 11.5,
                               fontWeight: FontWeight.w700,
                               letterSpacing: -0.2,
                             ),
@@ -1876,8 +1845,8 @@ class _TripCard extends StatelessWidget {
                           const SizedBox(width: 4),
                           Icon(
                             Icons.arrow_forward_rounded,
-                            size: 13,
-                            color: isActiveCockpit
+                            size: 12.5,
+                            color: (!isEnded && isActiveCockpit)
                                 ? Colors.white70
                                 : (isDark ? Colors.grey[400] : const Color(0xFF64748B)),
                           ),

@@ -4,10 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../core/services/cloud_trip_sync_service.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/currency_formatter.dart';
 import '../../../models/trip.dart';
 import '../../../models/trip_invitation.dart';
 import '../../../models/trip_member.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/expense_provider.dart';
 import '../../../providers/invitation_provider.dart';
 import '../../../providers/trip_provider.dart';
 import '../../trip/companion_search_dialog.dart';
@@ -319,6 +321,9 @@ class _MembersTabState extends ConsumerState<MembersTab> {
     final sentInvitations = ref.watch(sentInvitationsProvider);
     final tripInvitations = sentInvitations.where((inv) => inv.tripId == currentTrip.id && inv.status == InvitationStatus.pending).toList();
 
+    final allExpenses = ref.watch(allExpensesProvider);
+    final tripExpenses = allExpenses.where((e) => e.tripId == currentTrip.id).toList();
+
     return ListView(
       physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -513,6 +518,10 @@ class _MembersTabState extends ConsumerState<MembersTab> {
               final isMe = (currentUid != null && member.id == currentUid) ||
                   (authUser?.email != null && member.email != null && authUser!.email.toLowerCase() == member.email!.toLowerCase());
 
+              final memberPaid = tripExpenses
+                  .where((e) => e.paidByMemberId == member.id || e.paidByMemberId == member.name)
+                  .fold<double>(0.0, (sum, e) => sum + e.totalAmount);
+
               final colorInt = int.tryParse(member.colorHex ?? '0xFF0D9488') ?? 0xFF0D9488;
               final avatarColor = Color(colorInt);
 
@@ -573,32 +582,52 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                     ],
                   ],
                 ),
-                subtitle: Row(
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                      decoration: BoxDecoration(
-                        color: isMemberCreator ? Colors.amber.withAlpha(25) : Colors.blue.withAlpha(25),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        isMemberCreator ? 'Trip Lead' : 'Companion',
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.bold,
-                          color: isMemberCreator ? Colors.amber[800] : Colors.blue[700],
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: isMemberCreator ? Colors.amber.withAlpha(25) : Colors.blue.withAlpha(25),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            isMemberCreator ? 'Trip Lead' : 'Companion',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.bold,
+                              color: isMemberCreator ? Colors.amber[800] : Colors.blue[700],
+                            ),
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: memberPaid > 0 ? const Color(0xFF10B981).withAlpha(25) : (isDark ? Colors.white10 : Colors.grey.withAlpha(30)),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            'Paid: ${CurrencyFormatter.format(memberPaid, currency: currentTrip.defaultCurrency)}',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w800,
+                              color: memberPaid > 0 ? const Color(0xFF059669) : (isDark ? Colors.grey[400] : Colors.grey[700]),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     if (member.email != null) ...[
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          member.email!,
-                          style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : AppTheme.textMutedLight),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                      const SizedBox(height: 2),
+                      Text(
+                        member.email!,
+                        style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : AppTheme.textMutedLight),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ],

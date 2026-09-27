@@ -1165,10 +1165,9 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
       appBar: AppBar(
         elevation: 0,
         backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-        titleSpacing: 16,
+        titleSpacing: 10,
         title: trips.isEmpty || currentTrip == null
             ? const Row(
-                mainAxisSize: MainAxisSize.min,
                 children: [
                   PulsingLiveBeacon(
                     dotSize: 8,
@@ -1196,7 +1195,6 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                     ),
                   ),
                   child: Row(
-                    mainAxisSize: MainAxisSize.min,
                     children: [
                       if (!currentTrip.isCompleted) ...[
                         PulsingLiveBeacon(
@@ -1206,10 +1204,10 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                         ),
                         const SizedBox(width: 6),
                       ] else ...[
-                        const Icon(Icons.explore_rounded, color: AppTheme.primary, size: 17),
-                        const SizedBox(width: 6),
+                        const Icon(Icons.flag_rounded, color: Color(0xFFD97706), size: 15),
+                        const SizedBox(width: 5),
                       ],
-                      Flexible(
+                      Expanded(
                         child: Text(
                           currentTrip.title,
                           style: TextStyle(
@@ -1221,9 +1219,9 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      const SizedBox(width: 5),
+                      const SizedBox(width: 4),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 5.5, vertical: 1.5),
                         decoration: BoxDecoration(
                           color: (currentTrip.isCompleted
                                   ? Colors.grey
@@ -1240,20 +1238,20 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                         ),
                         child: Text(
                           currentTrip.isCompleted
-                              ? 'CONCLUDED'
+                              ? 'DONE'
                               : (currentTrip.isSolo ? 'SOLO' : (currentTrip.isFamily ? 'FAMILY' : 'GROUP')),
                           style: TextStyle(
-                            fontSize: 9,
+                            fontSize: 8.5,
                             fontWeight: FontWeight.w900,
                             color: currentTrip.isCompleted
                                 ? (isDark ? Colors.grey[300] : const Color(0xFF475569))
                                 : (currentTrip.isSolo ? const Color(0xFF2563EB) : AppTheme.primary),
-                            letterSpacing: 0.4,
+                            letterSpacing: 0.3,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 2),
-                      const Icon(Icons.arrow_drop_down_rounded, color: AppTheme.primary, size: 20),
+                      const SizedBox(width: 1),
+                      const Icon(Icons.arrow_drop_down_rounded, color: AppTheme.primary, size: 18),
                     ],
                   ),
                 ),
@@ -1309,52 +1307,19 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
           ? _buildEmptyState(context, isDark)
           : _buildActiveTripContent(context, currentTrip, trackingState, isDark),
       floatingActionButton: (currentTrip != null && !currentTrip.isCompleted && MediaQuery.of(context).viewInsets.bottom == 0)
-          ? Container(
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF0D9488), Color(0xFF0F766E)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(28),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF0D9488).withAlpha(110),
-                    blurRadius: 14,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-                border: Border.all(color: Colors.white.withAlpha(45), width: 1),
-              ),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: () => _openOcrAddExpense(currentTrip),
-                  borderRadius: BorderRadius.circular(28),
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.post_add_rounded, color: Colors.white, size: 18),
-                        SizedBox(width: 6.5),
-                        Text(
-                          'Add Bill (OCR)',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 13,
-                            letterSpacing: -0.2,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+          ? FloatingActionButton.extended(
+              onPressed: () => _openOcrAddExpense(currentTrip),
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
+              elevation: 4,
+              icon: const Icon(Icons.document_scanner_rounded, size: 19),
+              label: const Text(
+                'Scan Bill (OCR)',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, letterSpacing: -0.2),
               ),
             )
           : null,
-      floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
@@ -1573,11 +1538,11 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
               categoryBreakdown: categoryBreakdown,
               onTapPieChart: () {
                 HapticFeedback.lightImpact();
-                AppNavigator.push(context, TripAnalyticsScreen(tripId: trip.id));
+                AppNavigator.push(context, TripAnalyticsScreen(tripId: trip.id, initialTabIndex: 0));
               },
               onTapLedger: () {
                 HapticFeedback.selectionClick();
-                _navigateToTripDetail(trip, initialTabIndex: 3);
+                AppNavigator.push(context, TripAnalyticsScreen(tripId: trip.id, initialTabIndex: 1));
               },
               onTapCard: () {
                 HapticFeedback.lightImpact();
