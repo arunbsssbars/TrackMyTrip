@@ -26,14 +26,28 @@ class AuditLogNotifier extends StateNotifier<List<TripAuditLog>> {
       l.actionType.contains('expense') ||
       l.actionType.contains('budget') ||
       l.actionType.contains('bill') ||
-      l.actionType.contains('settle')
+      l.actionType.contains('settle') ||
+      l.actionType.contains('advance')
     ).toList();
+
+    // Deduplicate existing stored logs (pruning any historical dual-entry settlement logs)
+    final seenIds = <String>{};
+    final seenSemantic = <String>{};
+    final dedupedLogs = <TripAuditLog>[];
+    for (final l in logs) {
+      if (!seenIds.add(l.id)) continue;
+      if (l.actionType.contains('settle') || l.actionType.contains('advance')) {
+        final semanticKey = '${l.tripId}_${l.performedByMemberId}_${l.itemTitle}';
+        if (!seenSemantic.add(semanticKey)) continue;
+      }
+      dedupedLogs.add(l);
+    }
 
     final trips = _storage.getTrips();
     final allExpenses = _storage.getAllExpenses();
     final allSettlements = _storage.getAllSettlements();
 
-    final existingLogIds = logs.map((l) => l.id).toSet();
+    final existingLogIds = dedupedLogs.map((l) => l.id).toSet();
     final missingLogs = <TripAuditLog>[];
 
     for (final trip in trips) {
@@ -97,13 +111,13 @@ class AuditLogNotifier extends StateNotifier<List<TripAuditLog>> {
     }
 
     if (missingLogs.isNotEmpty) {
-      final combined = [...logs, ...missingLogs];
+      final combined = [...dedupedLogs, ...missingLogs];
       combined.sort((a, b) => b.timestamp.compareTo(a.timestamp));
       state = combined;
       _storage.saveAllAuditLogs(combined);
     } else {
-      logs.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      state = logs;
+      dedupedLogs.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      state = dedupedLogs;
     }
   }
 
@@ -116,6 +130,16 @@ class AuditLogNotifier extends StateNotifier<List<TripAuditLog>> {
   }
 
   Future<void> logAction(TripAuditLog log, {bool broadcast = true}) async {
+    if (state.any((l) => l.id == log.id)) return;
+    if (log.actionType.contains('settle') || log.actionType.contains('advance')) {
+      if (state.any((l) =>
+          l.tripId == log.tripId &&
+          l.performedByMemberId == log.performedByMemberId &&
+          l.itemTitle == log.itemTitle &&
+          l.timestamp.difference(log.timestamp).abs().inSeconds < 5)) {
+        return; // Suppress duplicate settlement/advance log
+      }
+    }
     final updated = [log, ...state];
     state = updated;
     await _storage.saveAllAuditLogs(updated);

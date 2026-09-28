@@ -213,6 +213,30 @@ void main() {
       expect(revived.receiverMemberId, 'memB');
       expect(revived.amount, 45.50);
       expect(revived.paymentMethod, 'UPI');
+      expect(revived.isAdvance, isFalse);
+    });
+
+    test('Advance payment settlement serializes isAdvance flag correctly', () {
+      final advance = Settlement(
+        id: 'adv_test_1',
+        tripId: 'trip_100',
+        payerMemberId: 'memA',
+        receiverMemberId: 'memB',
+        amount: 150.00,
+        currency: 'USD',
+        settledAt: DateTime(2026, 9, 28, 10, 0),
+        paymentMethod: 'Bank Transfer',
+        notes: 'Pre-trip pool deposit',
+        isAdvance: true,
+      );
+
+      final json = advance.toJson();
+      expect(json['isAdvance'], isTrue);
+
+      final revived = Settlement.fromJson(json);
+      expect(revived.isAdvance, isTrue);
+      expect(revived.amount, 150.00);
+      expect(revived.paymentMethod, 'Bank Transfer');
     });
   });
 }

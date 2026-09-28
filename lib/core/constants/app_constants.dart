@@ -123,19 +123,19 @@ class AppConstants {
     } else if (cat.contains('fuel') || cat.contains('gas') || cat.contains('petrol') || cat.contains('diesel')) {
       return const Color(0xFFEF4444); // Crimson Red
     } else if (cat.contains('accommodat') || cat.contains('hotel') || cat.contains('stay') || cat.contains('resort')) {
-      return const Color(0xFF8B5CF6); // Purple/Violet
+      return const Color(0xFFFBBF24); // Warm Gold / Amber (high contrast against green)
     } else if (cat.contains('transport') || cat.contains('toll') || cat.contains('cab') || cat.contains('flight') || cat.contains('train') || cat.contains('transit')) {
-      return const Color(0xFF3B82F6); // Royal Blue
+      return const Color(0xFF60A5FA); // Sky Blue
     } else if (cat.contains('activit') || cat.contains('ticket') || cat.contains('sightseeing') || cat.contains('adventure') || cat.contains('entry')) {
-      return const Color(0xFF10B981); // Emerald Green
+      return const Color(0xFF38BDF8); // Electric Cyan (high contrast against green)
     } else if (cat.contains('shopping') || cat.contains('souvenir') || cat.contains('gift') || cat.contains('cloth')) {
       return const Color(0xFFEC4899); // Pink
     } else if (cat.contains('snack') || cat.contains('refresh') || cat.contains('tea') || cat.contains('coffee')) {
-      return const Color(0xFFF97316); // Bright Orange
+      return const Color(0xFFFB923C); // Bright Orange
     } else if (cat.contains('health') || cat.contains('medical') || cat.contains('pharmacy')) {
-      return const Color(0xFF06B6D4); // Cyan
+      return const Color(0xFF2DD4BF); // Mint Cyan
     } else {
-      return const Color(0xFF0D9488); // Teal (Default)
+      return const Color(0xFFFB7185); // Rose Coral (high contrast against green)
     }
   }
 }

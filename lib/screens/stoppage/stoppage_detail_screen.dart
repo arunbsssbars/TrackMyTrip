@@ -272,7 +272,8 @@ class StoppageDetailScreen extends ConsumerWidget {
                       style: const TextStyle(fontSize: 11),
                     ),
                     value: isOngoing,
-                    activeColor: const Color(0xFF10B981),
+                    activeThumbColor: const Color(0xFF10B981),
+                    activeTrackColor: const Color(0xFF10B981).withAlpha(100),
                     onChanged: (val) {
                       setModalState(() {
                         isOngoing = val;

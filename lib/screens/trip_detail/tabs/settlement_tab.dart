@@ -8,8 +8,6 @@ import '../../../core/utils/date_formatter.dart';
 import '../../../core/utils/debt_simplifier.dart';
 import '../../../models/settlement.dart';
 import '../../../models/trip.dart';
-import '../../../models/trip_audit_log.dart';
-import '../../../providers/audit_log_provider.dart';
 import '../../../providers/settlement_provider.dart';
 
 class SettlementTab extends ConsumerStatefulWidget {
@@ -23,9 +21,21 @@ class SettlementTab extends ConsumerStatefulWidget {
 
 class _SettlementTabState extends ConsumerState<SettlementTab> {
   void _openRecordSettlementDialog(BuildContext context, {DebtTransfer? defaultTransfer, Settlement? existingSettlement}) {
-    showDialog(
+    if (widget.trip.members.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('At least 2 members are required to record a payment.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    showModalBottomSheet(
       context: context,
-      builder: (context) => _RecordSettlementDialog(
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _RecordPaymentSheet(
         trip: widget.trip,
         defaultTransfer: defaultTransfer,
         existingSettlement: existingSettlement,
@@ -41,6 +51,7 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return ListView(
+      physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 80),
       children: [
         if (widget.trip.isFamily)
@@ -410,22 +421,22 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
   }
 }
 
-class _RecordSettlementDialog extends ConsumerStatefulWidget {
+class _RecordPaymentSheet extends ConsumerStatefulWidget {
   final Trip trip;
   final DebtTransfer? defaultTransfer;
   final Settlement? existingSettlement;
 
-  const _RecordSettlementDialog({
+  const _RecordPaymentSheet({
     required this.trip,
     this.defaultTransfer,
     this.existingSettlement,
   });
 
   @override
-  ConsumerState<_RecordSettlementDialog> createState() => _RecordSettlementDialogState();
+  ConsumerState<_RecordPaymentSheet> createState() => _RecordPaymentSheetState();
 }
 
-class _RecordSettlementDialogState extends ConsumerState<_RecordSettlementDialog> {
+class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
   final _formKey = GlobalKey<FormState>();
   late String _payerId;
   late String _receiverId;
@@ -433,6 +444,14 @@ class _RecordSettlementDialogState extends ConsumerState<_RecordSettlementDialog
   late TextEditingController _notesController;
   late String _paymentMethod;
   bool _isAdvance = false;
+
+  final List<(String, IconData)> _paymentMethods = const [
+    ('Cash / Direct', Icons.payments_rounded),
+    ('UPI / Google Pay', Icons.qr_code_rounded),
+    ('Venmo / PayPal', Icons.send_rounded),
+    ('Bank Transfer', Icons.account_balance_rounded),
+    ('Other', Icons.more_horiz_rounded),
+  ];
 
   @override
   void initState() {
@@ -449,12 +468,28 @@ class _RecordSettlementDialogState extends ConsumerState<_RecordSettlementDialog
       _isAdvance = existing.isAdvance;
     } else {
       _payerId = transfer?.fromMemberId ?? (widget.trip.members.isNotEmpty ? widget.trip.members.first.id : '');
-      _receiverId = transfer?.toMemberId ?? (widget.trip.members.length > 1 ? widget.trip.members[1].id : '');
+      final otherMembers = widget.trip.members.where((m) => m.id != _payerId).toList();
+      _receiverId = transfer?.toMemberId ?? (otherMembers.isNotEmpty ? otherMembers.first.id : '');
       _amountController = TextEditingController(text: transfer != null ? transfer.amount.toStringAsFixed(2) : '');
       _notesController = TextEditingController();
       _paymentMethod = 'Cash / Direct';
       _isAdvance = false;
     }
+
+    // Safety guard: ensure payer and receiver are never identical on startup
+    if (_payerId == _receiverId && widget.trip.members.length > 1) {
+      final fallback = widget.trip.members.firstWhere((m) => m.id != _payerId);
+      _receiverId = fallback.id;
+    }
+  }
+
+  void _swapMembers() {
+    HapticFeedback.lightImpact();
+    setState(() {
+      final temp = _payerId;
+      _payerId = _receiverId;
+      _receiverId = temp;
+    });
   }
 
   @override
@@ -474,7 +509,6 @@ class _RecordSettlementDialogState extends ConsumerState<_RecordSettlementDialog
     }
 
     final amount = double.parse(_amountController.text.trim());
-    final currentMember = widget.trip.currentUserMember;
 
     if (widget.existingSettlement != null) {
       final updated = widget.existingSettlement!.copyWith(
@@ -486,20 +520,6 @@ class _RecordSettlementDialogState extends ConsumerState<_RecordSettlementDialog
         isAdvance: _isAdvance,
       );
       ref.read(allSettlementsProvider.notifier).updateSettlement(updated);
-
-      ref.read(allAuditLogsProvider.notifier).logAction(
-        TripAuditLog(
-          id: const Uuid().v4(),
-          tripId: widget.trip.id,
-          actionType: 'edit_settlement',
-          itemTitle: 'Payment of ${CurrencyFormatter.format(amount, currency: widget.trip.defaultCurrency)}',
-          performedByMemberId: currentMember?.id ?? 'User',
-          performedByName: currentMember?.name ?? 'Companion',
-          timestamp: DateTime.now(),
-          reason: 'Payment details modified',
-          changeDetails: '${widget.trip.getMemberName(_payerId)} -> ${widget.trip.getMemberName(_receiverId)}: ${CurrencyFormatter.format(amount, currency: widget.trip.defaultCurrency)}',
-        ),
-      );
     } else {
       final newSettlement = Settlement(
         id: const Uuid().v4(),
@@ -514,20 +534,6 @@ class _RecordSettlementDialogState extends ConsumerState<_RecordSettlementDialog
         isAdvance: _isAdvance,
       );
       ref.read(allSettlementsProvider.notifier).addSettlement(newSettlement);
-
-      ref.read(allAuditLogsProvider.notifier).logAction(
-        TripAuditLog(
-          id: const Uuid().v4(),
-          tripId: widget.trip.id,
-          actionType: 'create_settlement',
-          itemTitle: 'Payment of ${CurrencyFormatter.format(amount, currency: widget.trip.defaultCurrency)}',
-          performedByMemberId: currentMember?.id ?? 'User',
-          performedByName: currentMember?.name ?? 'Companion',
-          timestamp: DateTime.now(),
-          reason: 'Debt settled',
-          changeDetails: '${widget.trip.getMemberName(_payerId)} paid ${widget.trip.getMemberName(_receiverId)}',
-        ),
-      );
     }
 
     HapticFeedback.mediumImpact();
@@ -536,134 +542,619 @@ class _RecordSettlementDialogState extends ConsumerState<_RecordSettlementDialog
 
   void _deleteSettlement() {
     if (widget.existingSettlement == null) return;
-    ref.read(allSettlementsProvider.notifier).deleteSettlement(widget.existingSettlement!.id);
 
-    final currentMember = widget.trip.currentUserMember;
-    ref.read(allAuditLogsProvider.notifier).logAction(
-      TripAuditLog(
-        id: const Uuid().v4(),
-        tripId: widget.trip.id,
-        actionType: 'delete_settlement',
-        itemTitle: 'Payment of ${CurrencyFormatter.format(widget.existingSettlement!.amount, currency: widget.trip.defaultCurrency)}',
-        performedByMemberId: currentMember?.id ?? 'User',
-        performedByName: currentMember?.name ?? 'Companion',
-        timestamp: DateTime.now(),
-        reason: 'Payment cancelled / deleted',
-        changeDetails: 'Deleted ${CurrencyFormatter.format(widget.existingSettlement!.amount, currency: widget.trip.defaultCurrency)}',
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text('Delete Payment Record?'),
+        content: const Text('This will remove the settlement and recalculate balances.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              Navigator.pop(ctx);
+              ref.read(allSettlementsProvider.notifier).deleteSettlement(widget.existingSettlement!.id);
+              Navigator.of(context).pop();
+            },
+            child: const Text('Delete'),
+          ),
+        ],
       ),
     );
-
-    Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
     final isEditing = widget.existingSettlement != null;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      title: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(isEditing ? 'Edit Payment' : 'Record Payment', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-          if (isEditing)
-            IconButton(
-              icon: const Icon(Icons.delete_outline, color: Colors.red),
-              onPressed: _deleteSettlement,
-            ),
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.surfaceDark : Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        border: Border.all(color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(isDark ? 80 : 30),
+            blurRadius: 20,
+            offset: const Offset(0, -4),
+          ),
         ],
       ),
-      content: SizedBox(
-        width: MediaQuery.of(context).size.width * 0.85,
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
+      padding: EdgeInsets.only(
+        top: 10,
+        left: 20,
+        right: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          child: Form(
+            key: _formKey,
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                DropdownButtonFormField<String>(
-                  value: _payerId.isNotEmpty ? _payerId : null,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Payer (Who Paid)', prefixIcon: Icon(Icons.person)),
-                  items: widget.trip.members.map((m) {
-                    return DropdownMenuItem(value: m.id, child: Text(m.name, overflow: TextOverflow.ellipsis));
-                  }).toList(),
-                  onChanged: (val) {
-                    if (val != null) setState(() => _payerId = val);
-                  },
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  value: _receiverId.isNotEmpty ? _receiverId : null,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Receiver (Who Got Paid)', prefixIcon: Icon(Icons.person_outline)),
-                  items: widget.trip.members.map((m) {
-                    return DropdownMenuItem(value: m.id, child: Text(m.name, overflow: TextOverflow.ellipsis));
-                  }).toList(),
-                  onChanged: (val) {
-                    if (val != null) setState(() => _receiverId = val);
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _amountController,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: InputDecoration(
-                    labelText: 'Amount Paid',
-                    prefixText: '${CurrencyFormatter.getCurrencySymbol(widget.trip.defaultCurrency)} ',
+                // Top drag handle
+                Center(
+                  child: Container(
+                    width: 38,
+                    height: 4.5,
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white24 : Colors.grey[300],
+                      borderRadius: BorderRadius.circular(4),
+                    ),
                   ),
-                  validator: (val) {
-                    if (val == null || val.trim().isEmpty) return 'Please enter amount';
-                    final parsed = double.tryParse(val.trim());
-                    if (parsed == null || parsed <= 0) return 'Enter valid amount';
-                    return null;
-                  },
+                ),
+                const SizedBox(height: 14),
+
+                // Header Row
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withAlpha(22),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.handshake_rounded, size: 20, color: AppTheme.primary),
+                        ),
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              isEditing ? 'Edit Payment' : 'Record Payment',
+                              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, letterSpacing: -0.3),
+                            ),
+                            Text(
+                              'Direct member-to-member debt settlement',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isEditing)
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 22),
+                            tooltip: 'Delete Payment',
+                            onPressed: _deleteSettlement,
+                          ),
+                        IconButton(
+                          icon: Icon(Icons.close_rounded, size: 22, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+
+                // Directional Transfer Visualizer (Payer -> Receiver)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppTheme.surfaceMutedDark : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      // Payer Card
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.arrow_upward_rounded, size: 12, color: AppTheme.primary),
+                                const SizedBox(width: 3),
+                                Text(
+                                  'PAID BY',
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.6,
+                                    color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: isDark ? AppTheme.surfaceDark : Colors.white,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1),
+                                  width: 0.9,
+                                ),
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value: _payerId.isNotEmpty ? _payerId : null,
+                                  isExpanded: true,
+                                  icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
+                                  items: widget.trip.members.map((m) {
+                                    final isOpposite = m.id == _receiverId;
+                                    return DropdownMenuItem(
+                                      value: m.id,
+                                      child: Row(
+                                        children: [
+                                          CircleAvatar(
+                                            radius: 11,
+                                            backgroundColor: AppTheme.primary.withAlpha(30),
+                                            child: Text(
+                                              m.initials,
+                                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Expanded(
+                                            child: Text(
+                                              m.name,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                                            ),
+                                          ),
+                                          if (isOpposite)
+                                            Container(
+                                              margin: const EdgeInsets.only(left: 4),
+                                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                              decoration: BoxDecoration(
+                                                color: AppTheme.secondary.withAlpha(25),
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: const Text('Swap', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: AppTheme.secondary)),
+                                            ),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+                                  onChanged: (val) {
+                                    if (val != null) {
+                                      setState(() {
+                                        if (val == _receiverId) {
+                                          _receiverId = _payerId;
+                                        }
+                                        _payerId = val;
+                                      });
+                                    }
+                                  },
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Directional Transfer Indicator with Tap-to-Swap
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        child: Column(
+                          children: [
+                            const SizedBox(height: 14),
+                            Tooltip(
+                              message: 'Swap Payer & Receiver',
+                              child: Material(
+                                color: Colors.transparent,
+                                shape: const CircleBorder(),
+                                child: InkWell(
+                                  onTap: _swapMembers,
+                                  customBorder: const CircleBorder(),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(7),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primary.withAlpha(20),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: AppTheme.primary.withAlpha(60), width: 0.9),
+                                    ),
+                                    child: const Icon(Icons.swap_horiz_rounded, size: 16, color: AppTheme.primary),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Receiver Card
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.arrow_downward_rounded, size: 12, color: AppTheme.secondary),
+                                const SizedBox(width: 3),
+                                Text(
+                                  'RECEIVED BY',
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.6,
+                                    color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: isDark ? AppTheme.surfaceDark : Colors.white,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1),
+                                  width: 0.9,
+                                ),
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value: _receiverId.isNotEmpty ? _receiverId : null,
+                                  isExpanded: true,
+                                  icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
+                                  items: widget.trip.members.map((m) {
+                                    final isOpposite = m.id == _payerId;
+                                    return DropdownMenuItem(
+                                      value: m.id,
+                                      child: Row(
+                                        children: [
+                                          CircleAvatar(
+                                            radius: 11,
+                                            backgroundColor: AppTheme.secondary.withAlpha(30),
+                                            child: Text(
+                                              m.initials,
+                                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.secondary),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Expanded(
+                                            child: Text(
+                                              m.name,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                                            ),
+                                          ),
+                                          if (isOpposite)
+                                            Container(
+                                              margin: const EdgeInsets.only(left: 4),
+                                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                              decoration: BoxDecoration(
+                                                color: AppTheme.primary.withAlpha(25),
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: const Text('Swap', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: AppTheme.primary)),
+                                            ),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+                                  onChanged: (val) {
+                                    if (val != null) {
+                                      setState(() {
+                                        if (val == _payerId) {
+                                          _payerId = _receiverId;
+                                        }
+                                        _receiverId = val;
+                                      });
+                                    }
+                                  },
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_payerId == _receiverId) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withAlpha(20),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.red.withAlpha(60), width: 0.8),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.warning_amber_rounded, size: 14, color: Colors.red),
+                        SizedBox(width: 6),
+                        Text('Payer and receiver cannot be the same member.', style: TextStyle(fontSize: 11, color: Colors.red, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+
+                // Hero Amount Input Card
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppTheme.surfaceDark : Colors.white,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1),
+                      width: 1.1,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'AMOUNT TRANSFERRED',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.8,
+                              color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                            ),
+                          ),
+                          if (widget.defaultTransfer != null)
+                            InkWell(
+                              onTap: () {
+                                _amountController.text = widget.defaultTransfer!.amount.toStringAsFixed(2);
+                              },
+                              borderRadius: BorderRadius.circular(6),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primary.withAlpha(isDark ? 30 : 18),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: AppTheme.primary.withAlpha(50), width: 0.8),
+                                ),
+                                child: Text(
+                                  'Settle Full (${CurrencyFormatter.format(widget.defaultTransfer!.amount, currency: widget.trip.defaultCurrency)})',
+                                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Text(
+                            CurrencyFormatter.getCurrencySymbol(widget.trip.defaultCurrency),
+                            style: const TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.w900,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextFormField(
+                              controller: _amountController,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              style: TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.5,
+                                color: isDark ? Colors.white : AppTheme.textMainLight,
+                              ),
+                              decoration: InputDecoration(
+                                hintText: '0.00',
+                                hintStyle: TextStyle(
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w900,
+                                  color: isDark ? Colors.grey[700] : Colors.grey[300],
+                                ),
+                                border: InputBorder.none,
+                                isDense: true,
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                              validator: (val) {
+                                if (val == null || val.trim().isEmpty) return 'Please enter amount';
+                                final parsed = double.tryParse(val.trim());
+                                if (parsed == null || parsed <= 0) return 'Enter valid amount';
+                                return null;
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  value: _paymentMethod,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Payment Method', prefixIcon: Icon(Icons.payment)),
-                  items: ['Cash / Direct', 'UPI / Google Pay', 'Venmo / PayPal', 'Bank Transfer', 'Other'].map((method) {
-                    return DropdownMenuItem(value: method, child: Text(method, overflow: TextOverflow.ellipsis));
-                  }).toList(),
-                  onChanged: (val) {
-                    if (val != null) setState(() => _paymentMethod = val);
-                  },
+
+                // Payment Method Selector Pills
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'PAYMENT METHOD',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.8,
+                        color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 7,
+                      runSpacing: 7,
+                      children: _paymentMethods.map((entry) {
+                        final methodName = entry.$1;
+                        final methodIcon = entry.$2;
+                        final isSelected = _paymentMethod == methodName;
+
+                        return Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () => setState(() => _paymentMethod = methodName),
+                            borderRadius: BorderRadius.circular(10),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 150),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? AppTheme.primary.withAlpha(isDark ? 35 : 20)
+                                    : (isDark ? Colors.white.withAlpha(8) : const Color(0xFFF1F5F9)),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? AppTheme.primary
+                                      : (isDark ? Colors.white.withAlpha(16) : const Color(0xFFE2E8F0)),
+                                  width: isSelected ? 1.2 : 0.8,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    methodIcon,
+                                    size: 14,
+                                    color: isSelected ? AppTheme.primary : (isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    methodName,
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                                      color: isSelected
+                                          ? AppTheme.primary
+                                          : (isDark ? Colors.grey[300] : const Color(0xFF475569)),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 12),
+
+                // Notes Field
                 TextFormField(
                   controller: _notesController,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Notes (Optional)',
-                    hintText: 'e.g. Settle lunch & fuel',
-                    prefixIcon: Icon(Icons.notes),
+                    hintText: 'e.g. Settle dinner, tolls, and fuel',
+                    prefixIcon: const Icon(Icons.notes_rounded, size: 20),
+                    filled: true,
+                    fillColor: isDark ? AppTheme.surfaceMutedDark : const Color(0xFFF8FAFC),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide(color: isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide(color: isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: AppTheme.primary, width: 1.4),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   ),
                 ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  title: const Text('Initial Advance Contribution'),
-                  subtitle: const Text('Mark this as an upfront deposit to the trip organizer', style: TextStyle(fontSize: 11)),
-                  value: _isAdvance,
-                  activeColor: AppTheme.primary,
-                  contentPadding: EdgeInsets.zero,
-                  onChanged: (val) {
-                    setState(() => _isAdvance = val);
-                  },
+                const SizedBox(height: 10),
+
+                // Initial Advance Contribution Card
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white.withAlpha(6) : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: isDark ? Colors.white.withAlpha(14) : const Color(0xFFE2E8F0),
+                      width: 0.9,
+                    ),
+                  ),
+                  child: SwitchListTile(
+                    title: const Text(
+                      'Advance Contribution',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: const Text(
+                      'Mark as an upfront deposit to the trip organizer',
+                      style: TextStyle(fontSize: 11),
+                    ),
+                    value: _isAdvance,
+                    activeThumbColor: AppTheme.primary,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) {
+                      setState(() => _isAdvance = val);
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Submit Button
+                FilledButton.icon(
+                  onPressed: (_payerId.isNotEmpty && _receiverId.isNotEmpty && _payerId != _receiverId)
+                      ? _saveSettlement
+                      : null,
+                  icon: const Icon(Icons.check_circle_rounded, size: 18),
+                  label: Text(
+                    isEditing ? 'Save Changes' : 'Record Payment',
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: isDark ? Colors.white12 : Colors.grey[300],
+                    disabledForegroundColor: isDark ? Colors.white30 : Colors.grey[500],
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
                 ),
               ],
             ),
           ),
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-        ElevatedButton(
-          onPressed: _saveSettlement,
-          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white),
-          child: Text(isEditing ? 'Save Changes' : 'Record Payment'),
-        ),
-      ],
     );
   }
 }

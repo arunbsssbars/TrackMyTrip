@@ -29,6 +29,7 @@ import '../../models/proximity_alert.dart';
 import '../notifications/notification_center_sheet.dart';
 import '../common/sos_badge_icon.dart';
 import '../common/universal_bottom_bar.dart';
+import '../../widgets/app_floating_button.dart';
 
 class TripDetailScreen extends ConsumerStatefulWidget {
   final String tripId;
@@ -110,7 +111,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
           ],
         ),
         content: Text(
-          'Reopening "${trip.title}" will allow you and all companions to resume adding stoppages, logging expenses, and tracking live GPS.\n\nA notification will be sent to all companions.',
+          'Reopening "${trip.title}" will allow you and all members to resume adding stoppages, logging expenses, and tracking live GPS.\n\nA notification will be sent to all members.',
           style: const TextStyle(fontSize: 13.5, height: 1.4),
         ),
         actions: [
@@ -124,7 +125,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
               final updatedTrip = trip.copyWith(isCompleted: false);
               await ref.read(tripListProvider.notifier).updateTrip(updatedTrip);
 
-              // Broadcast notification to all companions
+              // Broadcast notification to all members
               final authUser = ref.read(authNotifierProvider).valueOrNull;
               final creatorName = (authUser?.displayName.isNotEmpty == true) ? authUser!.displayName : 'Trip Leader';
               ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
@@ -137,7 +138,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('Journey reopened! Companions have been notified.'),
+                    content: Text('Journey reopened! Members have been notified.'),
                     backgroundColor: Color(0xFF10B981),
                     behavior: SnackBarBehavior.floating,
                   ),
@@ -584,7 +585,8 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
             return const SizedBox.shrink();
           }
 
-          IconData icon;
+          IconData? icon;
+          Widget? customIcon;
           String label;
           VoidCallback onPressed;
 
@@ -597,7 +599,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
             };
           } else if (index == 3) {
             // Tab 3: Bills & Splits / Budget tab
-            icon = Icons.add_card_rounded;
+            customIcon = const OcrAddIcon();
             label = 'Add Bill';
             onPressed = () {
               AppNavigator.push(
@@ -629,49 +631,12 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
             return const SizedBox.shrink();
           }
 
-          return Container(
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF0D9488), Color(0xFF0F766E)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(28),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF0D9488).withAlpha(110),
-                  blurRadius: 14,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-              border: Border.all(color: Colors.white.withAlpha(45), width: 1),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: onPressed,
-                borderRadius: BorderRadius.circular(28),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(icon, color: Colors.white, size: 18),
-                      const SizedBox(width: 6.5),
-                      Text(
-                        label,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 13,
-                          letterSpacing: -0.2,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          return AppFloatingActionButton(
+            heroTag: 'trip_detail_fab_$index',
+            icon: icon,
+            customIcon: customIcon,
+            label: label,
+            onTap: onPressed,
           );
         },
       ),

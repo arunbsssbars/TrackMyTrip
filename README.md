@@ -1,10 +1,10 @@
-# Track My Trip (TripTrackerApp)
+# Track My Trip (TrackMyTrip)
 
 [![Flutter Version](https://img.shields.io/badge/Flutter-3.x-blue.svg)](https://flutter.dev)
 [![Dart Version](https://img.shields.io/badge/Dart-3.x-teal.svg)](https://dart.dev)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20Riverpod%20%2B%20Offline--First-indigo.svg)](https://riverpod.dev)
-[![Tests Passing](https://img.shields.io/badge/Tests-108%20Passing-brightgreen.svg)](https://github.com/arunbsssbars/TripTrackerApp)
-[![Release](https://img.shields.io/badge/Release-v2.3--overhaul-orange.svg)](https://github.com/arunbsssbars/TripTrackerApp/releases)
+[![Tests Passing](https://img.shields.io/badge/Tests-119%20Passing-brightgreen.svg)](https://github.com/arunbsssbars/TrackMyTrip)
+[![Release](https://img.shields.io/badge/Release-v2.3--overhaul-orange.svg)](https://github.com/arunbsssbars/TrackMyTrip/releases)
 
 **Track My Trip** is an enterprise-grade, offline-first mobile application designed for solo travelers, families, and expedition convoys. It unifies high-precision GPS telemetry, multi-party mathematical expense splitting, real-time companion radar, and anti-resurrection distributed data integrity across SQLite and Cloud Firestore.
 

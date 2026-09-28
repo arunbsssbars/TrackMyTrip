@@ -1083,7 +1083,7 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
                     title: const Text('Currently Stopped Here', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                     subtitle: const Text('Keep stoppage active until you depart', style: TextStyle(fontSize: 10)),
                     value: _isOngoing,
-                    activeColor: AppTheme.secondary,
+                    activeThumbColor: AppTheme.secondary,
                     contentPadding: EdgeInsets.zero,
                     onChanged: (val) => setState(() => _isOngoing = val),
                   ),

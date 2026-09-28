@@ -75,7 +75,7 @@ class _PulsingLiveBeaconState extends State<PulsingLiveBeacon>
                   height: widget.dotSize,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: widget.color.withOpacity(_opacityAnimation.value),
+                    color: widget.color.withValues(alpha: _opacityAnimation.value),
                   ),
                 ),
               );
@@ -90,7 +90,7 @@ class _PulsingLiveBeaconState extends State<PulsingLiveBeacon>
               color: widget.color,
               boxShadow: [
                 BoxShadow(
-                  color: widget.color.withOpacity(0.65),
+                  color: widget.color.withValues(alpha: 0.65),
                   blurRadius: 5,
                   spreadRadius: 1.2,
                 ),
@@ -108,10 +108,10 @@ class _PulsingLiveBeaconState extends State<PulsingLiveBeacon>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: widget.color.withOpacity(0.16),
+        color: widget.color.withValues(alpha: 0.16),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
-          color: widget.color.withOpacity(0.45),
+          color: widget.color.withValues(alpha: 0.45),
           width: 0.8,
         ),
       ),

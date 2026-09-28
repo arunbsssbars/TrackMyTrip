@@ -723,7 +723,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                       Expanded(
                         flex: 4,
                         child: DropdownButtonFormField<String>(
-                          value: CurrencyFormatter.commonCurrencies.contains(_foreignCurrency)
+                          initialValue: CurrencyFormatter.commonCurrencies.contains(_foreignCurrency)
                               ? _foreignCurrency
                               : 'USD',
                           isExpanded: true,
@@ -1201,7 +1201,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                 Expanded(
                   flex: 5,
                   child: DropdownButtonFormField<String>(
-                    value: AppConstants.expenseCategories.contains(_selectedCategory)
+                    initialValue: AppConstants.expenseCategories.contains(_selectedCategory)
                         ? _selectedCategory
                         : AppConstants.expenseCategories.first,
                     isExpanded: true,
@@ -1702,7 +1702,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                       ),
                       Switch(
                         value: _attachLocation,
-                        activeColor: const Color(0xFF0EA5E9),
+                        activeThumbColor: const Color(0xFF0EA5E9),
                         onChanged: (val) {
                           setState(() {
                             _attachLocation = val;

@@ -59,7 +59,7 @@ class AppTheme {
           letterSpacing: -0.4,
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: surfaceLight,
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -116,7 +116,7 @@ class AppTheme {
           borderSide: const BorderSide(color: primary, width: 1.8),
         ),
       ),
-      tabBarTheme: const TabBarTheme(
+      tabBarTheme: const TabBarThemeData(
         indicatorColor: primary,
         labelColor: primary,
         unselectedLabelColor: textMutedLight,
@@ -156,7 +156,7 @@ class AppTheme {
           letterSpacing: -0.4,
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: surfaceDark,
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -213,7 +213,7 @@ class AppTheme {
           borderSide: const BorderSide(color: primaryLight, width: 1.8),
         ),
       ),
-      tabBarTheme: const TabBarTheme(
+      tabBarTheme: const TabBarThemeData(
         indicatorColor: primaryLight,
         labelColor: primaryLight,
         unselectedLabelColor: textMutedDark,

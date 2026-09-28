@@ -30,7 +30,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
       context,
       ref,
       widget.trip,
-      actionLabel: 'invite companions',
+      actionLabel: 'invite members',
     );
     if (!canProceed || !mounted) return;
 
@@ -71,7 +71,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Added "${newMember.name}" as custom companion!'),
+                content: Text('Added "${newMember.name}" as custom member!'),
                 backgroundColor: AppTheme.primary,
                 behavior: SnackBarBehavior.floating,
               ),
@@ -114,7 +114,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
       context,
       ref,
       widget.trip,
-      actionLabel: 'add a custom companion',
+      actionLabel: 'add a custom member',
     );
     if (!canProceed || !mounted) return;
 
@@ -143,7 +143,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Add an offline companion (e.g. driver, guide, family member without the app) to split expenses and track attendance.',
+                'Add an offline member (e.g. driver, guide, family member without the app) to split expenses and track attendance.',
                 style: TextStyle(fontSize: 12.5, color: Colors.grey),
               ),
               const SizedBox(height: 14),
@@ -152,7 +152,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                 autofocus: true,
                 textCapitalization: TextCapitalization.words,
                 decoration: InputDecoration(
-                  labelText: 'Companion Name',
+                  labelText: 'Member Name',
                   hintText: 'e.g. Driver Ramesh, Tour Guide',
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
@@ -182,7 +182,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('Added "$name" as custom companion!'),
+                    content: Text('Added "$name" as custom member!'),
                     backgroundColor: AppTheme.primary,
                     behavior: SnackBarBehavior.floating,
                   ),
@@ -316,7 +316,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
       ),
       body: ListView(
         physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 88),
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 88),
         children: [
           // 1. Members Header & Add Actions (Invite & Custom)
         Row(
@@ -362,23 +362,14 @@ class _MembersTabState extends ConsumerState<MembersTab> {
 
         const SizedBox(height: 10),
 
-        // 3. Members List
-        Card(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-            side: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
-          ),
-          color: isDark ? const Color(0xFF1E293B) : Colors.white,
-          child: ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: currentTrip.members.length,
-            separatorBuilder: (_, __) => Divider(
-              height: 1,
-              color: isDark ? Colors.white10 : const Color(0xFFF1F5F9),
-            ),
-            itemBuilder: (context, index) {
+        // 3. Members List — Individual Container Cards
+        ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          itemCount: currentTrip.members.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
               final member = currentTrip.members[index];
               final isMemberCreator = currentTrip.isCreator(member.id);
               final isMe = (currentUid != null && member.id == currentUid) ||
@@ -391,80 +382,131 @@ class _MembersTabState extends ConsumerState<MembersTab> {
               final colorInt = int.tryParse(member.colorHex ?? '0xFF0D9488') ?? 0xFF0D9488;
               final avatarColor = Color(colorInt);
 
-              return ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                leading: Stack(
-                  children: [
-                    CircleAvatar(
-                      radius: 22,
-                      backgroundColor: avatarColor,
-                      child: Text(
-                        member.initials,
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                      ),
-                    ),
-                    if (isMemberCreator)
-                      Positioned(
-                        right: 0,
-                        bottom: 0,
-                        child: Container(
-                          padding: const EdgeInsets.all(2),
-                          decoration: const BoxDecoration(
-                            color: Colors.amber,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.star_rounded, size: 10, color: Colors.white),
-                        ),
-                      ),
-                  ],
+              // Action widget for trailing area
+              Widget? actionWidget;
+              if (isCreator && !isMe) {
+                actionWidget = IconButton(
+                  icon: const Icon(Icons.person_remove_rounded, size: 20, color: Colors.redAccent),
+                  onPressed: () => _confirmRemoveMember(member),
+                  tooltip: 'Remove member',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                );
+              } else if (isMe && !isMemberCreator) {
+                actionWidget = TextButton.icon(
+                  onPressed: _confirmLeaveTrip,
+                  icon: const Icon(Icons.exit_to_app_rounded, size: 16, color: Colors.red),
+                  label: const Text('Leave', style: TextStyle(color: Colors.red, fontSize: 12)),
+                  style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
+                );
+              }
+
+              return Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
                 ),
-                title: Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        member.name,
-                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    if (isMe) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withAlpha(30),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: const Text(
-                          'You',
-                          style: TextStyle(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.primary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                subtitle: Column(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const SizedBox(height: 4),
+                    // Row 1: Avatar + Name/Email + Action
+                    Row(
+                      children: [
+                        // Avatar with creator badge
+                        Stack(
+                          children: [
+                            CircleAvatar(
+                              radius: 22,
+                              backgroundColor: avatarColor,
+                              child: Text(
+                                member.initials,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                              ),
+                            ),
+                            if (isMemberCreator)
+                              Positioned(
+                                right: 0,
+                                bottom: 0,
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.amber,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.star_rounded, size: 10, color: Colors.white),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(width: 12),
+                        // Name + Email
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      member.name,
+                                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  if (isMe) ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.primary.withAlpha(30),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: const Text(
+                                        'You',
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppTheme.primary,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              if (member.email != null) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  member.email!,
+                                  style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : AppTheme.textMutedLight),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        // Action button
+                        if (actionWidget != null) actionWidget,
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    // Row 2: Role pill + Compact Paid amount pill
                     Wrap(
-                      spacing: 6,
+                      spacing: 8,
                       runSpacing: 4,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
                             color: isMemberCreator ? Colors.amber.withAlpha(25) : Colors.blue.withAlpha(25),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
-                            isMemberCreator ? 'Trip Lead' : 'Companion',
+                            isMemberCreator ? 'Trip Lead' : 'Member',
                             style: TextStyle(
                               fontSize: 10.5,
                               fontWeight: FontWeight.bold,
@@ -473,7 +515,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                           ),
                         ),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
                             color: memberPaid > 0 ? const Color(0xFF10B981).withAlpha(25) : (isDark ? Colors.white10 : Colors.grey.withAlpha(30)),
                             borderRadius: BorderRadius.circular(6),
@@ -485,38 +527,17 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                               fontWeight: FontWeight.w800,
                               color: memberPaid > 0 ? const Color(0xFF059669) : (isDark ? Colors.grey[400] : Colors.grey[700]),
                             ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
                     ),
-                    if (member.email != null) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        member.email!,
-                        style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : AppTheme.textMutedLight),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
                   ],
                 ),
-                trailing: isCreator && !isMe
-                    ? IconButton(
-                        icon: const Icon(Icons.person_remove_rounded, size: 20, color: Colors.redAccent),
-                        onPressed: () => _confirmRemoveMember(member),
-                        tooltip: 'Remove companion',
-                      )
-                    : (isMe && !isMemberCreator
-                        ? TextButton.icon(
-                            onPressed: _confirmLeaveTrip,
-                            icon: const Icon(Icons.exit_to_app_rounded, size: 16, color: Colors.red),
-                            label: const Text('Leave', style: TextStyle(color: Colors.red, fontSize: 12)),
-                          )
-                        : null),
               );
             },
           ),
-        ),
 
         const SizedBox(height: 20),
 

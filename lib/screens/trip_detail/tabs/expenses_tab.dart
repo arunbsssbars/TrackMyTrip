@@ -788,14 +788,14 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
               color: isDark ? AppTheme.surfaceDark : Colors.white,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: isDark ? AppTheme.borderDark : AppTheme.borderLight,
+                color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0),
                 width: 1.1,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withAlpha(10),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
+                  color: Colors.black.withAlpha(isDark ? 25 : 8),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
                 ),
               ],
             ),
@@ -804,47 +804,79 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'TOTAL EXPENDITURE',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.8,
-                              color: isDark ? Colors.grey[400] : AppTheme.textMutedLight,
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.account_balance_wallet_rounded,
+                              size: 13,
+                              color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                             ),
-                          ),
-                          const SizedBox(height: 2),
-                          FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency),
-                              style: const TextStyle(
-                                fontSize: 24,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -0.5,
-                                color: AppTheme.primary,
+                            const SizedBox(width: 5),
+                            Text(
+                              'TOTAL EXPENDITURE',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.8,
+                                color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                               ),
                             ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency),
+                            style: TextStyle(
+                              fontSize: 27,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.6,
+                              color: isDark ? Colors.white : AppTheme.textMainLight,
+                            ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 10),
-                    FilledButton.icon(
-                      onPressed: () => _openAddExpenseScreen(context),
-                      icon: const Icon(Icons.add_rounded, size: 18),
-                      label: const Text('Add Bill', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    // Quick Set / Edit Budget Pill Button
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => _showSetBudgetDialog(context),
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6.5),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withAlpha(isDark ? 30 : 18),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppTheme.primary.withAlpha(60), width: 0.9),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                budget != null ? Icons.edit_note_rounded : Icons.track_changes_rounded,
+                                size: 16,
+                                color: AppTheme.primary,
+                              ),
+                              const SizedBox(width: 4.5),
+                              Text(
+                                budget != null ? 'Edit Target' : 'Set Budget',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppTheme.primary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -859,68 +891,106 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                       Flexible(
                         child: Text(
                           'Budget: ${CurrencyFormatter.format(budget, currency: trip.defaultCurrency)}',
-                          style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : Colors.grey[600], fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: isDark ? Colors.grey[300] : const Color(0xFF475569),
+                            fontWeight: FontWeight.w700,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       const SizedBox(width: 8),
                       Flexible(
-                        child: Text(
-                          totalSpent > budget
-                              ? 'Over by ${CurrencyFormatter.format(totalSpent - budget, currency: trip.defaultCurrency)}'
-                              : 'Remaining: ${CurrencyFormatter.format(budget - totalSpent, currency: trip.defaultCurrency)}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: totalSpent > budget ? Colors.red : Colors.green,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                          decoration: BoxDecoration(
+                            color: (totalSpent > budget
+                                    ? Colors.red
+                                    : (totalSpent / budget > 0.8
+                                        ? const Color(0xFFF59E0B)
+                                        : const Color(0xFF10B981)))
+                                .withAlpha(isDark ? 35 : 20),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: (totalSpent > budget
+                                      ? Colors.red
+                                      : (totalSpent / budget > 0.8
+                                          ? const Color(0xFFF59E0B)
+                                          : const Color(0xFF10B981)))
+                                  .withAlpha(isDark ? 90 : 60),
+                              width: 0.8,
+                            ),
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          child: Text(
+                            totalSpent > budget
+                                ? 'Over by ${CurrencyFormatter.format(totalSpent - budget, currency: trip.defaultCurrency)}'
+                                : 'Remaining: ${CurrencyFormatter.format(budget - totalSpent, currency: trip.defaultCurrency)} (${((1.0 - (totalSpent / budget).clamp(0.0, 1.0)) * 100).toStringAsFixed(0)}%)',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w800,
+                              color: totalSpent > budget
+                                  ? Colors.red
+                                  : (totalSpent / budget > 0.8
+                                      ? const Color(0xFFF59E0B)
+                                      : const Color(0xFF10B981)),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 7),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(6),
                     child: LinearProgressIndicator(
                       value: (totalSpent / budget).clamp(0.0, 1.0),
-                      backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
+                      backgroundColor: isDark ? Colors.grey[800] : const Color(0xFFE2E8F0),
                       valueColor: AlwaysStoppedAnimation<Color>(
-                        totalSpent > budget ? Colors.red : AppTheme.primary,
+                        totalSpent > budget
+                            ? const Color(0xFFEF4444)
+                            : (totalSpent / budget > 0.8 ? const Color(0xFFF59E0B) : const Color(0xFF10B981)),
                       ),
-                      minHeight: 6,
+                      minHeight: 7,
                     ),
                   ),
                 ] else ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   Material(
                     color: Colors.transparent,
                     child: Ink(
                       decoration: BoxDecoration(
-                        color: AppTheme.primary.withAlpha(15),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: AppTheme.primary.withAlpha(45), width: 1),
+                        color: isDark ? Colors.white.withAlpha(8) : const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: isDark ? Colors.white.withAlpha(18) : const Color(0xFFE2E8F0),
+                          width: 0.9,
+                        ),
                       ),
                       child: InkWell(
                         onTap: () => _showSetBudgetDialog(context),
-                        borderRadius: BorderRadius.circular(8),
-                        splashColor: AppTheme.primary.withAlpha(30),
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                        borderRadius: BorderRadius.circular(10),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                           child: Row(
                             children: [
-                              Icon(Icons.add_circle_outline_rounded, size: 14, color: AppTheme.primary),
-                              SizedBox(width: 6),
+                              Icon(Icons.savings_outlined, size: 15, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+                              const SizedBox(width: 7),
                               Expanded(
                                 child: Text(
-                                  'Set a trip budget target to track remaining balance',
-                                  style: TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.bold),
+                                  'Set a spending goal to track remaining trip balance',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
+                              Icon(Icons.chevron_right_rounded, size: 16, color: isDark ? Colors.grey[500] : Colors.grey[400]),
                             ],
                           ),
                         ),
@@ -928,6 +998,51 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                     ),
                   ),
                 ],
+
+                const SizedBox(height: 10),
+                Divider(
+                  color: isDark ? AppTheme.borderDark : const Color(0xFFF1F5F9),
+                  height: 1,
+                  thickness: 0.8,
+                ),
+                const SizedBox(height: 8),
+
+                // Quick stats row at the bottom of the card
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.receipt_long_rounded,
+                          size: 12,
+                          color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${expenses.length} bill${expenses.length == 1 ? '' : 's'} recorded',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      widget.trip.isSolo
+                          ? 'Solo Journey'
+                          : widget.trip.isFamily
+                              ? 'Family Pool'
+                              : '${widget.trip.members.length} members sharing',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                      ),
+                    ),
+                  ],
+                ),
 
                 // Trust & Audit History Bar
                 const SizedBox(height: 10),
@@ -1031,6 +1146,7 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
 
                     return ListView.builder(
                       controller: _scrollController,
+                      physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
                       padding: const EdgeInsets.fromLTRB(16, 6, 16, 80),
                       itemCount: displayedExpenses.length + (hasMore ? 1 : 0),
                       itemBuilder: (context, index) {
@@ -1092,10 +1208,14 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Container(
-                                      padding: const EdgeInsets.all(8),
+                                      padding: const EdgeInsets.all(9),
                                       decoration: BoxDecoration(
-                                        color: AppTheme.primary.withAlpha(20),
-                                        borderRadius: BorderRadius.circular(12),
+                                        color: AppTheme.primary.withAlpha(isDark ? 28 : 16),
+                                        borderRadius: BorderRadius.circular(13),
+                                        border: Border.all(
+                                          color: AppTheme.primary.withAlpha(isDark ? 55 : 35),
+                                          width: 0.9,
+                                        ),
                                       ),
                                       child: Icon(AppConstants.getExpenseIcon(expense.category), color: AppTheme.primary, size: 20),
                                     ),
@@ -1106,7 +1226,7 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                                         children: [
                                           Text(
                                             expense.title,
-                                            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: -0.2),
+                                            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5, letterSpacing: -0.2),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                           ),
@@ -1115,21 +1235,26 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                                             'Paid by $payerName',
                                             style: TextStyle(
                                               fontSize: 12,
-                                              fontWeight: FontWeight.bold,
+                                              fontWeight: FontWeight.w700,
                                               color: isDark ? Colors.grey[300] : const Color(0xFF334155),
                                             ),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                           ),
-                                          const SizedBox(height: 2),
+                                          const SizedBox(height: 3),
                                           Row(
+                                            mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              Icon(Icons.schedule_rounded, size: 11, color: isDark ? Colors.grey[400] : Colors.grey[600]),
-                                              const SizedBox(width: 3.5),
+                                              Icon(Icons.schedule_rounded, size: 11.5, color: isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                                              const SizedBox(width: 4),
                                               Flexible(
                                                 child: Text(
-                                                  '${DateFormatter.formatDateTime(expense.createdAt)}${matchedStop != null ? ' • ${matchedStop.name}' : ''}',
-                                                  style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+                                                  DateFormatter.formatRelativeOrTime(expense.createdAt),
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                                  ),
                                                   maxLines: 1,
                                                   overflow: TextOverflow.ellipsis,
                                                 ),
@@ -1142,6 +1267,7 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                                     const SizedBox(width: 8),
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment: CrossAxisAlignment.center,
                                       children: [
                                         Column(
                                           crossAxisAlignment: CrossAxisAlignment.end,
@@ -1151,8 +1277,8 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                                               CurrencyFormatter.format(expense.totalAmount, currency: expense.currency),
                                               style: TextStyle(
                                                 fontWeight: FontWeight.w900,
-                                                fontSize: 16,
-                                                letterSpacing: -0.3,
+                                                fontSize: 17,
+                                                letterSpacing: -0.4,
                                                 color: isDark ? Colors.white : AppTheme.textMainLight,
                                               ),
                                             ),
@@ -1161,20 +1287,15 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                                                 CurrencyFormatter.format(expense.originalAmount!, currency: expense.originalCurrency),
                                                 style: const TextStyle(
                                                   fontSize: 11,
-                                                  fontWeight: FontWeight.w600,
+                                                  fontWeight: FontWeight.w700,
                                                   color: Colors.blue,
                                                 ),
                                               ),
                                           ],
                                         ),
-                                        const SizedBox(width: 3),
-                                        Icon(
-                                          Icons.chevron_right_rounded,
-                                          size: 19,
-                                          color: isDark ? Colors.grey[400] : const Color(0xFF94A3B8),
-                                        ),
+                                        const SizedBox(width: 2),
                                         PopupMenuButton<String>(
-                                          icon: Icon(Icons.more_vert_rounded, size: 18, color: isDark ? Colors.grey[400] : const Color(0xFF94A3B8)),
+                                          icon: Icon(Icons.more_vert_rounded, size: 19, color: isDark ? Colors.grey[400] : const Color(0xFF94A3B8)),
                                           padding: EdgeInsets.zero,
                                           constraints: const BoxConstraints(),
                                           onSelected: (val) {
@@ -1237,70 +1358,45 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                                   ],
                                 ),
                                 const SizedBox(height: 10),
-                                const Divider(height: 1),
+                                Divider(
+                                  color: isDark ? AppTheme.borderDark : const Color(0xFFF1F5F9),
+                                  height: 1,
+                                  thickness: 0.8,
+                                ),
                                 const SizedBox(height: 8),
 
                                 // Stoppage Anchor tag + Bill Badge + Splits Info
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                Wrap(
+                                  alignment: WrapAlignment.spaceBetween,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  spacing: 8,
+                                  runSpacing: 6,
                                   children: [
-                                    Flexible(
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          if (matchedStop != null)
-                                            Flexible(
-                                              child: Material(
-                                                color: Colors.transparent,
-                                                child: Ink(
-                                                  decoration: BoxDecoration(
-                                                    color: AppTheme.secondary.withAlpha(isDark ? 28 : 18),
-                                                    borderRadius: BorderRadius.circular(7),
-                                                    border: Border.all(color: AppTheme.secondary.withAlpha(isDark ? 80 : 50), width: 0.9),
-                                                  ),
-                                                  child: Padding(
-                                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                                                    child: Row(
-                                                      mainAxisSize: MainAxisSize.min,
-                                                      children: [
-                                                        const Icon(Icons.place_rounded, size: 12, color: AppTheme.secondary),
-                                                        const SizedBox(width: 3.5),
-                                                        Flexible(
-                                                          child: Text(
-                                                            matchedStop.name,
-                                                            style: const TextStyle(
-                                                              fontSize: 10.5,
-                                                              fontWeight: FontWeight.bold,
-                                                              color: AppTheme.secondary,
-                                                            ),
-                                                            maxLines: 1,
-                                                            overflow: TextOverflow.ellipsis,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 4,
+                                      crossAxisAlignment: WrapCrossAlignment.center,
+                                      children: [
+                                        if (matchedStop != null)
+                                          Material(
+                                            color: Colors.transparent,
+                                            child: Ink(
+                                              decoration: BoxDecoration(
+                                                color: AppTheme.secondary.withAlpha(isDark ? 28 : 18),
+                                                borderRadius: BorderRadius.circular(7),
+                                                border: Border.all(color: AppTheme.secondary.withAlpha(isDark ? 80 : 50), width: 0.8),
                                               ),
-                                            )
-                                          else if (expense.locationName != null && expense.locationName!.isNotEmpty)
-                                            Padding(
-                                              padding: const EdgeInsets.only(right: 6),
-                                              child: Container(
+                                              child: Padding(
                                                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                                                decoration: BoxDecoration(
-                                                  color: AppTheme.secondary.withAlpha(isDark ? 28 : 18),
-                                                  borderRadius: BorderRadius.circular(7),
-                                                  border: Border.all(color: AppTheme.secondary.withAlpha(isDark ? 80 : 50), width: 0.9),
-                                                ),
                                                 child: Row(
                                                   mainAxisSize: MainAxisSize.min,
                                                   children: [
-                                                    const Icon(Icons.place_rounded, size: 12, color: AppTheme.secondary),
+                                                    const Icon(Icons.place_rounded, size: 11.5, color: AppTheme.secondary),
                                                     const SizedBox(width: 3.5),
-                                                    Flexible(
+                                                    ConstrainedBox(
+                                                      constraints: const BoxConstraints(maxWidth: 130),
                                                       child: Text(
-                                                        expense.locationName!,
+                                                        matchedStop.name,
                                                         style: const TextStyle(
                                                           fontSize: 10.5,
                                                           fontWeight: FontWeight.bold,
@@ -1313,56 +1409,112 @@ class _ExpensesTabState extends ConsumerState<ExpensesTab> {
                                                   ],
                                                 ),
                                               ),
-                                            )
-                                          else
-                                            Text('General Trip', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
-                                          if (expense.receiptImagePath != null) ...[
-                                            const SizedBox(width: 6),
-                                            Material(
-                                              color: Colors.transparent,
-                                              child: Ink(
-                                                decoration: BoxDecoration(
-                                                  color: Colors.teal.withAlpha(isDark ? 30 : 20),
-                                                  borderRadius: BorderRadius.circular(7),
-                                                  border: Border.all(color: Colors.teal.withAlpha(isDark ? 80 : 50), width: 1),
-                                                ),
-                                                child: InkWell(
-                                                  onTap: () => _showReceiptDialog(context, expense),
-                                                  borderRadius: BorderRadius.circular(7),
-                                                  splashColor: Colors.teal.withAlpha(40),
-                                                  child: const Padding(
-                                                    padding: EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                                                    child: Row(
-                                                      mainAxisSize: MainAxisSize.min,
-                                                      children: [
-                                                        Icon(Icons.receipt_long_rounded, size: 12, color: Colors.teal),
-                                                        SizedBox(width: 3.5),
-                                                        Text(
-                                                          'Receipt 🔍',
-                                                          style: TextStyle(
-                                                            fontSize: 10.5,
-                                                            fontWeight: FontWeight.bold,
-                                                            color: Colors.teal,
-                                                          ),
-                                                        ),
-                                                      ],
+                                            ),
+                                          )
+                                        else if (expense.locationName != null && expense.locationName!.isNotEmpty)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: AppTheme.secondary.withAlpha(isDark ? 28 : 18),
+                                              borderRadius: BorderRadius.circular(7),
+                                              border: Border.all(color: AppTheme.secondary.withAlpha(isDark ? 80 : 50), width: 0.8),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(Icons.place_rounded, size: 11.5, color: AppTheme.secondary),
+                                                const SizedBox(width: 3.5),
+                                                ConstrainedBox(
+                                                  constraints: const BoxConstraints(maxWidth: 130),
+                                                  child: Text(
+                                                    expense.locationName!,
+                                                    style: const TextStyle(
+                                                      fontSize: 10.5,
+                                                      fontWeight: FontWeight.bold,
+                                                      color: AppTheme.secondary,
                                                     ),
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          )
+                                        else
+                                          Text('General Trip', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                                        if (expense.receiptImagePath != null)
+                                          Material(
+                                            color: Colors.transparent,
+                                            child: Ink(
+                                              decoration: BoxDecoration(
+                                                color: Colors.teal.withAlpha(isDark ? 30 : 20),
+                                                borderRadius: BorderRadius.circular(7),
+                                                border: Border.all(color: Colors.teal.withAlpha(isDark ? 80 : 50), width: 0.8),
+                                              ),
+                                              child: InkWell(
+                                                onTap: () => _showReceiptDialog(context, expense),
+                                                borderRadius: BorderRadius.circular(7),
+                                                splashColor: Colors.teal.withAlpha(40),
+                                                child: const Padding(
+                                                  padding: EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                                  child: Row(
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      Icon(Icons.receipt_long_rounded, size: 11.5, color: Colors.teal),
+                                                      SizedBox(width: 3.5),
+                                                      Text(
+                                                        'Receipt',
+                                                        style: TextStyle(
+                                                          fontSize: 10.5,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: Colors.teal,
+                                                        ),
+                                                      ),
+                                                    ],
                                                   ),
                                                 ),
                                               ),
                                             ),
-                                          ],
+                                          ),
+                                      ],
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: isDark ? Colors.white.withAlpha(10) : const Color(0xFFF1F5F9),
+                                        borderRadius: BorderRadius.circular(7),
+                                        border: Border.all(
+                                          color: isDark ? Colors.white.withAlpha(18) : const Color(0xFFE2E8F0),
+                                          width: 0.8,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            widget.trip.isSolo
+                                                ? Icons.person_rounded
+                                                : widget.trip.isFamily
+                                                    ? Icons.family_restroom_rounded
+                                                    : Icons.group_rounded,
+                                            size: 11.5,
+                                            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            widget.trip.isSolo
+                                                ? 'Solo Log'
+                                                : widget.trip.isFamily
+                                                    ? 'Family Pool'
+                                                    : 'Split • ${expense.splits.where((s) => s.isIncluded).length} members',
+                                            style: TextStyle(
+                                              fontSize: 10.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                            ),
+                                          ),
                                         ],
                                       ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      widget.trip.isSolo
-                                          ? '🎒 Solo Log'
-                                          : widget.trip.isFamily
-                                              ? '👨‍👩‍👧 Family Pool'
-                                              : 'Split across ${expense.splits.where((s) => s.isIncluded).length} companions',
-                                      style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : Colors.grey[600]),
                                     ),
                                   ],
                                 ),

@@ -75,23 +75,31 @@ class SettlementNotifier extends StateNotifier<List<Settlement>> {
       final trip = trips.where((t) => t.id == settlement.tripId).firstOrNull;
       final payerName = trip?.getMemberName(settlement.payerMemberId) ?? 'Member';
       final payeeName = trip?.getMemberName(settlement.receiverMemberId) ?? 'Member';
+      final isAdv = settlement.isAdvance;
 
       _ref.read(allAuditLogsProvider.notifier).logAction(TripAuditLog(
         id: 'settle_${settlement.id}',
         tripId: settlement.tripId,
-        actionType: 'settlement',
-        itemTitle: 'Settlement: $payerName → $payeeName (${settlement.currency} ${settlement.amount.toStringAsFixed(0)})',
+        actionType: isAdv ? 'advance_payment' : 'settlement',
+        itemTitle: isAdv
+            ? 'Advance Paid: $payerName → $payeeName (${settlement.currency} ${settlement.amount.toStringAsFixed(0)})'
+            : 'Settlement: $payerName → $payeeName (${settlement.currency} ${settlement.amount.toStringAsFixed(0)})',
         performedByMemberId: settlement.payerMemberId,
         performedByName: payerName,
         timestamp: settlement.settledAt,
-        changeDetails: 'Payment recorded via ${settlement.paymentMethod}',
+        changeDetails: isAdv
+            ? 'Advance contribution recorded via ${settlement.paymentMethod}'
+            : 'Payment recorded via ${settlement.paymentMethod}',
       ));
 
       _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
+        id: 'alert_settle_${settlement.id}',
         tripId: settlement.tripId,
         type: AlertType.settlementRecorded,
-        title: 'Settlement Payment Recorded',
-        message: '$payerName paid $payeeName ${settlement.currency} ${settlement.amount.toStringAsFixed(0)} to settle balance',
+        title: isAdv ? 'Advance Payment Recorded' : 'Settlement Payment Recorded',
+        message: isAdv
+            ? '$payerName paid $payeeName an advance of ${settlement.currency} ${settlement.amount.toStringAsFixed(0)}'
+            : '$payerName paid $payeeName ${settlement.currency} ${settlement.amount.toStringAsFixed(0)} to settle balance',
       );
     } catch (_) {}
   }

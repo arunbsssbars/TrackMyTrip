@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trip_tracker_app/core/services/live_location_tracker_service.dart';
 import 'package:trip_tracker_app/models/trip.dart';
 import 'package:trip_tracker_app/models/trip_member.dart';
 import 'package:trip_tracker_app/widgets/current_trip_hero_card.dart';
@@ -38,7 +39,7 @@ void main() {
   }
 
   group('CurrentTripHeroCard Component Tests', () {
-    testWidgets('renders basic trip details, travelers count, and share code', (WidgetTester tester) async {
+    testWidgets('renders basic trip details, telemetry gauges, and share code', (WidgetTester tester) async {
       final trip = createTestTrip();
 
       await tester.pumpWidget(
@@ -49,94 +50,37 @@ void main() {
               isDark: false,
               totalSpent: 1200.0,
               expenseCount: 4,
+              trackingState: const LiveTrackingState(
+                currentSpeedKmh: 45.0,
+                totalDistanceKm: 12.3,
+              ),
               onTapLedger: () {},
             ),
           ),
         ),
       );
 
-      // Verify title & journey type pill
+      // Verify title & telemetry
       expect(find.text('Swiss Alps Expedition'), findsOneWidget);
-      expect(find.text('GROUP'), findsOneWidget);
-      expect(find.text('2 Travelers'), findsOneWidget);
+      expect(find.byIcon(Icons.groups_rounded), findsOneWidget);
       expect(find.text('ALPINE-99'), findsOneWidget);
-      expect(find.text('JOURNEY EXPENDITURE'), findsOneWidget);
+      expect(find.text('KM/H SPEED'), findsOneWidget);
+      expect(find.text('45'), findsOneWidget);
+      expect(find.text('KM DISTANCE'), findsOneWidget);
+      expect(find.text('12.3'), findsOneWidget);
+      expect(find.text('Total Spent: '), findsOneWidget);
       expect(find.text('\$1,200.00'), findsOneWidget);
+      expect(find.text('4 bills'), findsOneWidget);
     });
 
-    testWidgets('displays budget progress bar and remaining budget when under budget', (WidgetTester tester) async {
-      final trip = createTestTrip(budget: 2000.0);
+    testWidgets('correctly pluralizes single expense entry as 1 bill', (WidgetTester tester) async {
+      final trip = createTestTrip();
 
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
             body: CurrentTripHeroCard(
               trip: trip,
-              isDark: false,
-              totalSpent: 1200.0,
-              expenseCount: 3,
-              onTapLedger: () {},
-            ),
-          ),
-        ),
-      );
-
-      expect(find.byType(LinearProgressIndicator), findsOneWidget);
-      expect(find.text('60% of \$2,000.00'), findsOneWidget);
-      expect(find.text('Left: \$800.00'), findsOneWidget);
-    });
-
-    testWidgets('displays Over Budget warning when totalSpent exceeds budget', (WidgetTester tester) async {
-      final trip = createTestTrip(budget: 1000.0);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CurrentTripHeroCard(
-              trip: trip,
-              isDark: true,
-              totalSpent: 1350.0,
-              expenseCount: 6,
-              onTapLedger: () {},
-            ),
-          ),
-        ),
-      );
-
-      expect(find.text('Over Budget!'), findsOneWidget);
-      expect(find.text('100% of \$1,000.00'), findsOneWidget);
-    });
-
-    testWidgets('renders fallback expense entry count when trip has no budget', (WidgetTester tester) async {
-      final tripWithoutBudget = createTestTrip(budget: null);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CurrentTripHeroCard(
-              trip: tripWithoutBudget,
-              isDark: false,
-              totalSpent: 450.0,
-              expenseCount: 3,
-              onTapLedger: () {},
-            ),
-          ),
-        ),
-      );
-
-      // Should not show LinearProgressIndicator
-      expect(find.byType(LinearProgressIndicator), findsNothing);
-      expect(find.text('3 entries logged • Tap to view ledger & analytics'), findsOneWidget);
-    });
-
-    testWidgets('correctly pluralizes single expense entry', (WidgetTester tester) async {
-      final tripWithoutBudget = createTestTrip(budget: null);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CurrentTripHeroCard(
-              trip: tripWithoutBudget,
               isDark: false,
               totalSpent: 85.0,
               expenseCount: 1,
@@ -146,7 +90,27 @@ void main() {
         ),
       );
 
-      expect(find.text('1 entry logged • Tap to view ledger & analytics'), findsOneWidget);
+      expect(find.text('1 bill'), findsOneWidget);
+    });
+
+    testWidgets('correctly pluralizes multiple expense entries as N bills', (WidgetTester tester) async {
+      final trip = createTestTrip();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CurrentTripHeroCard(
+              trip: trip,
+              isDark: false,
+              totalSpent: 450.0,
+              expenseCount: 3,
+              onTapLedger: () {},
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('3 bills'), findsOneWidget);
     });
 
     testWidgets('displays CONCLUDED badge when trip is completed', (WidgetTester tester) async {
@@ -169,7 +133,7 @@ void main() {
       expect(find.text('CONCLUDED'), findsOneWidget);
     });
 
-    testWidgets('displays SOLO JOURNEY badge when trip is solo', (WidgetTester tester) async {
+    testWidgets('displays backpack icon when trip is solo', (WidgetTester tester) async {
       final soloTrip = createTestTrip(
         members: const [
           TripMember(id: 'u1', name: 'Solo Traveler', isCurrentUser: true),
@@ -190,10 +154,10 @@ void main() {
         ),
       );
 
-      expect(find.text('SOLO'), findsOneWidget);
+      expect(find.byIcon(Icons.backpack_rounded), findsOneWidget);
     });
 
-    testWidgets('triggers onTapLedger callback when ledger block is tapped', (WidgetTester tester) async {
+    testWidgets('triggers onTapLedger callback when financial summary is tapped', (WidgetTester tester) async {
       var ledgerTapped = false;
       final trip = createTestTrip();
 
@@ -213,11 +177,92 @@ void main() {
         ),
       );
 
-      // Tap on the financial glance expenditure block
-      await tester.tap(find.text('JOURNEY EXPENDITURE'));
+      await tester.tap(find.text('2 bills'));
       await tester.pumpAndSettle();
 
       expect(ledgerTapped, isTrue);
+    });
+
+    testWidgets('triggers onToggleTracking callback when telemetry button is tapped', (WidgetTester tester) async {
+      var trackingToggled = false;
+      final trip = createTestTrip();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CurrentTripHeroCard(
+              trip: trip,
+              isDark: false,
+              totalSpent: 500.0,
+              expenseCount: 2,
+              onTapLedger: () {},
+              onToggleTracking: () {
+                trackingToggled = true;
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Start Live Convoy Telemetry'));
+      await tester.pumpAndSettle();
+
+      expect(trackingToggled, isTrue);
+    });
+
+    testWidgets('triggers onTapCard callback when trip title header is tapped', (WidgetTester tester) async {
+      var cardTapped = false;
+      final trip = createTestTrip();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CurrentTripHeroCard(
+              trip: trip,
+              isDark: false,
+              totalSpent: 500.0,
+              expenseCount: 2,
+              onTapLedger: () {},
+              onTapCard: () {
+                cardTapped = true;
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Swiss Alps Expedition'));
+      await tester.pumpAndSettle();
+
+      expect(cardTapped, isTrue);
+    });
+
+    testWidgets('triggers onToggleTracking callback when live convoy button is tapped', (WidgetTester tester) async {
+      var trackingToggled = false;
+      final trip = createTestTrip();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CurrentTripHeroCard(
+              trip: trip,
+              isDark: false,
+              totalSpent: 500.0,
+              expenseCount: 2,
+              onTapLedger: () {},
+              onToggleTracking: () {
+                trackingToggled = true;
+              },
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Start Live Convoy Telemetry'), findsOneWidget);
+      await tester.tap(find.text('Start Live Convoy Telemetry'));
+      await tester.pumpAndSettle();
+
+      expect(trackingToggled, isTrue);
     });
   });
 }

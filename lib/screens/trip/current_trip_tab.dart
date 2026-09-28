@@ -85,58 +85,70 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
               Text('Conclude Journey?', style: TextStyle(fontWeight: FontWeight.bold)),
             ],
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Are you sure you want to conclude "${trip.title}"?\n\n'
-                '• Live convoy tracking room will be closed.\n'
-                '• Journey will be marked concluded.\n'
-                '• You will be redirected to the Review & Analytics screen.',
-                style: const TextStyle(fontSize: 13, height: 1.4),
-              ),
-              const SizedBox(height: 14),
-              InkWell(
-                onTap: () {
-                  setDialogState(() {
-                    captureFinalLocation = !captureFinalLocation;
-                  });
-                },
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    children: [
-                      Checkbox(
-                        value: captureFinalLocation,
-                        onChanged: (v) {
-                          setDialogState(() {
-                            captureFinalLocation = v ?? true;
-                          });
-                        },
-                      ),
-                      const Expanded(
-                        child: Text(
-                          'Capture current GPS position as final destination stop',
-                          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Are you sure you want to conclude "${trip.title}"?\n\n'
+                  '• Live convoy tracking room will be closed.\n'
+                  '• Journey will be marked concluded.\n'
+                  '• You will be redirected to the Review & Analytics screen.',
+                  textAlign: TextAlign.justify,
+                  style: const TextStyle(fontSize: 13, height: 1.45),
+                ),
+                const SizedBox(height: 14),
+                InkWell(
+                  onTap: () {
+                    setDialogState(() {
+                      captureFinalLocation = !captureFinalLocation;
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        Checkbox(
+                          value: captureFinalLocation,
+                          onChanged: (v) {
+                            setDialogState(() {
+                              captureFinalLocation = v ?? true;
+                            });
+                          },
                         ),
-                      ),
-                    ],
+                        const Expanded(
+                          child: Text(
+                            'Capture current GPS position as final destination stop',
+                            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
+          actionsOverflowDirection: VerticalDirection.down,
+          actionsOverflowButtonSpacing: 8,
+          actionsPadding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancel'),
             ),
             FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFD97706)),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFD97706),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              ),
               icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
-              label: const Text('Conclude Journey'),
+              label: const Text(
+                'Conclude Journey',
+                overflow: TextOverflow.ellipsis,
+              ),
               onPressed: () => Navigator.pop(ctx, true),
             ),
           ],
@@ -398,203 +410,7 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
     );
   }
 
-  void _showTripAuditTrailSheet(BuildContext context, Trip trip) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        final isDark = Theme.of(ctx).brightness == Brightness.dark;
-        return Consumer(
-          builder: (context, ref, _) {
-            final allLogs = ref.watch(allAuditLogsProvider);
-            final tripLogs = allLogs.where((l) => l.tripId == trip.id).toList();
-            tripLogs.sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
-            return Container(
-              constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.85),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SizedBox(height: 12),
-                  Container(
-                    width: 42,
-                    height: 4.5,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.withAlpha(80),
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(7),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF8B5CF6).withAlpha(25),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: const Icon(Icons.history_rounded, color: Color(0xFF8B5CF6), size: 20),
-                            ),
-                            const SizedBox(width: 10),
-                            Text(
-                              'Audit Trail (${tripLogs.length})',
-                              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17),
-                            ),
-                          ],
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close_rounded, size: 20),
-                          onPressed: () => Navigator.of(ctx).pop(),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Text(
-                      'Chronological operational events and modifications for "${trip.title}".',
-                      style: TextStyle(fontSize: 12, color: isDark ? Colors.grey[400] : const Color(0xFF64748B)),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  const Divider(height: 1),
-                  Flexible(
-                    child: tripLogs.isEmpty
-                        ? Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.event_note_rounded, size: 44, color: Colors.grey.withAlpha(120)),
-                                const SizedBox(height: 10),
-                                const Text(
-                                  'No audit records yet for this trip',
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.grey),
-                                ),
-                                const SizedBox(height: 4),
-                                const Text(
-                                  'Expenses, settlements, stops, and reviews will log here automatically.',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                                ),
-                              ],
-                            ),
-                          )
-                        : ListView.separated(
-                            shrinkWrap: true,
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            itemCount: tripLogs.length,
-                            separatorBuilder: (_, __) => const SizedBox(height: 8),
-                            itemBuilder: (ctx, index) {
-                              final log = tripLogs[index];
-                              IconData icon = Icons.info_outline_rounded;
-                              Color iconColor = AppTheme.primary;
-                              if (log.actionType.contains('expense')) {
-                                icon = Icons.receipt_long_rounded;
-                                iconColor = const Color(0xFF10B981);
-                              } else if (log.actionType.contains('settlement')) {
-                                icon = Icons.handshake_rounded;
-                                iconColor = const Color(0xFF3B82F6);
-                              } else if (log.actionType.contains('stoppage')) {
-                                icon = Icons.place_rounded;
-                                iconColor = const Color(0xFFF97316);
-                              } else if (log.actionType.contains('memory')) {
-                                icon = Icons.photo_library_rounded;
-                                iconColor = const Color(0xFFEC4899);
-                              } else if (log.actionType.contains('review')) {
-                                icon = Icons.star_rate_rounded;
-                                iconColor = const Color(0xFFF59E0B);
-                              }
-
-                              return Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
-                                  ),
-                                ),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.all(8),
-                                      decoration: BoxDecoration(
-                                        color: iconColor.withAlpha(25),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Icon(icon, size: 16, color: iconColor),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                            children: [
-                                              Flexible(
-                                                child: Text(
-                                                  log.itemTitle,
-                                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                                                  overflow: TextOverflow.ellipsis,
-                                                ),
-                                              ),
-                                              Text(
-                                                DateFormatter.formatShortDate(log.timestamp),
-                                                style: const TextStyle(fontSize: 10.5, color: Colors.grey),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 3),
-                                          Text(
-                                            'By ${log.performedByName} • ${log.actionType.replaceAll('_', ' ').toUpperCase()}',
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                          if (log.changeDetails != null && log.changeDetails!.isNotEmpty) ...[
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              log.changeDetails!,
-                                              style: TextStyle(
-                                                fontSize: 11.5,
-                                                fontStyle: FontStyle.italic,
-                                                color: isDark ? Colors.grey[300] : const Color(0xFF334155),
-                                              ),
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
 
   Widget _buildSwitcherFilterChip(
     String label,
@@ -1253,12 +1069,13 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
           : _buildActiveTripContent(context, currentTrip, trackingState, isDark),
       floatingActionButton: (currentTrip != null && !currentTrip.isCompleted && MediaQuery.of(context).viewInsets.bottom == 0)
           ? AppFloatingActionButton(
+              heroTag: 'current_trip_ocr_fab',
               onTap: () => _openOcrAddExpense(currentTrip),
-              icon: Icons.document_scanner_rounded,
-              label: 'Scan Bill (OCR)',
+              customIcon: const OcrAddIcon(),
+              label: 'Add Bill',
             )
           : null,
-      floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
@@ -1468,13 +1285,27 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
               ),
             ],
 
-            // 1. Executive Journey Cockpit Hero Card
+            // 1. Executive Journey Cockpit Hero Card with Live Telemetry
             CurrentTripHeroCard(
               trip: trip,
               isDark: isDark,
               totalSpent: totalSpent,
               expenseCount: tripExpenses.length,
-              categoryBreakdown: categoryBreakdown,
+              trackingState: trackingState,
+              onToggleTracking: () async {
+                if (trackingState.isTracking) {
+                  ref.read(liveLocationTrackerProvider.notifier).stopTracking();
+                } else {
+                  final canProceed = await TripGuardHelper.ensureTripOpenForEdit(
+                    context,
+                    ref,
+                    trip,
+                    actionLabel: 'broadcast live convoy telemetry',
+                  );
+                  if (!canProceed || !context.mounted) return;
+                  ref.read(liveLocationTrackerProvider.notifier).startTracking(trip.id);
+                }
+              },
               onTapPieChart: () {
                 HapticFeedback.lightImpact();
                 AppNavigator.push(context, TripAnalyticsScreen(tripId: trip.id, initialTabIndex: 0));
@@ -1487,190 +1318,110 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                 HapticFeedback.lightImpact();
                 _navigateToTripDetail(trip, initialTabIndex: 0);
               },
-              onTapAuditTrail: () {
-                HapticFeedback.lightImpact();
-                AuditLogSheet.show(context, trip);
-              },
             ),
+            const SizedBox(height: 10),
+
+            // Full-Width Audit Trail & Trust History Action Button (Between Top Card and Journey Modules)
+            _buildAuditTrailAndTrustHistoryButton(context, trip, isDark),
             const SizedBox(height: 14),
 
-            // 2. Connected Convoy Telemetry Instrument Cluster
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: isDark ? AppTheme.surfaceDark : Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0),
-                  width: 1,
+            // 2. Journey Modules Hub (All 6 Core Modules in Clean 3x2 Grid)
+            const Row(
+              children: [
+                Icon(Icons.grid_view_rounded, size: 16, color: AppTheme.primary),
+                SizedBox(width: 6),
+                Text(
+                  'JOURNEY MODULES (6)',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.8,
+                    color: Colors.grey,
+                  ),
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withAlpha(isDark ? 25 : 8),
-                    blurRadius: 10,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.speed_rounded, size: 18, color: AppTheme.primary),
-                          SizedBox(width: 6),
-                          Text(
-                            'LIVE CONVOY TELEMETRY',
-                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 0.8),
-                          ),
-                        ],
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
-                        decoration: BoxDecoration(
-                          color: trackingState.isTracking
-                              ? const Color(0xFF10B981).withAlpha(20)
-                              : (isDark ? Colors.white10 : const Color(0xFFF1F5F9)),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: trackingState.isTracking
-                                ? const Color(0xFF10B981).withAlpha(100)
-                                : Colors.transparent,
-                            width: 0.8,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.circle,
-                              size: 6,
-                              color: trackingState.isTracking ? const Color(0xFF10B981) : Colors.grey,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              trackingState.isTracking ? 'GPS Active' : 'GPS Standby',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: trackingState.isTracking ? const Color(0xFF10B981) : Colors.grey,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-
-                  // Gauges
-                  Row(
-                    children: [
-                      // Speed gauge
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-                          decoration: BoxDecoration(
-                            color: isDark ? Colors.white.withAlpha(6) : const Color(0xFFF8FAFC),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
-                          ),
-                          child: Column(
-                            children: [
-                              Text(
-                                trackingState.currentSpeedKmh.toStringAsFixed(0),
-                                style: TextStyle(
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.w900,
-                                  color: trackingState.currentSpeedKmh > 5 ? const Color(0xFF10B981) : AppTheme.primary,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              const Text(
-                                'SPEED (KM/H)',
-                                style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Colors.grey),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      // Distance gauge
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-                          decoration: BoxDecoration(
-                            color: isDark ? Colors.white.withAlpha(6) : const Color(0xFFF8FAFC),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
-                          ),
-                          child: Column(
-                            children: [
-                              Text(
-                                trackingState.totalDistanceKm.toStringAsFixed(1),
-                                style: const TextStyle(
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              const Text(
-                                'DISTANCE (KM)',
-                                style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Colors.grey),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Tracking Toggle Controller
-                  SizedBox(
-                    width: double.infinity,
-                    child: trackingState.isTracking
-                        ? OutlinedButton.icon(
-                            onPressed: () {
-                              ref.read(liveLocationTrackerProvider.notifier).stopTracking();
-                            },
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.red,
-                              side: const BorderSide(color: Colors.red, width: 1.2),
-                              padding: const EdgeInsets.symmetric(vertical: 11),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            icon: const Icon(Icons.stop_rounded, size: 18),
-                            label: const Text('Pause Live Convoy Tracking', style: TextStyle(fontWeight: FontWeight.bold)),
-                          )
-                        : FilledButton.icon(
-                            onPressed: () async {
-                              final canProceed = await TripGuardHelper.ensureTripOpenForEdit(
-                                context,
-                                ref,
-                                trip,
-                                actionLabel: 'broadcast live convoy telemetry',
-                              );
-                              if (!canProceed || !context.mounted) return;
-                              ref.read(liveLocationTrackerProvider.notifier).startTracking(trip.id);
-                            },
-                            style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFF10B981),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 11),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            icon: const Icon(Icons.play_arrow_rounded, size: 20),
-                            label: const Text('Start Live Convoy Tracking', style: TextStyle(fontWeight: FontWeight.bold)),
-                          ),
-                  ),
-                ],
-              ),
+              ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildQuickActionCard(
+                    icon: Icons.timeline_rounded,
+                    title: 'Timeline',
+                    subtitle: '${stoppages.length} stops',
+                    color: AppTheme.primary,
+                    isDark: isDark,
+                    onTap: () => _navigateToTripDetail(trip, initialTabIndex: 0),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildQuickActionCard(
+                    icon: Icons.map_rounded,
+                    title: 'Live Route',
+                    subtitle: 'Radar & Nav',
+                    color: const Color(0xFF0F766E),
+                    isDark: isDark,
+                    onTap: () => _navigateToTripDetail(trip, initialTabIndex: 1),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildQuickActionCard(
+                    icon: Icons.groups_rounded,
+                    title: 'Members',
+                    subtitle: '${trip.members.length} members',
+                    color: const Color(0xFFF59E0B),
+                    isDark: isDark,
+                    onTap: () => _navigateToTripDetail(trip, initialTabIndex: 2),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildQuickActionCard(
+                    icon: Icons.account_balance_wallet_rounded,
+                    title: 'Bills & Splits',
+                    subtitle: '${tripExpenses.length} bills recorded',
+                    color: const Color(0xFF10B981),
+                    isDark: isDark,
+                    onTap: () => _navigateToTripDetail(trip, initialTabIndex: 3),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildQuickActionCard(
+                    icon: Icons.photo_library_rounded,
+                    title: 'Memories',
+                    subtitle: 'Photos & logs',
+                    color: const Color(0xFFEC4899),
+                    isDark: isDark,
+                    onTap: () => _navigateToTripDetail(trip, initialTabIndex: trip.isSolo ? 4 : 5),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildQuickActionCard(
+                    icon: Icons.analytics_rounded,
+                    title: 'Analytics',
+                    subtitle: 'Charts & ledger',
+                    color: const Color(0xFF06B6D4),
+                    isDark: isDark,
+                    onTap: () {
+                      AppNavigator.push(context, TripAnalyticsScreen(tripId: trip.id));
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
 
             // 4. Next Destination / Upcoming Waypoint Card
             if (nextStoppage != null) ...[
@@ -1777,104 +1528,6 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
               const SizedBox(height: 16),
             ],
 
-            // 4. Journey Modules Hub (All 6 Core Modules in Clean 3x2 Grid)
-            const Row(
-              children: [
-                Icon(Icons.grid_view_rounded, size: 16, color: AppTheme.primary),
-                SizedBox(width: 6),
-                Text(
-                  'JOURNEY MODULES (6)',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.8,
-                    color: Colors.grey,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildQuickActionCard(
-                    icon: Icons.timeline_rounded,
-                    title: 'Timeline',
-                    subtitle: '${stoppages.length} stops',
-                    color: AppTheme.primary,
-                    isDark: isDark,
-                    onTap: () => _navigateToTripDetail(trip, initialTabIndex: 0),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _buildQuickActionCard(
-                    icon: Icons.map_rounded,
-                    title: 'Live Route',
-                    subtitle: 'Radar & Nav',
-                    color: const Color(0xFF0F766E),
-                    isDark: isDark,
-                    onTap: () => _navigateToTripDetail(trip, initialTabIndex: 1),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildQuickActionCard(
-                    icon: Icons.people_alt_rounded,
-                    title: 'Companions',
-                    subtitle: '${trip.members.length} members',
-                    color: const Color(0xFFF59E0B),
-                    isDark: isDark,
-                    onTap: () => _navigateToTripDetail(trip, initialTabIndex: 2),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _buildQuickActionCard(
-                    icon: Icons.account_balance_wallet_rounded,
-                    title: 'Bills & Splits',
-                    subtitle: '${tripExpenses.length} bills recorded',
-                    color: const Color(0xFF10B981),
-                    isDark: isDark,
-                    onTap: () => _navigateToTripDetail(trip, initialTabIndex: 3),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildQuickActionCard(
-                    icon: Icons.photo_library_rounded,
-                    title: 'Memories',
-                    subtitle: 'Photos & logs',
-                    color: const Color(0xFFEC4899),
-                    isDark: isDark,
-                    onTap: () => _navigateToTripDetail(trip, initialTabIndex: trip.isSolo ? 4 : 5),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _buildQuickActionCard(
-                    icon: Icons.analytics_rounded,
-                    title: 'Analytics',
-                    subtitle: 'Charts & ledger',
-                    color: const Color(0xFF06B6D4),
-                    isDark: isDark,
-                    onTap: () {
-                      AppNavigator.push(context, TripAnalyticsScreen(tripId: trip.id));
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
             // 6. Journey Lifecycle & Executive Summary Actions (Items 17 & 18)
             const SizedBox(height: 16),
             const Row(
@@ -1895,7 +1548,38 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
             const SizedBox(height: 10),
             Row(
               children: [
-                // End Journey or Reopen Journey
+                // 1st place: Analytics & Metrics
+                Expanded(
+                  child: _buildInsightsPill(
+                    icon: Icons.analytics_rounded,
+                    label: 'Analytics & Metrics',
+                    color: const Color(0xFF06B6D4),
+                    isDark: isDark,
+                    onTap: () {
+                      AppNavigator.push(
+                        context,
+                        TripAnalyticsScreen(tripId: trip.id),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // 2nd place: Trip Audit Trail
+                Expanded(
+                  child: _buildInsightsPill(
+                    icon: Icons.history_rounded,
+                    label: 'Trip Audit Trail',
+                    color: const Color(0xFF8B5CF6),
+                    isDark: isDark,
+                    onTap: () => AuditLogSheet.show(context, trip),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                // 3rd place: End Journey or Reopen Journey
                 Expanded(
                   child: _buildInsightsPill(
                     icon: trip.isCompleted ? Icons.replay_rounded : Icons.flag_rounded,
@@ -1912,27 +1596,7 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                   ),
                 ),
                 const SizedBox(width: 10),
-                // Analytics & Metrics (Renamed from Review & Stats)
-                Expanded(
-                  child: _buildInsightsPill(
-                    icon: Icons.analytics_rounded,
-                    label: 'Analytics & Metrics',
-                    color: const Color(0xFF06B6D4),
-                    isDark: isDark,
-                    onTap: () {
-                      AppNavigator.push(
-                        context,
-                        TripAnalyticsScreen(tripId: trip.id),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                // Trip Review (1-5 Star Rating & Notes)
+                // 4th place: Trip Review (1-5 Star Rating & Notes)
                 Expanded(
                   child: _buildInsightsPill(
                     icon: Icons.star_rate_rounded,
@@ -1942,17 +1606,6 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                     color: const Color(0xFFF59E0B),
                     isDark: isDark,
                     onTap: () => _showTripReviewDialog(context, trip),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                // Trip Audit Trail
-                Expanded(
-                  child: _buildInsightsPill(
-                    icon: Icons.history_rounded,
-                    label: 'Trip Audit Trail',
-                    color: const Color(0xFF8B5CF6),
-                    isDark: isDark,
-                    onTap: () => _showTripAuditTrailSheet(context, trip),
                   ),
                 ),
               ],
@@ -1967,6 +1620,87 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
               onTap: () => _exportPdf(trip),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAuditTrailAndTrustHistoryButton(BuildContext context, Trip trip, bool isDark) {
+    return Material(
+      color: Colors.transparent,
+      child: Ink(
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.surfaceDark : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0),
+            width: 1.1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha(isDark ? 30 : 12),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.lightImpact();
+            AuditLogSheet.show(context, trip);
+          },
+          borderRadius: BorderRadius.circular(16),
+          splashColor: const Color(0xFF8B5CF6).withAlpha(20),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(7.5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8B5CF6).withAlpha(isDark ? 35 : 18),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.security_rounded,
+                    size: 18,
+                    color: Color(0xFF8B5CF6),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Audit Trail & Trust History',
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        'Tamper-evident activity logs & ledger transparency',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w500,
+                          color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 14,
+                  color: isDark ? Colors.grey[500] : const Color(0xFF94A3B8),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

@@ -47,7 +47,15 @@ class ProximityAlertService extends ChangeNotifier {
   void _loadAlerts() {
     final raw = _storage.getAllAlerts();
     final seen = <String>{};
-    _alerts = raw.where((a) => seen.add(a.id)).toList();
+    final seenSemantic = <String>{};
+    _alerts = raw.where((a) {
+      if (!seen.add(a.id)) return false;
+      if (a.type == AlertType.settlementRecorded) {
+        final key = '${a.tripId}_${a.senderMemberId}_${a.message}';
+        if (!seenSemantic.add(key)) return false;
+      }
+      return true;
+    }).toList();
     _inAppBannersEnabled = _storage.getInAppBannersEnabled();
     _syncAlertsFromTrips();
     notifyListeners();
@@ -141,15 +149,21 @@ class ProximityAlertService extends ChangeNotifier {
 
       // 5. Settlements
       for (final s in allSettlements.where((settle) => settle.tripId == trip.id)) {
-        if (!existingAlertIds.contains('alert_settle_${s.id}')) {
+        final alertId = 'alert_settle_${s.id}';
+        final alreadyLogged = existingAlertIds.contains(alertId) ||
+            _alerts.any((a) => a.tripId == trip.id && a.type == AlertType.settlementRecorded && (a.id == alertId || a.id.contains(s.id)));
+        if (!alreadyLogged) {
           final payerName = trip.getMemberName(s.payerMemberId);
           final payeeName = trip.getMemberName(s.receiverMemberId);
+          final isAdv = s.isAdvance;
           newAlerts.add(ProximityAlert(
-            id: 'alert_settle_${s.id}',
+            id: alertId,
             tripId: trip.id,
             type: AlertType.settlementRecorded,
-            title: 'Settlement Recorded',
-            message: '$payerName paid $payeeName (${s.currency} ${s.amount.toStringAsFixed(0)})',
+            title: isAdv ? 'Advance Payment Recorded' : 'Settlement Recorded',
+            message: isAdv
+                ? '$payerName paid $payeeName an advance of ${s.currency} ${s.amount.toStringAsFixed(0)}'
+                : '$payerName paid $payeeName (${s.currency} ${s.amount.toStringAsFixed(0)})',
             senderMemberId: s.payerMemberId,
             senderName: payerName,
             timestamp: s.settledAt,
@@ -421,6 +435,7 @@ class ProximityAlertService extends ChangeNotifier {
 
   /// Broadcasts an activity notification to all trip members (bills, memories, stops, settlements, invites, joins, leaves)
   Future<void> broadcastActivityAlert({
+    String? id,
     required String tripId,
     required AlertType type,
     required String title,
@@ -429,9 +444,12 @@ class ProximityAlertService extends ChangeNotifier {
     String? senderMemberId,
     String? senderName,
   }) async {
+    final alertId = id ?? 'act_${const Uuid().v4().substring(0, 8)}';
+    if (_alerts.any((a) => a.id == alertId)) return;
+
     final currentUser = UserService.getCurrentUser();
     final alert = ProximityAlert(
-      id: 'act_${const Uuid().v4().substring(0, 8)}',
+      id: alertId,
       tripId: tripId,
       type: type,
       title: title,

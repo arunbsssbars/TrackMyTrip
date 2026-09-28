@@ -15,7 +15,6 @@ import '../../../providers/stoppage_provider.dart';
 import '../../stoppage/add_stoppage_dialog.dart';
 import '../../stoppage/stoppage_detail_screen.dart';
 import '../../../core/utils/trip_guard_helper.dart';
-import '../../../widgets/app_floating_button.dart';
 
 class TimelineTab extends ConsumerStatefulWidget {
   final Trip trip;
@@ -955,14 +954,6 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
       }),
     ],
   ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      floatingActionButton: (!widget.trip.isCompleted && MediaQuery.of(context).viewInsets.bottom == 0)
-          ? AppFloatingActionButton(
-              onTap: () => _openAddStoppageDialog(context, autoDetectGps: true),
-              icon: Icons.add_location_alt_rounded,
-              label: 'Tag Stoppage',
-            )
-          : null,
-    );
+);
   }
 }

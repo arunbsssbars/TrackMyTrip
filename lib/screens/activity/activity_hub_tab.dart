@@ -1400,7 +1400,6 @@ enum ActivityNature {
         return ActivityNature.memory;
       case AlertType.locationShared:
       case AlertType.general:
-      default:
         return ActivityNature.general;
     }
   }

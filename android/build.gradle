@@ -3,16 +3,7 @@ allprojects {
         google()
         mavenCentral()
     }
-    configurations.all {
-        resolutionStrategy {
-            force 'androidx.core:core:1.13.1'
-            force 'androidx.core:core-ktx:1.13.1'
-            force 'org.jetbrains.kotlin:kotlin-stdlib:1.9.24'
-            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.24'
-            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.24'
-            force 'org.jetbrains.kotlin:kotlin-stdlib-common:1.9.24'
-        }
-    }
+
 }
 
 rootProject.buildDir = "../build"
@@ -25,9 +16,10 @@ subprojects {
 subprojects { project ->
     project.plugins.withId("com.android.library") {
         project.android.ext.flutter = [
-            compileSdkVersion: 35,
-            minSdkVersion: 21,
-            targetSdkVersion: 35,
+            compileSdkVersion: 36,
+            minSdkVersion: 24,
+            targetSdkVersion: 36,
+            ndkVersion: "25.1.8937393",
         ]
     }
 }

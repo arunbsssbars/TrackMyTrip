@@ -438,7 +438,7 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
 
               // Section 4: Companions Section
               if (_tripType == 'solo') ...[
-                _buildSectionHeader('4. Solo Traveler', Icons.person_rounded),
+                _buildSectionHeader('4. Solo Traveler', Icons.backpack_rounded),
                 const SizedBox(height: 8),
                 Container(
                   padding: const EdgeInsets.all(12),

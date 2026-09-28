@@ -377,7 +377,7 @@ class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
 
               // --- Uploader ---
               DropdownButtonFormField<String>(
-                value: _selectedMemberId ?? (members.isNotEmpty ? members.first.id : null),
+                initialValue: _selectedMemberId ?? (members.isNotEmpty ? members.first.id : null),
                 decoration: const InputDecoration(
                   labelText: 'Captured By',
                   prefixIcon: Icon(Icons.person_rounded),
