@@ -231,7 +231,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                     autocorrect: false,
                     decoration: InputDecoration(
                       labelText: 'Username Handle',
-                      hintText: 'Choose a unique username handle',
+                      hintText: 'Choose username',
                       prefixIcon: const Icon(Icons.alternate_email_rounded),
                       prefixText: '@',
                       suffixIcon: _isCheckingUsername
@@ -267,7 +267,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                     autocorrect: false,
                     decoration: const InputDecoration(
                       labelText: 'Email Address',
-                      hintText: 'Enter your email',
+                      hintText: 'Enter email',
                       prefixIcon: Icon(Icons.email_outlined),
                     ),
                     validator: (val) {
@@ -284,7 +284,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                     obscureText: _obscurePassword,
                     decoration: InputDecoration(
                       labelText: 'Password',
-                      hintText: 'Enter password (at least 6 characters)',
+                      hintText: 'Min 6 characters',
                       prefixIcon: const Icon(Icons.lock_outline_rounded),
                       suffixIcon: IconButton(
                         icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
@@ -304,7 +304,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                     obscureText: _obscureConfirmPassword,
                     decoration: InputDecoration(
                       labelText: 'Confirm Password',
-                      hintText: 'Re-enter your password',
+                      hintText: 'Re-enter password',
                       prefixIcon: const Icon(Icons.lock_clock_outlined),
                       suffixIcon: IconButton(
                         icon: Icon(_obscureConfirmPassword ? Icons.visibility_off : Icons.visibility),
@@ -345,8 +345,9 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
 
                   // Already have account
                   Center(
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    child: Wrap(
+                      alignment: WrapAlignment.center,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         Text(
                           'Already have an account? ',

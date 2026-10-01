@@ -283,15 +283,20 @@ class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScree
                           )
                         : const Row(
                             mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
                               SizedBox(width: 8),
-                              Text(
-                                "I've Verified My Email",
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
+                              Flexible(
+                                child: Text(
+                                  "I've Verified My Email",
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                             ],

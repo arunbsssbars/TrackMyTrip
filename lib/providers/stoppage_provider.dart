@@ -45,7 +45,7 @@ class StoppageNotifier extends StateNotifier<List<Stoppage>> {
       try {
         final trip = _storage.getTrips().where((t) => t.id == stoppage.tripId).firstOrNull;
         final creator = trip?.currentUserMember ?? (trip?.members.isNotEmpty == true ? trip!.members.first : null);
-        final authorName = creator?.name ?? 'Companion';
+        final authorName = stoppage.createdByName ?? creator?.name ?? 'Companion';
 
         _ref.read(allAuditLogsProvider.notifier).logAction(TripAuditLog(
           id: 'stop_${stoppage.id}',
@@ -59,10 +59,19 @@ class StoppageNotifier extends StateNotifier<List<Stoppage>> {
         ));
 
         _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
+          id: 'act_stop_${stoppage.id}',
           tripId: stoppage.tripId,
-          type: AlertType.stoppageArrival,
-          title: 'New Waypoint Added',
+          type: AlertType.stoppageAdded,
+          title: 'Stop Added',
           message: '$authorName added stop "${stoppage.name}"',
+          itemId: stoppage.id,
+          itemType: 'stop',
+          showLocalBanner: true,
+        );
+
+        _ref.read(proximityAlertServiceProvider).seedStoppageArrivalDebounce(
+          tripId: stoppage.tripId,
+          stoppageId: stoppage.id,
         );
       } catch (_) {}
 
@@ -82,12 +91,18 @@ class StoppageNotifier extends StateNotifier<List<Stoppage>> {
     }
   }
 
-  Future<void> updateStoppage(Stoppage updatedStoppage) async {
+  Future<void> updateStoppage(Stoppage updatedStoppage, {bool broadcast = true}) async {
     state = [
       for (final s in state)
         if (s.id == updatedStoppage.id) updatedStoppage else s
     ];
     await _storage.saveAllStoppages(state);
+
+    if (broadcast) {
+      try {
+        _ref.read(realtimeSyncServiceProvider).broadcastUpdateStoppage(updatedStoppage);
+      } catch (_) {}
+    }
 
     try {
       _ref.read(firestoreSyncServiceProvider).pushStoppage(updatedStoppage);
@@ -127,10 +142,16 @@ class StoppageNotifier extends StateNotifier<List<Stoppage>> {
     await updateStoppage(updated);
   }
 
-  Future<void> deleteStoppage(String stoppageId) async {
+  Future<void> deleteStoppage(String stoppageId, {bool broadcast = true}) async {
     final existing = state.firstWhere((s) => s.id == stoppageId, orElse: () => state.first);
     state = state.where((s) => s.id != stoppageId).toList();
     await _storage.saveAllStoppages(state);
+
+    if (broadcast) {
+      try {
+        _ref.read(realtimeSyncServiceProvider).broadcastDeleteStoppage(existing.tripId, stoppageId);
+      } catch (_) {}
+    }
 
     try {
       _ref.read(firestoreSyncServiceProvider).deleteStoppage(existing.tripId, stoppageId);

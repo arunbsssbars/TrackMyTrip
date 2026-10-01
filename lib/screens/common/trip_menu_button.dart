@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/cloud_trip_sync_service.dart';
 import '../../core/services/pdf_export_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/app_dialogs.dart';
+import '../../core/utils/app_snackbar.dart';
 import '../../core/utils/page_transitions.dart';
 import '../../models/trip.dart';
 import '../../providers/auth_provider.dart';
@@ -278,10 +280,7 @@ class TripMenuButton extends ConsumerWidget {
                     const SizedBox(height: 8),
                     TextButton(
                       onPressed: () {
-                        final updated = trip.copyWith(
-                          isCompleted: false,
-                        );
-                        ref.read(tripListProvider.notifier).updateTrip(updated);
+                        ref.read(tripListProvider.notifier).reopenTrip(trip.id);
                         Navigator.of(ctx).pop();
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
@@ -302,58 +301,26 @@ class TripMenuButton extends ConsumerWidget {
     );
   }
 
-  void _confirmReopenTrip(BuildContext context, WidgetRef ref) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
-          children: [
-            Icon(Icons.restart_alt_rounded, color: Color(0xFF10B981), size: 24),
-            SizedBox(width: 8),
-            Text('Reopen Journey?'),
-          ],
-        ),
-        content: Text(
-          'Reopening "${trip.title}" will set its status back to active, enabling live GPS convoy tracking, itinerary additions, and expense logging.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final updated = trip.copyWith(isCompleted: false);
-              ref.read(tripListProvider.notifier).updateTrip(updated);
-              Navigator.of(ctx).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('🔄 Journey reactivated! Ready for tracking.'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF10B981),
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Reopen Journey'),
-          ),
-        ],
-      ),
+  void _confirmReopenTrip(BuildContext context, WidgetRef ref) async {
+    final confirmed = await AppDialogs.confirm(
+      context,
+      title: 'Reopen Journey?',
+      message: 'Reopening "${trip.title}" will set its status back to active, enabling live GPS convoy tracking, itinerary additions, and expense logging.',
+      confirmLabel: 'Reopen Journey',
+      icon: Icons.restart_alt_rounded,
     );
+
+    if (confirmed && context.mounted) {
+      await ref.read(tripListProvider.notifier).reopenTrip(trip.id);
+      if (context.mounted) {
+        AppSnackBar.showSuccess(context, '🔄 Journey reactivated! Ready for tracking.');
+      }
+    }
   }
 
   void _confirmDeleteTrip(BuildContext context, WidgetRef ref) {
     if (trip.isCompleted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('🔒 Concluded journeys are permanently preserved for auditing and cannot be deleted.'),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      AppSnackBar.showError(context, '🔒 Concluded journeys are permanently preserved for auditing and cannot be deleted.');
       return;
     }
     final expenses = ref.read(allExpensesProvider).where((e) => e.tripId == trip.id).toList();
@@ -436,57 +403,28 @@ class TripMenuButton extends ConsumerWidget {
     );
   }
 
-  void _confirmLeaveTrip(BuildContext context, WidgetRef ref) {
+  void _confirmLeaveTrip(BuildContext context, WidgetRef ref) async {
     if (trip.isCompleted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('🔒 Concluded journeys cannot be abandoned. All splits and member records are preserved.'),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      AppSnackBar.showError(context, '🔒 Concluded journeys cannot be abandoned. All splits and member records are preserved.');
       return;
     }
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
-          children: [
-            Icon(Icons.exit_to_app_rounded, color: Colors.amber, size: 24),
-            SizedBox(width: 8),
-            Text('Leave Journey?'),
-          ],
-        ),
-        content: Text('You will no longer receive live location updates or shared ledger sync for "${trip.title}".'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.of(ctx).pop();
-              await ref.read(tripListProvider.notifier).leaveTrip(trip.id);
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('You left the trip.'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-                onTripDeleted?.call();
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.amber[800],
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Leave Trip'),
-          ),
-        ],
-      ),
+
+    final confirmed = await AppDialogs.confirm(
+      context,
+      title: 'Leave Journey?',
+      message: 'You will no longer receive live location updates or shared ledger sync for "${trip.title}".',
+      confirmLabel: 'Leave Journey',
+      isDestructive: true,
+      icon: Icons.exit_to_app_rounded,
     );
+
+    if (confirmed && context.mounted) {
+      await ref.read(tripListProvider.notifier).leaveTrip(trip.id);
+      if (context.mounted) {
+        AppSnackBar.showInfo(context, 'You left the trip.');
+        onTripDeleted?.call();
+      }
+    }
   }
 
   Future<void> _exportPdf(BuildContext context, WidgetRef ref) async {

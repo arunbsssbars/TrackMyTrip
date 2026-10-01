@@ -191,7 +191,8 @@ class _OfflineMapDownloadSheetState extends State<OfflineMapDownloadSheet> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Route Coverage Points', style: TextStyle(fontSize: 12.5, color: Colors.grey)),
+                    const Expanded(child: Text('Route Coverage Points', style: TextStyle(fontSize: 12.5, color: Colors.grey))),
+                    const SizedBox(width: 8),
                     Text('${widget.routePoints.length} GPS Points', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                   ],
                 ),
@@ -199,18 +200,34 @@ class _OfflineMapDownloadSheetState extends State<OfflineMapDownloadSheet> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Estimated Offline Tiles', style: TextStyle(fontSize: 12.5, color: Colors.grey)),
-                    Text('~$estTilesCount tiles (≈$estMb MB)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primary)),
+                    const Expanded(child: Text('Estimated Offline Tiles', style: TextStyle(fontSize: 12.5, color: Colors.grey))),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        '~$estTilesCount tiles (≈$estMb MB)',
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.end,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primary),
+                      ),
+                    ),
                   ],
                 ),
                 const Divider(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Current Local Storage', style: TextStyle(fontSize: 12.5, color: Colors.grey)),
+                    const Expanded(child: Text('Current Local Storage', style: TextStyle(fontSize: 12.5, color: Colors.grey))),
+                    const SizedBox(width: 8),
                     _loadingStats
                         ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                        : Text('$_cachedCount tiles (${_cachedMb.toStringAsFixed(1)} MB)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        : Flexible(
+                            child: Text(
+                              '$_cachedCount tiles (${_cachedMb.toStringAsFixed(1)} MB)',
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.end,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                          ),
                   ],
                 ),
               ],

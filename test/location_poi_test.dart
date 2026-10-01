@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:trip_tracker_app/core/services/location_service.dart';
-import 'package:trip_tracker_app/models/nearby_poi.dart';
+import 'package:trackmytrip/core/services/location_service.dart';
+import 'package:trackmytrip/models/nearby_poi.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

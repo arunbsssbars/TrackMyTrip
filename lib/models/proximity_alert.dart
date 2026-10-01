@@ -11,10 +11,13 @@ enum AlertType {
   memberJoined,
   memberLeft,
   billAdded,
+  billUpdated,
+  billDeleted,
   settlementRecorded,
   memoryAdded,
   stoppageAdded,
   locationShared,
+  tripReopened,
 }
 
 enum AlertUrgency {
@@ -40,6 +43,10 @@ class ProximityAlert {
   final bool isRead;
   final String? recipientId;
   final bool isOutgoing;
+  final String? itemId;
+  final String? itemType;
+  final double? amount;
+  final String? currency;
 
   const ProximityAlert({
     required this.id,
@@ -57,6 +64,10 @@ class ProximityAlert {
     this.isRead = false,
     this.recipientId,
     this.isOutgoing = false,
+    this.itemId,
+    this.itemType,
+    this.amount,
+    this.currency,
   });
 
   ProximityAlert copyWith({
@@ -75,6 +86,10 @@ class ProximityAlert {
     bool? isRead,
     String? recipientId,
     bool? isOutgoing,
+    String? itemId,
+    String? itemType,
+    double? amount,
+    String? currency,
   }) {
     return ProximityAlert(
       id: id ?? this.id,
@@ -92,6 +107,10 @@ class ProximityAlert {
       isRead: isRead ?? this.isRead,
       recipientId: recipientId ?? this.recipientId,
       isOutgoing: isOutgoing ?? this.isOutgoing,
+      itemId: itemId ?? this.itemId,
+      itemType: itemType ?? this.itemType,
+      amount: amount ?? this.amount,
+      currency: currency ?? this.currency,
     );
   }
 
@@ -112,6 +131,10 @@ class ProximityAlert {
       'isRead': isRead,
       if (recipientId != null) 'recipientId': recipientId,
       'isOutgoing': isOutgoing,
+      if (itemId != null) 'itemId': itemId,
+      if (itemType != null) 'itemType': itemType,
+      if (amount != null) 'amount': amount,
+      if (currency != null) 'currency': currency,
     };
   }
 
@@ -138,6 +161,10 @@ class ProximityAlert {
       isRead: json['isRead'] as bool? ?? false,
       recipientId: json['recipientId'] as String?,
       isOutgoing: json['isOutgoing'] as bool? ?? false,
+      itemId: json['itemId'] as String?,
+      itemType: json['itemType'] as String?,
+      amount: (json['amount'] as num?)?.toDouble(),
+      currency: json['currency'] as String?,
     );
   }
 }

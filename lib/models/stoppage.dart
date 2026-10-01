@@ -10,6 +10,7 @@ class Stoppage {
   final DateTime? departedAt;
   final String? notes;
   final String createdBy;
+  final String? createdByName;
   final int orderIndex;
 
   const Stoppage({
@@ -24,6 +25,7 @@ class Stoppage {
     this.departedAt,
     this.notes,
     required this.createdBy,
+    this.createdByName,
     this.orderIndex = 0,
   });
 
@@ -47,6 +49,7 @@ class Stoppage {
     bool clearDepartedAt = false,
     String? notes,
     String? createdBy,
+    String? createdByName,
     int? orderIndex,
   }) {
     return Stoppage(
@@ -61,6 +64,7 @@ class Stoppage {
       departedAt: clearDepartedAt ? null : (departedAt ?? this.departedAt),
       notes: notes ?? this.notes,
       createdBy: createdBy ?? this.createdBy,
+      createdByName: createdByName ?? this.createdByName,
       orderIndex: orderIndex ?? this.orderIndex,
     );
   }
@@ -78,6 +82,7 @@ class Stoppage {
       'departedAt': departedAt?.toIso8601String(),
       'notes': notes,
       'createdBy': createdBy,
+      'createdByName': createdByName,
       'orderIndex': orderIndex,
     };
   }
@@ -95,6 +100,7 @@ class Stoppage {
       departedAt: json['departedAt'] != null ? DateTime.parse(json['departedAt'] as String) : null,
       notes: json['notes'] as String?,
       createdBy: json['createdBy'] as String,
+      createdByName: json['createdByName'] as String?,
       orderIndex: json['orderIndex'] as int? ?? 0,
     );
   }

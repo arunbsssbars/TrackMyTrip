@@ -34,8 +34,6 @@ class _AuditLogSheetState extends ConsumerState<AuditLogSheet> {
   @override
   void initState() {
     super.initState();
-    // Default expand today
-    _expandedDates.add(_getDateKey(DateTime.now()));
     _scrollController.addListener(_onScroll);
   }
 
@@ -137,6 +135,11 @@ class _AuditLogSheetState extends ConsumerState<AuditLogSheet> {
 
     // Sort dates descending
     final sortedDateKeys = groupedByDate.keys.toList()..sort((a, b) => b.compareTo(a));
+
+    // Ensure the latest date accordion is open by default (Requirement 2)
+    if (_expandedDates.isEmpty && sortedDateKeys.isNotEmpty) {
+      _expandedDates.add(sortedDateKeys.first);
+    }
 
     return Container(
       constraints: BoxConstraints(
@@ -307,6 +310,8 @@ class _AuditLogSheetState extends ConsumerState<AuditLogSheet> {
                                         Expanded(
                                           child: Text(
                                             _formatDateHeading(firstDate),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
                                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                                           ),
                                         ),

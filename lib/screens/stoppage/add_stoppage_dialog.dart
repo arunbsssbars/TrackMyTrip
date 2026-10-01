@@ -9,6 +9,8 @@ import 'package:latlong2/latlong.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/services/location_service.dart';
+import '../../core/services/image_compression_service.dart';
+import '../../core/services/user_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../core/utils/date_formatter.dart';
@@ -172,12 +174,12 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
   Future<void> _pickReceiptPhoto(ImageSource source) async {
     try {
       setState(() => _isLoadingReceipt = true);
-      final picker = ImagePicker();
-      final picked = await picker.pickImage(
+      final picked = await ImageCompressionService.pickOptimizedImage(
+        picker: ImagePicker(),
         source: source,
-        maxWidth: 1600,
-        maxHeight: 1600,
-        imageQuality: 85,
+        maxWidth: 1920,
+        maxHeight: 1080,
+        imageQuality: 75,
       );
 
       if (picked != null) {
@@ -205,12 +207,12 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
   Future<void> _pickPhoto(ImageSource source) async {
     try {
       setState(() => _isLoadingImage = true);
-      final picker = ImagePicker();
-      final picked = await picker.pickImage(
+      final picked = await ImageCompressionService.pickOptimizedImage(
+        picker: ImagePicker(),
         source: source,
-        maxWidth: 1600,
-        maxHeight: 1600,
-        imageQuality: 85,
+        maxWidth: 1920,
+        maxHeight: 1080,
+        imageQuality: 75,
       );
 
       if (picked != null) {
@@ -576,7 +578,9 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
 
     try {
       final currentTrip = ref.read(currentTripProvider);
-      final myMemberId = currentTrip?.currentUserMember?.id ?? 'me';
+      final currentUser = UserService.getCurrentUser();
+      final myMemberId = currentTrip?.currentUserMember?.id ?? currentUser.id;
+      final myMemberName = currentTrip?.currentUserMember?.name ?? currentUser.displayName;
 
       final newStoppage = Stoppage(
         id: const Uuid().v4(),
@@ -590,6 +594,7 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
         departedAt: _isOngoing ? null : _arrivedAt.add(const Duration(minutes: 45)),
         notes: _notesController.text.trim().isNotEmpty ? _notesController.text.trim() : null,
         createdBy: myMemberId,
+        createdByName: myMemberName,
       );
 
       ref.read(allStoppagesProvider.notifier).addStoppage(newStoppage);
@@ -620,16 +625,35 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
             .where((m) => _splitIncludedMemberIds.contains(m.id))
             .toList();
         final splitCount = includedMembers.isEmpty ? (currentTrip.members.isEmpty ? 1 : currentTrip.members.length) : includedMembers.length;
-        final perPerson = billAmount / splitCount;
+        final perPerson = CurrencyFormatter.roundTo2Decimals(billAmount / splitCount);
 
-        final splits = currentTrip.members.map((m) {
+        double allocatedSum = 0.0;
+        final splits = <ExpenseSplit>[];
+        for (var i = 0; i < currentTrip.members.length; i++) {
+          final m = currentTrip.members[i];
           final isInc = _splitIncludedMemberIds.isEmpty || _splitIncludedMemberIds.contains(m.id);
-          return ExpenseSplit(
+          double amount = 0.0;
+          if (isInc) {
+            amount = perPerson;
+            allocatedSum += amount;
+          }
+          splits.add(ExpenseSplit(
             memberId: m.id,
-            allocatedAmount: isInc ? perPerson : 0.0,
+            allocatedAmount: amount,
             isIncluded: isInc,
-          );
-        }).toList();
+          ));
+        }
+
+        // Balance penny rounding discrepancy on the first included member
+        final discrepancy = CurrencyFormatter.roundTo2Decimals(billAmount - allocatedSum);
+        if (discrepancy != 0.0) {
+          final firstIncIdx = splits.indexWhere((s) => s.isIncluded);
+          if (firstIncIdx != -1) {
+            splits[firstIncIdx] = splits[firstIncIdx].copyWith(
+              allocatedAmount: CurrencyFormatter.roundTo2Decimals(splits[firstIncIdx].allocatedAmount + discrepancy),
+            );
+          }
+        }
 
         final newExpense = Expense(
           id: const Uuid().v4(),

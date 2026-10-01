@@ -46,6 +46,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '731719697818',
     projectId: 'trackmytrip-sync-2026',
     authDomain: 'trackmytrip-sync-2026.firebaseapp.com',
+    databaseURL: 'https://trackmytrip-sync-2026-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'trackmytrip-sync-2026.firebasestorage.app',
   );
 
@@ -54,6 +55,7 @@ class DefaultFirebaseOptions {
     appId: '1:731719697818:android:fbf3b3bfba7fa282bce623',
     messagingSenderId: '731719697818',
     projectId: 'trackmytrip-sync-2026',
+    databaseURL: 'https://trackmytrip-sync-2026-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'trackmytrip-sync-2026.firebasestorage.app',
   );
 
@@ -62,8 +64,9 @@ class DefaultFirebaseOptions {
     appId: '1:731719697818:ios:c695ae0f15590c96bce623',
     messagingSenderId: '731719697818',
     projectId: 'trackmytrip-sync-2026',
+    databaseURL: 'https://trackmytrip-sync-2026-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'trackmytrip-sync-2026.firebasestorage.app',
-    iosBundleId: 'com.triptracker.tripTrackerApp',
+    iosBundleId: 'com.trackmytrip.app',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
@@ -71,8 +74,9 @@ class DefaultFirebaseOptions {
     appId: '1:731719697818:ios:c695ae0f15590c96bce623',
     messagingSenderId: '731719697818',
     projectId: 'trackmytrip-sync-2026',
+    databaseURL: 'https://trackmytrip-sync-2026-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'trackmytrip-sync-2026.firebasestorage.app',
-    iosBundleId: 'com.triptracker.tripTrackerApp',
+    iosBundleId: 'com.trackmytrip.app',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
@@ -81,6 +85,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '731719697818',
     projectId: 'trackmytrip-sync-2026',
     authDomain: 'trackmytrip-sync-2026.firebaseapp.com',
+    databaseURL: 'https://trackmytrip-sync-2026-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'trackmytrip-sync-2026.firebasestorage.app',
   );
 }

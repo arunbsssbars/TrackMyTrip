@@ -6,7 +6,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/services/live_location_tracker_service.dart';
-import '../../core/services/proximity_alert_service.dart';
 import '../../core/services/user_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/date_formatter.dart';
@@ -28,12 +27,10 @@ import '../../core/services/pdf_export_service.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/settlement_provider.dart';
 import '../stats/trip_analytics_screen.dart';
-import '../expenses/add_expense_screen.dart';
 import '../../core/utils/trip_guard_helper.dart';
 import '../../models/trip_audit_log.dart';
 import '../../providers/audit_log_provider.dart';
-import 'package:image_picker/image_picker.dart';
-import '../../core/services/ocr_service.dart';
+import '../../widgets/quick_bill_action_sheet.dart';
 
 class CurrentTripTab extends ConsumerStatefulWidget {
   const CurrentTripTab({super.key});
@@ -183,7 +180,7 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
             departedAt: DateTime.now(),
             createdBy: UserService.getCurrentUser().id,
           );
-          await ref.read(allStoppagesProvider.notifier).addStoppage(finalStop);
+          await ref.read(allStoppagesProvider.notifier).addStoppage(finalStop, broadcast: false);
         }
       } catch (_) {}
     }
@@ -251,20 +248,7 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
 
     if (shouldReopen != true || !context.mounted) return;
 
-    final updatedTrip = trip.copyWith(
-      isCompleted: false,
-      status: 'active',
-    );
-    await ref.read(tripListProvider.notifier).updateTrip(updatedTrip);
-
-    // Notify companions (Item 7)
-    try {
-      await ref.read(proximityAlertServiceProvider).broadcastTripReopened(
-        tripId: trip.id,
-        tripTitle: trip.title,
-        reopenerName: UserService.getCurrentUser().displayName,
-      );
-    } catch (_) {}
+    await ref.read(tripListProvider.notifier).reopenTrip(trip.id);
 
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -668,7 +652,6 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                             ),
                           )
                         : ListView.separated(
-                            shrinkWrap: true,
                             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                             itemCount: filtered.length,
                             separatorBuilder: (_, __) => const SizedBox(height: 9),
@@ -957,7 +940,7 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                   ),
                   child: Row(
                     children: [
-                      if (!currentTrip.isCompleted) ...[
+                      if (currentTrip.isRunning) ...[
                         PulsingLiveBeacon(
                           dotSize: 7.5,
                           showLabel: false,
@@ -1070,71 +1053,20 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
       floatingActionButton: (currentTrip != null && !currentTrip.isCompleted && MediaQuery.of(context).viewInsets.bottom == 0)
           ? AppFloatingActionButton(
               heroTag: 'current_trip_ocr_fab',
-              onTap: () => _openOcrAddExpense(currentTrip),
+              onTap: () => QuickBillActionSheet.show(context, trip: currentTrip),
               customIcon: const OcrAddIcon(),
-              label: 'Add Bill',
+              label: 'Quick Bill',
             )
           : null,
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
-  Future<void> _openOcrAddExpense(Trip trip) async {
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const ListTile(
-                title: Text('Scan Bill / Receipt', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                subtitle: Text('Choose source to auto-extract bill details with OCR'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.camera_alt_rounded, color: Colors.blue),
-                title: const Text('Capture with Camera', style: TextStyle(fontWeight: FontWeight.w600)),
-                onTap: () => Navigator.of(ctx).pop(ImageSource.camera),
-              ),
-              ListTile(
-                leading: const Icon(Icons.photo_library_rounded, color: Colors.purple),
-                title: const Text('Select from Gallery', style: TextStyle(fontWeight: FontWeight.w600)),
-                onTap: () => Navigator.of(ctx).pop(ImageSource.gallery),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    if (source == null || !mounted) return;
-
-    final picked = await ImagePicker().pickImage(source: source);
-    if (picked == null || !mounted) return;
-
-    final ocr = await OcrService.extractFromReceipt(picked.path);
-    if (!mounted) return;
-
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (ctx) => AddExpenseScreen(
-          tripId: trip.id,
-          prefillTitle: ocr.title,
-          prefillAmount: ocr.amount,
-          prefillImagePath: picked.path,
-          prefillCategory: ocr.category,
-          prefillDescription: ocr.description,
-        ),
-      ),
-    );
-  }
-
   Widget _buildEmptyState(BuildContext context, bool isDark) {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -1438,16 +1370,23 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Row(
-                          children: [
-                            Icon(Icons.near_me_rounded, size: 16, color: Color(0xFF0F766E)),
-                            SizedBox(width: 6),
-                            Text(
-                              'NEXT UPCOMING STOPPAGE',
-                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 0.8),
-                            ),
-                          ],
+                        const Expanded(
+                          child: Row(
+                            children: [
+                              Icon(Icons.near_me_rounded, size: 16, color: Color(0xFF0F766E)),
+                              SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'NEXT UPCOMING STOPPAGE',
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 0.8),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
+                        const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                           decoration: BoxDecoration(

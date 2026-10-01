@@ -70,6 +70,42 @@ class AppConstants {
     'Emergency & Misc',
   ];
 
+  /// Robust normalizer ensuring any user-input, OCR, or enum category maps to a standard category
+  static String normalizeExpenseCategory(String? rawCategory) {
+    if (rawCategory == null || rawCategory.trim().isEmpty) {
+      return 'Emergency & Misc';
+    }
+    final raw = rawCategory.trim();
+    for (final standard in expenseCategories) {
+      if (standard.toLowerCase() == raw.toLowerCase()) {
+        return standard;
+      }
+    }
+    final lower = raw.toLowerCase();
+    if (lower.contains('shop') || lower.contains('souvenir') || lower.contains('gift') || lower.contains('cloth') || lower.contains('market') || lower.contains('mall')) {
+      return 'Shopping & Souvenirs';
+    }
+    if (lower.contains('food') || lower.contains('drink') || lower.contains('dinner') || lower.contains('lunch') || lower.contains('breakfast') || lower.contains('restaurant') || lower.contains('cafe')) {
+      return 'Food & Drinks';
+    }
+    if (lower.contains('fuel') || lower.contains('gas') || lower.contains('petrol') || lower.contains('diesel')) {
+      return 'Fuel / Gas';
+    }
+    if (lower.contains('hotel') || lower.contains('stay') || lower.contains('accommodat') || lower.contains('lodge') || lower.contains('room')) {
+      return 'Accommodation';
+    }
+    if (lower.contains('transport') || lower.contains('toll') || lower.contains('transit') || lower.contains('cab') || lower.contains('taxi') || lower.contains('uber') || lower.contains('flight') || lower.contains('train') || lower.contains('bus')) {
+      return 'Transport & Toll';
+    }
+    if (lower.contains('activit') || lower.contains('ticket') || lower.contains('sight') || lower.contains('adventure') || lower.contains('entry') || lower.contains('pass')) {
+      return 'Activities & Tickets';
+    }
+    if (lower.contains('snack') || lower.contains('refresh') || lower.contains('tea') || lower.contains('coffee') || lower.contains('beverage') || lower.contains('water')) {
+      return 'Snacks & Refreshment';
+    }
+    return 'Emergency & Misc';
+  }
+
   static IconData getStoppageIcon(String category) {
     switch (category) {
       case 'Viewpoint':

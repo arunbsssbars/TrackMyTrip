@@ -5,12 +5,17 @@ import 'package:uuid/uuid.dart';
 import '../../models/auth_user.dart';
 import '../../models/user_profile.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'local_storage_service.dart';
 import 'push_notification_service.dart';
 import 'user_service.dart';
 
 import 'security_service.dart';
 import '../utils/security_sanitizer.dart';
+import 'cloud_trip_sync_service.dart';
+import 'media_cache_service.dart';
+import 'map_tile_cache_service.dart';
+import 'tombstone_service.dart';
 
 class AuthService {
   final LocalStorageService _storage;
@@ -409,37 +414,200 @@ class AuthService {
   }
 
   Future<void> signOut() async {
-    try {
-      await _firebaseAuth?.signOut();
-      await _googleSignIn.signOut();
-    } catch (_) {}
+    // 1. Immediately clear local auth session & state so UI logout is instantaneous
     await _storage.clearAuthSession();
     await _storage.switchUser(null);
     UserService.resetCurrentUser();
+
+    // 2. Perform remote Firebase and Google sign-out in parallel with 2s timeout
+    try {
+      await Future.wait([
+        if (_firebaseAuth != null) _firebaseAuth!.signOut(),
+        _googleSignIn.signOut(),
+      ]).timeout(const Duration(seconds: 2), onTimeout: () => []);
+    } catch (_) {}
   }
 
   /// Forensic Account & Local Data Purge (MASVS-STORAGE / GDPR Right to be Forgotten)
   Future<void> forensicWipeAccount() async {
     await signOut();
+    await TombstoneService.wipeAll();
     await _securityService.wipeAllSensitiveData(db: _storage.db);
   }
 
   /// Permanently Deletes User Account and Wipes All Associated Local & Cloud Data
-  /// Mandated by Apple App Store Guideline 5.1.1(v) & Google Play Data Safety
-  Future<void> deleteAccountAndData() async {
-    final uid = _firebaseAuth?.currentUser?.uid ?? currentSession?.id;
-    
-    // 1. Delete user document from Firestore if connected
-    if (uid != null && uid.isNotEmpty) {
+  /// Mandated by Apple App Store Guideline 5.1.1(v) & Google Play Data Safety & GDPR Article 17
+  Future<void> deleteAccountAndData({String? userId, String? userEmail}) async {
+    final uid = userId ?? _firebaseAuth?.currentUser?.uid ?? currentSession?.id;
+    final email = userEmail ?? _firebaseAuth?.currentUser?.email ?? currentSession?.email;
+    final fbUser = _firebaseAuth?.currentUser;
+
+    // 1. Clean up user's data from Cloud Firestore & Realtime Database while user is still authenticated!
+    // (If fbUser.delete() runs first, request.auth becomes null and Firestore/RTDB reject deletes with permission-denied)
+    if (uid != null && uid.isNotEmpty && _firestore != null) {
       try {
-        await _firestore?.collection('users').doc(uid).delete();
+        final cleanEmail = email?.trim().toLowerCase();
+
+        // A. Delete trips authored by this user from 'trips' collection
+        final q1 = await _firestore!
+            .collection('trips')
+            .where('creatorId', isEqualTo: uid)
+            .get();
+        final q2 = await _firestore!
+            .collection('trips')
+            .where('createdByMemberId', isEqualTo: uid)
+            .get();
+
+        final authoredDocs = <String, DocumentSnapshot>{};
+        for (final doc in q1.docs) {
+          authoredDocs[doc.id] = doc;
+        }
+        for (final doc in q2.docs) {
+          authoredDocs[doc.id] = doc;
+        }
+
+        for (final doc in authoredDocs.values) {
+          final tripId = doc.id;
+          final subcollections = [
+            'stoppages',
+            'expenses',
+            'memories',
+            'settlements',
+            'audit_logs',
+            'proximity_alerts',
+            'member_locations',
+            'invitations',
+          ];
+          for (final sub in subcollections) {
+            try {
+              final subSnap = await _firestore!.collection('trips').doc(tripId).collection(sub).get();
+              for (final subDoc in subSnap.docs) {
+                await subDoc.reference.delete();
+              }
+            } catch (_) {}
+          }
+          // Delete live rooms & RTDB nodes
+          try {
+            await CloudTripSyncService.deleteRoom(tripId);
+          } catch (_) {}
+          try {
+            await FirebaseDatabase.instance.ref('trips/$tripId').remove();
+          } catch (_) {}
+          // Delete trip doc
+          await doc.reference.delete();
+        }
+
+        // B. Purge and delete rooms from 'rooms' collection
+        try {
+          final roomsSnap = await _firestore!.collection('rooms').get();
+          for (final roomDoc in roomsSnap.docs) {
+            try {
+              final rData = roomDoc.data();
+              final pkg = rData['package'] as Map<String, dynamic>?;
+              final tripMap = pkg?['trip'] as Map<String, dynamic>?;
+              if (tripMap != null) {
+                final creatorId = tripMap['creatorId'] ?? tripMap['createdByMemberId'];
+                final creatorEmail = (tripMap['creatorEmail'] as String?)?.toLowerCase();
+                final tripId = tripMap['id'] as String? ?? roomDoc.id;
+
+                final isCreator = creatorId == uid || (cleanEmail != null && creatorEmail == cleanEmail);
+                if (isCreator) {
+                  try {
+                    await FirebaseDatabase.instance.ref('trips/$tripId').remove();
+                  } catch (_) {}
+                  try {
+                    await FirebaseDatabase.instance.ref('rooms/${roomDoc.id}').remove();
+                  } catch (_) {}
+                  await roomDoc.reference.delete();
+                } else {
+                  // User was a member: remove from room package
+                  final members = (tripMap['members'] as List?)?.whereType<Map<String, dynamic>>().toList();
+                  if (members != null) {
+                    final originalLen = members.length;
+                    members.removeWhere((m) =>
+                        m['id'] == uid ||
+                        (cleanEmail != null && (m['email'] as String?)?.toLowerCase() == cleanEmail));
+                    if (members.length != originalLen) {
+                      tripMap['members'] = members;
+                      await roomDoc.reference.update({'package.trip.members': members});
+                    }
+                  }
+                }
+              }
+            } catch (_) {}
+          }
+        } catch (_) {}
+
+        // C. Remove user from trips where they were a companion
+        final companionTrips = await _firestore!
+            .collection('trips')
+            .where('memberIds', arrayContains: uid)
+            .get();
+        for (final doc in companionTrips.docs) {
+          try {
+            await doc.reference.update({
+              'memberIds': FieldValue.arrayRemove([uid]),
+              if (cleanEmail != null && cleanEmail.isNotEmpty)
+                'memberEmails': FieldValue.arrayRemove([cleanEmail]),
+            });
+          } catch (_) {}
+        }
+
+        if (cleanEmail != null && cleanEmail.isNotEmpty) {
+          final emailCompanionTrips = await _firestore!
+              .collection('trips')
+              .where('memberEmails', arrayContains: cleanEmail)
+              .get();
+          for (final doc in emailCompanionTrips.docs) {
+            try {
+              await doc.reference.update({
+                'memberIds': FieldValue.arrayRemove([uid]),
+                'memberEmails': FieldValue.arrayRemove([cleanEmail]),
+              });
+            } catch (_) {}
+          }
+        }
+
+        // D. Purge invitations sent or received by this user
+        try {
+          final inv1 = await _firestore!.collection('invitations').where('inviterId', isEqualTo: uid).get();
+          for (final d in inv1.docs) {
+            await d.reference.delete();
+          }
+          final inv2 = await _firestore!.collection('invitations').where('inviteeId', isEqualTo: uid).get();
+          for (final d in inv2.docs) {
+            await d.reference.delete();
+          }
+          if (cleanEmail != null && cleanEmail.isNotEmpty) {
+            final inv3 = await _firestore!.collection('invitations').where('inviteeEmail', isEqualTo: cleanEmail).get();
+            for (final d in inv3.docs) {
+              await d.reference.delete();
+            }
+          }
+        } catch (_) {}
+
+        // E. Purge proximity alerts created by this user
+        try {
+          final alerts = await _firestore!.collection('proximity_alerts').where('senderMemberId', isEqualTo: uid).get();
+          for (final d in alerts.docs) {
+            await d.reference.delete();
+          }
+        } catch (_) {}
+
+        // F. Delete user profile doc from users collection
+        await _firestore!.collection('users').doc(uid).delete();
+
+        // G. Clean up RTDB user node and push tokens
+        try {
+          await FirebaseDatabase.instance.ref('users/$uid').remove();
+          await FirebaseDatabase.instance.ref('push_tokens/$uid').remove();
+        } catch (_) {}
       } catch (e) {
-        if (kDebugMode) debugPrint('[AuthService] Firestore profile deletion warning: $e');
+        if (kDebugMode) debugPrint('[AuthService] Cloud Firestore user purge error: $e');
       }
     }
 
-    // 2. Delete Firebase Auth Account
-    final fbUser = _firebaseAuth?.currentUser;
+    // 2. If Firebase Auth is active, delete the Firebase Auth user now
     if (fbUser != null) {
       try {
         await fbUser.delete();
@@ -453,8 +621,34 @@ class AuthService {
       }
     }
 
-    // 3. Local forensic wipe & reset
-    await forensicWipeAccount();
+    // 3. Clear local storage, database tables, and auth session cleanly BEFORE unlinking DB file
+    try {
+      await _storage.clearAuthSession();
+      await _storage.db.wipeDatabase();
+      await MediaCacheService.wipeAllMediaCache();
+      await MapTileCacheService.clearCache();
+      if (uid != null && uid.isNotEmpty) {
+        await _storage.deleteRegisteredUser(uid);
+      }
+      if (email != null && email.isNotEmpty) {
+        await _storage.deleteRegisteredUser(email);
+      }
+      await _storage.switchUser(null);
+      UserService.resetCurrentUser();
+      // Wipe tombstone memory + SharedPreferences so a newly registered / re-logging
+      // user on this same device does NOT inherit the previous session's tombstones,
+      // which caused the "ghost deletion" bug where all their trips showed a deletion
+      // banner on first click and then disappeared.
+      await TombstoneService.wipeAll();
+      await _securityService.wipeAllSensitiveData(db: _storage.db);
+    } catch (e) {
+      if (kDebugMode) debugPrint('[AuthService] Local data wipe error: $e');
+    }
+
+    // 4. Remote Google Sign-Out
+    try {
+      await _googleSignIn.signOut();
+    } catch (_) {}
   }
 
   /// Syncs the current or provided user to Firestore users collection with full search tokens

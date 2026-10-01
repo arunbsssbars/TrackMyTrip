@@ -10,6 +10,7 @@ import 'stoppage_provider.dart';
 import 'trip_provider.dart';
 
 import '../core/services/realtime_sync_service.dart';
+import '../core/services/firestore_sync_service.dart';
 
 class AuditLogNotifier extends StateNotifier<List<TripAuditLog>> {
   final LocalStorageService _storage;
@@ -63,11 +64,14 @@ class AuditLogNotifier extends StateNotifier<List<TripAuditLog>> {
             id: 'budget_${trip.id}',
             tripId: trip.id,
             actionType: 'set_budget',
-            itemTitle: 'Trip Budget: ${trip.defaultCurrency} ${trip.budget!.toStringAsFixed(0)}',
+            itemTitle: 'Trip Budget',
             performedByMemberId: creatorId,
             performedByName: creatorName,
             timestamp: trip.startDate,
             changeDetails: 'Allocated travel expenditure limit',
+            amount: trip.budget,
+            currency: trip.defaultCurrency,
+            targetItemId: trip.id,
           ));
         }
       }
@@ -81,11 +85,14 @@ class AuditLogNotifier extends StateNotifier<List<TripAuditLog>> {
             id: 'exp_${e.id}',
             tripId: trip.id,
             actionType: 'add_expense',
-            itemTitle: '${e.title} (${e.currency} ${e.totalAmount.toStringAsFixed(0)})',
+            itemTitle: e.title,
             performedByMemberId: e.paidByMemberId,
             performedByName: payerName.isNotEmpty && payerName != 'Unknown Member' ? payerName : creatorName,
             timestamp: e.createdAt,
             changeDetails: 'Expense registered in category ${e.category}',
+            amount: e.totalAmount,
+            currency: e.currency,
+            targetItemId: e.id,
           ));
         }
       }
@@ -100,11 +107,14 @@ class AuditLogNotifier extends StateNotifier<List<TripAuditLog>> {
             id: 'settle_${s.id}',
             tripId: trip.id,
             actionType: 'settlement',
-            itemTitle: 'Settlement: $payerName → $payeeName (${s.currency} ${s.amount.toStringAsFixed(0)})',
+            itemTitle: 'Settlement: $payerName → $payeeName',
             performedByMemberId: s.payerMemberId,
             performedByName: payerName,
             timestamp: s.settledAt,
             changeDetails: 'Payment recorded via ${s.paymentMethod}',
+            amount: s.amount,
+            currency: s.currency,
+            targetItemId: s.id,
           ));
         }
       }
@@ -141,6 +151,7 @@ class AuditLogNotifier extends StateNotifier<List<TripAuditLog>> {
       }
     }
     final updated = [log, ...state];
+    updated.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     state = updated;
     await _storage.saveAllAuditLogs(updated);
     _triggerCloudSync(log.tripId);
@@ -148,20 +159,25 @@ class AuditLogNotifier extends StateNotifier<List<TripAuditLog>> {
       try {
         _ref.read(realtimeSyncServiceProvider).broadcastAuditLog(log);
       } catch (_) {}
+      try {
+        _ref.read(firestoreSyncServiceProvider).pushAuditLog(log);
+      } catch (_) {}
     }
   }
 
-  /// Ingests an activity log received from a companion over WebSocket
+  /// Ingests an activity log received from a companion over WebSocket or Firestore
   Future<void> receiveRemoteLog(TripAuditLog log) async {
     if (state.any((l) => l.id == log.id)) return; // Avoid duplicates
     final updated = [log, ...state];
+    updated.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     state = updated;
     await _storage.saveAllAuditLogs(updated);
   }
 
   void _triggerCloudSync(String tripId) {
     try {
-      final trip = _ref.read(tripListProvider).firstWhere((t) => t.id == tripId);
+      final trip = _ref.read(tripListProvider).where((t) => t.id == tripId).firstOrNull;
+      if (trip == null) return;
       final stoppages = _ref.read(allStoppagesProvider).where((s) => s.tripId == tripId).toList();
       final expenses = _ref.read(allExpensesProvider).where((e) => e.tripId == tripId).toList();
       final memories = _ref.read(allMemoriesProvider).where((m) => m.tripId == tripId).toList();

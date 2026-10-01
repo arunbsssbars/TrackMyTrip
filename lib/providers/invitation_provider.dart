@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import 'package:flutter/foundation.dart';
@@ -39,6 +40,7 @@ class InvitationNotifier extends StateNotifier<List<TripInvitation>> {
   /// Actively queries Firestore for invitations addressed to the active user profile
   Future<void> fetchPendingInvitationsFromCloud() async {
     try {
+      if (Firebase.apps.isEmpty) return;
       final currentUser = UserService.getCurrentUser();
       String? authUid;
       try {
@@ -151,6 +153,7 @@ class InvitationNotifier extends StateNotifier<List<TripInvitation>> {
 
   void _listenToFirestoreInvitations() {
     try {
+      if (Firebase.apps.isEmpty) return;
       final currentUser = UserService.getCurrentUser();
       String? authUid;
       try {
@@ -506,15 +509,29 @@ class InvitationNotifier extends StateNotifier<List<TripInvitation>> {
         colorHex: currentUser.colorHex ?? '0xFF0D9488',
       ).toJson();
 
+      final userCleanEmail = currentUser.email?.trim().toLowerCase();
+
       if (tripDoc.exists && tripDoc.data() != null) {
         final data = tripDoc.data()!;
         final existingMembers = (data['members'] as List<dynamic>?) ?? [];
-        final updatedMembers = [...existingMembers.where((m) => m['id'] != currentUser.id), newMemberJson];
+        final updatedMembers = [
+          ...existingMembers.where((m) {
+            if (m is Map) {
+              if (m['id'] == currentUser.id) return false;
+              if (userCleanEmail != null && userCleanEmail.isNotEmpty) {
+                final mEmail = m['email']?.toString().trim().toLowerCase();
+                if (mEmail == userCleanEmail) return false;
+              }
+            }
+            return true;
+          }),
+          newMemberJson,
+        ];
         final memberIds = (data['memberIds'] as List<dynamic>?)?.map((e) => e.toString()).toSet() ?? {};
         memberIds.add(currentUser.id);
         final memberEmails = (data['memberEmails'] as List<dynamic>?)?.map((e) => e.toString().toLowerCase()).toSet() ?? {};
-        if (currentUser.email != null && currentUser.email!.isNotEmpty) {
-          memberEmails.add(currentUser.email!.trim().toLowerCase());
+        if (userCleanEmail != null && userCleanEmail.isNotEmpty) {
+          memberEmails.add(userCleanEmail);
         }
 
         await tripDocRef.update({
@@ -525,11 +542,20 @@ class InvitationNotifier extends StateNotifier<List<TripInvitation>> {
         });
       } else if (invitation.tripJson != null) {
         final baseTrip = Trip.fromJson(invitation.tripJson!);
-        final updatedMembers = [...baseTrip.members.where((m) => m.id != currentUser.id), TripMember.fromJson(newMemberJson)];
+        final updatedMembers = [
+          ...baseTrip.members.where((m) {
+            if (m.id == currentUser.id) return false;
+            if (userCleanEmail != null && userCleanEmail.isNotEmpty && m.email != null) {
+              if (m.email!.trim().toLowerCase() == userCleanEmail) return false;
+            }
+            return true;
+          }),
+          TripMember.fromJson(newMemberJson),
+        ];
         final memberIds = updatedMembers.map((m) => m.id).toSet()..add(currentUser.id);
         final memberEmails = updatedMembers.map((m) => m.email).where((e) => e != null && e.isNotEmpty).cast<String>().toSet();
-        if (currentUser.email != null && currentUser.email!.isNotEmpty) {
-          memberEmails.add(currentUser.email!.trim().toLowerCase());
+        if (userCleanEmail != null && userCleanEmail.isNotEmpty) {
+          memberEmails.add(userCleanEmail);
         }
 
         await tripDocRef.set({
@@ -546,30 +572,36 @@ class InvitationNotifier extends StateNotifier<List<TripInvitation>> {
       if (kDebugMode) debugPrint('[InvitationNotifier] acceptInvitation firestore trip update error: $e');
     }
 
-    // 4. Import trip package into local storage
+    // 4. Import trip package into local storage with deduplication
     if (invitation.tripJson != null) {
       try {
         final incomingTrip = Trip.fromJson(invitation.tripJson!);
-        final isAlreadyMember = incomingTrip.members.any(
-          (m) => m.name.toLowerCase() == currentUser.displayName.toLowerCase() || m.id == currentUser.id,
+        final userCleanEmail = currentUser.email?.trim().toLowerCase();
+        final existingMember = incomingTrip.members.where(
+          (m) => m.id == currentUser.id ||
+              (userCleanEmail != null && userCleanEmail.isNotEmpty && m.email != null && m.email!.trim().toLowerCase() == userCleanEmail) ||
+              m.name.toLowerCase() == currentUser.displayName.toLowerCase(),
+        ).firstOrNull;
+
+        const colors = ['0xFF10B981', '0xFFEC4899', '0xFF3B82F6', '0xFFF97316', '0xFF8B5CF6', '0xFF14B8A6'];
+        final newColor = colors[incomingTrip.members.length % colors.length];
+        final newMember = TripMember(
+          id: currentUser.id,
+          name: currentUser.displayName,
+          email: currentUser.email,
+          isCurrentUser: true,
+          colorHex: currentUser.colorHex ?? existingMember?.colorHex ?? newColor,
         );
 
-        Trip updatedTrip = incomingTrip;
-        if (!isAlreadyMember) {
-          const colors = ['0xFF10B981', '0xFFEC4899', '0xFF3B82F6', '0xFFF97316', '0xFF8B5CF6', '0xFF14B8A6'];
-          final newColor = colors[incomingTrip.members.length % colors.length];
-          final newMember = TripMember(
-            id: currentUser.id,
-            name: currentUser.displayName,
-            email: currentUser.email,
-            isCurrentUser: true,
-            colorHex: currentUser.colorHex ?? newColor,
-          );
-          updatedTrip = incomingTrip.copyWith(
-            members: [...incomingTrip.members, newMember],
-          );
-        }
+        final updatedMembers = [
+          ...incomingTrip.members.where((m) =>
+              m.id != currentUser.id &&
+              (userCleanEmail == null || userCleanEmail.isEmpty || m.email == null || m.email!.trim().toLowerCase() != userCleanEmail) &&
+              m.name.toLowerCase() != currentUser.displayName.toLowerCase()),
+          newMember,
+        ];
 
+        final updatedTrip = incomingTrip.copyWith(members: updatedMembers);
         await _storage.saveTrip(updatedTrip);
       } catch (e) {
         if (kDebugMode) debugPrint('[InvitationNotifier] acceptInvitation local trip save error: $e');
@@ -601,10 +633,12 @@ class InvitationNotifier extends StateNotifier<List<TripInvitation>> {
 
     try {
       _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
+        id: 'inv_acc_${invitation.id}',
         tripId: invitation.tripId,
         type: AlertType.invitationAccepted,
         title: 'Invitation Accepted',
         message: '${currentUser.displayName} joined "${invitation.tripTitle}"',
+        showLocalBanner: false,
       );
     } catch (_) {}
 
@@ -624,6 +658,10 @@ class InvitationNotifier extends StateNotifier<List<TripInvitation>> {
           isRead: true,
         );
         await alertService.updateAlert(updatedAlert);
+      }
+      // Eliminate duplicate local alert if we already mutated the original invitation alert
+      if (existingAlerts.isNotEmpty) {
+        await alertService.deleteAlert('inv_acc_${invitation.id}');
       }
     } catch (_) {}
 

@@ -2,13 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/app_dialogs.dart';
+import '../../../core/utils/app_snackbar.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/utils/date_formatter.dart';
 import '../../../core/utils/debt_simplifier.dart';
 import '../../../models/settlement.dart';
 import '../../../models/trip.dart';
+import '../../../providers/auth_provider.dart';
 import '../../../providers/settlement_provider.dart';
+import '../../../providers/trip_provider.dart';
+import '../../common/user_avatar.dart';
 
 class SettlementTab extends ConsumerStatefulWidget {
   final Trip trip;
@@ -21,13 +27,11 @@ class SettlementTab extends ConsumerStatefulWidget {
 
 class _SettlementTabState extends ConsumerState<SettlementTab> {
   void _openRecordSettlementDialog(BuildContext context, {DebtTransfer? defaultTransfer, Settlement? existingSettlement}) {
-    if (widget.trip.members.length < 2) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('At least 2 members are required to record a payment.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+    final trips = ref.read(tripListProvider);
+    final currentTrip = trips.where((t) => t.id == widget.trip.id).firstOrNull ?? widget.trip;
+
+    if (currentTrip.members.length < 2) {
+      AppSnackBar.showWarning(context, 'At least 2 members are required to record a payment.');
       return;
     }
 
@@ -36,19 +40,62 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => _RecordPaymentSheet(
-        trip: widget.trip,
+        trip: currentTrip,
         defaultTransfer: defaultTransfer,
         existingSettlement: existingSettlement,
       ),
     );
   }
 
+  void _shareSettlementSummary(Trip trip, Map<String, double> netBalances, List<DebtTransfer> transfers) {
+    final buffer = StringBuffer();
+    buffer.writeln('💰 Settlement Summary: ${trip.title}');
+    buffer.writeln('----------------------------------------');
+    if (transfers.isEmpty) {
+      buffer.writeln('✨ All companions are completely settled up!');
+    } else {
+      buffer.writeln('Recommended Transfers to Settle:');
+      for (final t in transfers) {
+        final fromName = trip.getMemberName(t.fromMemberId);
+        final toName = trip.getMemberName(t.toMemberId);
+        final amt = CurrencyFormatter.format(t.amount, currency: trip.defaultCurrency);
+        buffer.writeln('• $fromName pays $toName: $amt');
+      }
+    }
+    buffer.writeln('\nIndividual Balances:');
+    for (final m in trip.members) {
+      final bal = netBalances[m.id] ?? 0.0;
+      final formatted = CurrencyFormatter.format(bal.abs(), currency: trip.defaultCurrency);
+      if (bal > 0.01) {
+        buffer.writeln('• ${m.name}: +$formatted (gets back)');
+      } else if (bal < -0.01) {
+        buffer.writeln('• ${m.name}: -$formatted (owes)');
+      } else {
+        buffer.writeln('• ${m.name}: Settled');
+      }
+    }
+    buffer.writeln('----------------------------------------');
+    buffer.writeln('Tracked with TrackMyTrip');
+    Share.share(buffer.toString(), subject: 'Settlement Summary - ${trip.title}');
+  }
+
   @override
   Widget build(BuildContext context) {
+    final trips = ref.watch(tripListProvider);
+    final currentTrip = trips.where((t) => t.id == widget.trip.id).firstOrNull ?? widget.trip;
+    final authUser = ref.watch(authNotifierProvider).valueOrNull;
+    final currentUid = authUser?.id;
+
     final netBalances = ref.watch(tripNetBalancesProvider);
     final simplifiedTransfers = ref.watch(simplifiedTransfersProvider);
     final settlements = ref.watch(currentTripSettlementsProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final hasExplicitCreator = currentTrip.members.any((m) =>
+        m.isCreator ||
+        m.role == 'creator' ||
+        currentTrip.isCreator(m.id, m.email) ||
+        (currentTrip.createdByMemberId.isNotEmpty && m.id == currentTrip.createdByMemberId));
 
     return ListView(
       physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
@@ -88,15 +135,20 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              widget.trip.isFamily ? 'Family Member Contributions' : 'Individual Balances',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.3,
-                color: isDark ? Colors.white : AppTheme.textMainLight,
+            Expanded(
+              child: Text(
+                currentTrip.isFamily ? 'Family Member Contributions' : 'Individual Balances',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
+                  color: isDark ? Colors.white : AppTheme.textMainLight,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
+            const SizedBox(width: 8),
             Consumer(builder: (context, ref, _) {
               final imbalance = ref.watch(ledgerImbalanceProvider);
               final isZeroDrift = imbalance.abs() < 0.01;
@@ -120,7 +172,7 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      isZeroDrift ? 'Ledger Balanced' : 'Drift: ${CurrencyFormatter.format(imbalance, currency: widget.trip.defaultCurrency)}',
+                      isZeroDrift ? 'Ledger Balanced' : 'Drift: ${CurrencyFormatter.format(imbalance, currency: currentTrip.defaultCurrency)}',
                       style: TextStyle(
                         fontSize: 10.5,
                         fontWeight: FontWeight.bold,
@@ -134,7 +186,18 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
           ],
         ),
         const SizedBox(height: 8),
-        ...widget.trip.members.map((member) {
+        ...currentTrip.members.asMap().entries.map((entry) {
+          final index = entry.key;
+          final member = entry.value;
+          final isMe = (currentUid != null && member.id == currentUid) ||
+              (authUser?.email != null && member.email != null && authUser!.email.toLowerCase() == member.email!.toLowerCase());
+
+          final isMemberCreator = member.isCreator ||
+              member.role == 'creator' ||
+              currentTrip.isCreator(member.id, member.email) ||
+              (currentTrip.createdByMemberId.isNotEmpty && member.id == currentTrip.createdByMemberId) ||
+              (!hasExplicitCreator && index == 0);
+
           final balance = netBalances[member.id] ?? 0.0;
           final isPositive = balance > 0.01;
           final isNegative = balance < -0.01;
@@ -144,51 +207,147 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
             margin: const EdgeInsets.symmetric(vertical: 4),
             decoration: BoxDecoration(
               color: isDark ? AppTheme.surfaceDark : AppTheme.surfaceLight,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: isDark ? AppTheme.borderDark : AppTheme.borderLight, width: 1.1),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isMemberCreator
+                    ? (isDark ? const Color(0xFFF59E0B).withAlpha(100) : const Color(0xFFF59E0B).withAlpha(160))
+                    : (isDark ? AppTheme.borderDark : AppTheme.borderLight),
+                width: isMemberCreator ? 1.4 : 1.1,
+              ),
             ),
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: member.colorHex != null
-                    ? Color(int.parse(member.colorHex!))
-                    : AppTheme.primary,
-                child: Text(
-                  member.name.substring(0, 1).toUpperCase(),
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                ),
-              ),
-              title: Text(
-                member.name,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-              ),
-              subtitle: Text(
-                isSettled
-                    ? 'All settled up'
-                    : (isPositive ? 'Is owed money by group' : 'Owes money to group'),
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: isSettled ? Colors.grey : (isPositive ? Colors.green : Colors.orange),
-                ),
-              ),
-              trailing: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isSettled
-                      ? Colors.grey.withAlpha(20)
-                      : (isPositive ? Colors.green.withAlpha(20) : Colors.red.withAlpha(20)),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  isSettled
-                      ? CurrencyFormatter.format(0.0, currency: widget.trip.defaultCurrency)
-                      : (isPositive
-                          ? '+${CurrencyFormatter.format(balance, currency: widget.trip.defaultCurrency)}'
-                          : '-${CurrencyFormatter.format(balance.abs(), currency: widget.trip.defaultCurrency)}'),
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 14,
-                    color: isSettled ? Colors.grey : (isPositive ? Colors.green : Colors.red),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () {
+                  final matchingTransfer = simplifiedTransfers
+                      .where((t) => t.fromMemberId == member.id || t.toMemberId == member.id)
+                      .firstOrNull;
+                  if (matchingTransfer != null) {
+                    _openRecordSettlementDialog(context, defaultTransfer: matchingTransfer);
+                  } else if (!isSettled) {
+                    _openRecordSettlementDialog(context);
+                  }
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Row(
+                    children: [
+                      UserAvatar(
+                        name: member.name,
+                        colorHex: member.colorHex,
+                        size: 38,
+                        border: isMemberCreator ? Border.all(color: const Color(0xFFF59E0B), width: 1.5) : null,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              member.name,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (isMemberCreator || isMe) ...[
+                              const SizedBox(height: 2),
+                              Wrap(
+                                spacing: 4,
+                                runSpacing: 2,
+                                children: [
+                                  if (isMemberCreator)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                      decoration: BoxDecoration(
+                                        color: isDark ? const Color(0xFF382E12) : const Color(0xFFFEF3C7),
+                                        borderRadius: BorderRadius.circular(5),
+                                        border: Border.all(
+                                          color: isDark ? const Color(0xFFF59E0B).withAlpha(120) : const Color(0xFFF59E0B),
+                                          width: 0.8,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.workspace_premium_rounded,
+                                            size: 9.5,
+                                            color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706),
+                                          ),
+                                          const SizedBox(width: 2.5),
+                                          Text(
+                                            'Creator',
+                                            style: TextStyle(
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.w800,
+                                              color: isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  if (isMe)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                      decoration: BoxDecoration(
+                                        color: isDark ? AppTheme.primary.withAlpha(50) : AppTheme.primary.withAlpha(25),
+                                        borderRadius: BorderRadius.circular(5),
+                                        border: Border.all(color: AppTheme.primary.withAlpha(80), width: 0.8),
+                                      ),
+                                      child: const Text(
+                                        'You',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppTheme.primary,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ],
+                            const SizedBox(height: 2),
+                            Text(
+                              isSettled
+                                  ? 'All settled up'
+                                  : (isPositive ? 'Is owed money by group' : 'Owes money to group'),
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w500,
+                                color: isSettled ? Colors.grey : (isPositive ? Colors.green : Colors.orange),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isSettled
+                              ? Colors.grey.withAlpha(20)
+                              : (isPositive ? Colors.green.withAlpha(20) : Colors.red.withAlpha(20)),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          isSettled
+                              ? CurrencyFormatter.format(0.0, currency: currentTrip.defaultCurrency)
+                              : (isPositive
+                                  ? '+${CurrencyFormatter.format(balance, currency: currentTrip.defaultCurrency)}'
+                                  : '-${CurrencyFormatter.format(balance.abs(), currency: currentTrip.defaultCurrency)}'),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
+                            color: isSettled ? Colors.grey : (isPositive ? Colors.green : Colors.red),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -201,23 +360,44 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              'Simplified Transfers to Settle',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.3,
-                color: isDark ? Colors.white : AppTheme.textMainLight,
+            Expanded(
+              child: Text(
+                'Simplified Transfers',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
+                  color: isDark ? Colors.white : AppTheme.textMainLight,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            FilledButton.tonalIcon(
-              icon: const Icon(Icons.payment_rounded, size: 16),
-              label: const Text('Record Custom', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-              onPressed: () => _openRecordSettlementDialog(context),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
+            const SizedBox(width: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              alignment: WrapAlignment.end,
+              children: [
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.share_rounded, size: 13),
+                  label: const Text('Share', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  onPressed: () => _shareSettlementSummary(currentTrip, netBalances, simplifiedTransfers),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                FilledButton.tonalIcon(
+                  icon: const Icon(Icons.payment_rounded, size: 14),
+                  label: const Text('Record', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  onPressed: () => _openRecordSettlementDialog(context),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -246,8 +426,8 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
           )
         else
           ...simplifiedTransfers.map((transfer) {
-            final fromMember = widget.trip.getMember(transfer.fromMemberId);
-            final toMember = widget.trip.getMember(transfer.toMemberId);
+            final fromMember = currentTrip.getMember(transfer.fromMemberId);
+            final toMember = currentTrip.getMember(transfer.toMemberId);
 
             return Container(
               margin: const EdgeInsets.symmetric(vertical: 5),
@@ -296,7 +476,7 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                CurrencyFormatter.format(transfer.amount, currency: widget.trip.defaultCurrency),
+                                CurrencyFormatter.format(transfer.amount, currency: currentTrip.defaultCurrency),
                                 style: const TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w900,
@@ -338,15 +518,20 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Payment History',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
-                  color: isDark ? Colors.white : AppTheme.textMainLight,
+              Expanded(
+                child: Text(
+                  'Payment History',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3,
+                    color: isDark ? Colors.white : AppTheme.textMainLight,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
+              const SizedBox(width: 8),
               Text(
                 'Tap to edit',
                 style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : Colors.grey[600]),
@@ -502,9 +687,7 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
   void _saveSettlement() {
     if (!_formKey.currentState!.validate()) return;
     if (_payerId == _receiverId) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Payer and receiver cannot be the same person')),
-      );
+      AppSnackBar.showError(context, 'Payer and receiver cannot be the same person');
       return;
     }
 
@@ -540,29 +723,23 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
     Navigator.of(context).pop();
   }
 
-  void _deleteSettlement() {
+  void _deleteSettlement() async {
     if (widget.existingSettlement == null) return;
 
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text('Delete Payment Record?'),
-        content: const Text('This will remove the settlement and recalculate balances.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () {
-              Navigator.pop(ctx);
-              ref.read(allSettlementsProvider.notifier).deleteSettlement(widget.existingSettlement!.id);
-              Navigator.of(context).pop();
-            },
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirmed = await AppDialogs.confirm(
+      context,
+      title: 'Delete Payment Record?',
+      message: 'This will remove the settlement and recalculate balances.',
+      confirmLabel: 'Delete',
+      isDestructive: true,
+      icon: Icons.delete_forever_rounded,
     );
+
+    if (confirmed && mounted) {
+      ref.read(allSettlementsProvider.notifier).deleteSettlement(widget.existingSettlement!.id);
+      Navigator.of(context).pop();
+      AppSnackBar.showSuccess(context, 'Payment record deleted.');
+    }
   }
 
   @override

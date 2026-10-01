@@ -8,6 +8,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../models/trip.dart';
+import '../common/user_avatar.dart';
 import '../../models/trip_member.dart';
 import '../../providers/audit_log_provider.dart';
 import '../../providers/expense_provider.dart';
@@ -325,25 +326,35 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
                 children: [
                   const Icon(Icons.calendar_month_rounded, size: 15, color: AppTheme.primary),
                   const SizedBox(width: 6),
-                  Text(
-                    DateFormatter.formatTripDateRange(trip.startDate, trip.endDate),
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  Expanded(
+                    child: Text(
+                      DateFormatter.formatTripDateRange(trip.startDate, trip.endDate),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                    ),
                   ),
                 ],
               ),
               const SizedBox(height: 8),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    '$stopsCount Stops  •  $billsCount Bills',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                  Expanded(
+                    child: Text(
+                      '$stopsCount Stops • $billsCount Bills',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                      ),
                     ),
                   ),
+                  const SizedBox(width: 8),
                   Text(
                     'Total: ${CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.bold,
@@ -412,27 +423,32 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 20),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withAlpha(20),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
+        Builder(
+          builder: (ctx) {
+            final qrSize = (MediaQuery.of(ctx).size.width * 0.58).clamp(160.0, 240.0);
+            return Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(20),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
-            ],
-          ),
-          child: QrImageView(
-            data: shareCode,
-            version: QrVersions.auto,
-            size: 240,
-            backgroundColor: Colors.white,
-            padding: const EdgeInsets.all(8),
-            errorCorrectionLevel: QrErrorCorrectLevel.L,
-          ),
+              child: QrImageView(
+                data: shareCode,
+                version: QrVersions.auto,
+                size: qrSize,
+                backgroundColor: Colors.white,
+                padding: const EdgeInsets.all(8),
+                errorCorrectionLevel: QrErrorCorrectLevel.L,
+              ),
+            );
+          },
         ),
         const SizedBox(height: 16),
         Text(
@@ -541,66 +557,75 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
           ],
         ),
         const SizedBox(height: 8),
-        ListView.separated(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: trip.members.length,
-          separatorBuilder: (c, i) => const Divider(height: 1),
-          itemBuilder: (context, index) {
-            final member = trip.members[index];
-            final color = member.colorHex != null
-                ? Color(int.parse(member.colorHex!))
-                : AppTheme.primary;
+        Column(
+          children: [
+            for (int index = 0; index < trip.members.length; index++) ...[
+              if (index > 0) const Divider(height: 1),
+              Builder(
+                builder: (context) {
+                  final member = trip.members[index];
+                  final isHost = trip.isMemberCreator(member) || index == 0;
 
-            return ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-              leading: CircleAvatar(
-                backgroundColor: color,
-                child: Text(
-                  member.name.substring(0, 1).toUpperCase(),
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                ),
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    leading: UserAvatar(
+                      name: member.name,
+                      colorHex: member.colorHex,
+                      size: 40,
+                      border: isHost ? Border.all(color: Colors.amber, width: 1.5) : null,
+                    ),
+                    title: Text(
+                      member.name,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: Text(
+                      member.email?.isNotEmpty == true
+                          ? member.email!
+                          : (member.isCurrentUser ? 'Active on this device' : 'Trip companion'),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.grey[400] : Colors.grey[600],
+                      ),
+                    ),
+                    trailing: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: member.isCurrentUser
+                            ? AppTheme.primary.withAlpha(25)
+                            : (isHost
+                                ? (isDark ? Colors.amber.withAlpha(30) : Colors.amber.withAlpha(25))
+                                : (isDark ? Colors.white.withAlpha(15) : const Color(0xFFF1F5F9))),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: member.isCurrentUser
+                              ? AppTheme.primary
+                              : (isHost
+                                  ? (isDark ? Colors.amber.withAlpha(120) : Colors.amber.shade400)
+                                  : (isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1))),
+                        ),
+                      ),
+                      child: Text(
+                        member.isCurrentUser && isHost
+                            ? 'Creator • You'
+                            : (member.isCurrentUser
+                                ? 'You'
+                                : (isHost ? 'Creator' : 'Member')),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: member.isCurrentUser
+                              ? AppTheme.primary
+                              : (isHost
+                                  ? (isDark ? Colors.amber[300] : Colors.amber[900])
+                                  : (isDark ? Colors.grey[300] : const Color(0xFF475569))),
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
-              title: Text(
-                member.name,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              subtitle: Text(
-                member.isCurrentUser ? 'You (Active Traveler)' : (member.id == trip.createdByMemberId ? 'Trip Host' : 'Co-Traveler'),
-                style: TextStyle(
-                  fontSize: 12,
-                  color: member.isCurrentUser ? AppTheme.primary : Colors.grey,
-                  fontWeight: member.isCurrentUser ? FontWeight.bold : FontWeight.normal,
-                ),
-              ),
-              trailing: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                decoration: BoxDecoration(
-                  color: member.isCurrentUser
-                      ? AppTheme.primary.withAlpha(25)
-                      : (isDark ? Colors.white.withAlpha(15) : const Color(0xFFF1F5F9)),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: member.isCurrentUser
-                        ? AppTheme.primary
-                        : (isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1)),
-                  ),
-                ),
-                child: Text(
-                  member.isCurrentUser
-                      ? 'You (Active)'
-                      : (member.id == trip.createdByMemberId ? 'Host' : 'Companion'),
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: member.isCurrentUser
-                        ? AppTheme.primary
-                        : (isDark ? Colors.grey[300] : const Color(0xFF475569)),
-                  ),
-                ),
-              ),
-            );
-          },
+            ],
+          ],
         ),
       ],
     );

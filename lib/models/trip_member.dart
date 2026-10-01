@@ -6,6 +6,7 @@ class TripMember {
   final String? colorHex;
   final String? phoneNumber;
   final bool isCurrentUser;
+  final String? role;
   final double? latitude;
   final double? longitude;
   final DateTime? lastSeen;
@@ -18,12 +19,19 @@ class TripMember {
     this.colorHex,
     this.phoneNumber,
     this.isCurrentUser = false,
+    this.role,
     this.latitude,
     this.longitude,
     this.lastSeen,
   });
 
+  static const String roleCreator = 'creator';
+  static const String roleMember = 'member';
+
   bool get hasLocation => latitude != null && longitude != null;
+  bool get isCreator => role == 'creator' || role == 'admin' || role == 'leader';
+  bool get isLeader => isCreator;
+  String get displayRole => isCreator ? 'Creator' : 'Member';
 
   String get initials => name.trim().isNotEmpty
       ? name.trim().split(' ').where((w) => w.isNotEmpty).map((w) => w[0]).take(2).join().toUpperCase()
@@ -37,6 +45,7 @@ class TripMember {
     String? colorHex,
     String? phoneNumber,
     bool? isCurrentUser,
+    String? role,
     double? latitude,
     double? longitude,
     DateTime? lastSeen,
@@ -49,6 +58,7 @@ class TripMember {
       colorHex: colorHex ?? this.colorHex,
       phoneNumber: phoneNumber ?? this.phoneNumber,
       isCurrentUser: isCurrentUser ?? this.isCurrentUser,
+      role: role ?? this.role,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       lastSeen: lastSeen ?? this.lastSeen,
@@ -64,6 +74,7 @@ class TripMember {
       'colorHex': colorHex,
       'phoneNumber': phoneNumber,
       'isCurrentUser': isCurrentUser,
+      'role': role,
       'latitude': latitude,
       'longitude': longitude,
       'lastSeen': lastSeen?.toIso8601String(),
@@ -79,6 +90,7 @@ class TripMember {
       colorHex: json['colorHex'] as String?,
       phoneNumber: json['phoneNumber'] as String?,
       isCurrentUser: json['isCurrentUser'] as bool? ?? false,
+      role: json['role'] as String?,
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
       lastSeen: json['lastSeen'] != null ? DateTime.tryParse(json['lastSeen'] as String) : null,

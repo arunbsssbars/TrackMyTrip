@@ -244,7 +244,7 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
       ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
         tripId: importedTrip.id,
         type: AlertType.memberJoined,
-        title: 'New Member Joined',
+        title: 'Member Joined',
         message: '${currentDisplayName.isNotEmpty ? currentDisplayName : "A companion"} joined "${importedTrip.title}" using the trip code',
         senderMemberId: activeMemberId,
         senderName: currentDisplayName,

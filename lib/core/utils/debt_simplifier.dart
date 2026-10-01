@@ -1,3 +1,5 @@
+import 'currency_formatter.dart';
+
 class DebtTransfer {
   final String fromMemberId;
   final String toMemberId;
@@ -19,15 +21,21 @@ class DebtSimplifier {
   static List<DebtTransfer> simplifyDebts(Map<String, double> netBalances) {
     final List<DebtTransfer> transfers = [];
 
-    // Filter out zero balances and make a mutable copy
+    // Filter out zero balances and make a mutable copy with 2-decimal rounded precision
     final Map<String, double> balances = {};
     netBalances.forEach((memberId, balance) {
-      if (balance.abs() > 0.01) {
-        balances[memberId] = balance;
+      final rounded = CurrencyFormatter.roundTo2Decimals(balance);
+      if (rounded.abs() >= 0.01) {
+        balances[memberId] = rounded;
       }
     });
 
-    while (balances.isNotEmpty) {
+    // Safety loop guard to prevent infinite looping on precision drift
+    final int maxSteps = balances.length * 3 + 10;
+    int stepCount = 0;
+
+    while (balances.isNotEmpty && stepCount < maxSteps) {
+      stepCount++;
       String? maxDebtorId;
       double minBalance = 0; // Most negative
 
@@ -52,20 +60,26 @@ class DebtSimplifier {
       final double debtorAmount = -minBalance;
       final double creditorAmount = maxBalance;
 
-      final double transferAmount = debtorAmount < creditorAmount ? debtorAmount : creditorAmount;
+      final double rawTransfer = debtorAmount < creditorAmount ? debtorAmount : creditorAmount;
+      final double transferAmount = CurrencyFormatter.roundTo2Decimals(rawTransfer);
 
-      if (transferAmount > 0.01) {
+      if (transferAmount >= 0.01) {
         transfers.add(
           DebtTransfer(
             fromMemberId: maxDebtorId!,
             toMemberId: maxCreditorId!,
-            amount: double.parse(transferAmount.toStringAsFixed(2)),
+            amount: transferAmount,
           ),
         );
+      } else {
+        // If remaining difference is sub-cent dust (< 0.01), prune both and break
+        balances.remove(maxDebtorId);
+        balances.remove(maxCreditorId);
+        break;
       }
 
-      final newDebtorBal = balances[maxDebtorId!]! + transferAmount;
-      final newCreditorBal = balances[maxCreditorId!]! - transferAmount;
+      final newDebtorBal = CurrencyFormatter.roundTo2Decimals(balances[maxDebtorId!]! + transferAmount);
+      final newCreditorBal = CurrencyFormatter.roundTo2Decimals(balances[maxCreditorId!]! - transferAmount);
 
       if (newDebtorBal.abs() < 0.01) {
         balances.remove(maxDebtorId);

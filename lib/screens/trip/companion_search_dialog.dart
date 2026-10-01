@@ -377,8 +377,12 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
                           width: 1.2,
                         ),
                       ),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                      child: Material(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(16),
+                        clipBehavior: Clip.antiAlias,
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
                         leading: CircleAvatar(
                           radius: 22,
                           backgroundColor: color,
@@ -515,6 +519,7 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
                                      label: const Text('Invite', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                                    )),
                       ),
+                        ),
                     );
                   },
                 );

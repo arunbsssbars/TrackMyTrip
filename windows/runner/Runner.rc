@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.triptracker" "\0"
-            VALUE "FileDescription", "trip_tracker_app" "\0"
+            VALUE "CompanyName", "com.trackmytrip" "\0"
+            VALUE "FileDescription", "trackmytrip" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "trip_tracker_app" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.triptracker. All rights reserved." "\0"
-            VALUE "OriginalFilename", "trip_tracker_app.exe" "\0"
-            VALUE "ProductName", "trip_tracker_app" "\0"
+            VALUE "InternalName", "trackmytrip" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.trackmytrip. All rights reserved." "\0"
+            VALUE "OriginalFilename", "trackmytrip.exe" "\0"
+            VALUE "ProductName", "trackmytrip" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

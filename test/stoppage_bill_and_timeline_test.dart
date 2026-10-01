@@ -1,9 +1,9 @@
-﻿import 'package:flutter_test/flutter_test.dart';
-import 'package:trip_tracker_app/models/stoppage.dart';
-import 'package:trip_tracker_app/models/expense.dart';
-import 'package:trip_tracker_app/models/expense_split.dart';
-import 'package:trip_tracker_app/models/trip_member.dart';
-import 'package:trip_tracker_app/screens/stoppage/add_stoppage_dialog.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:trackmytrip/models/stoppage.dart';
+import 'package:trackmytrip/models/expense.dart';
+import 'package:trackmytrip/models/expense_split.dart';
+import 'package:trackmytrip/models/trip_member.dart';
+import 'package:trackmytrip/screens/stoppage/add_stoppage_dialog.dart';
 
 void main() {
   group('Stoppage Bill Integration & Category Mapping', () {

@@ -120,15 +120,19 @@ class _PulsingLiveBeaconState extends State<PulsingLiveBeacon>
         children: [
           beaconDot,
           const SizedBox(width: 4.5),
-          Text(
-            widget.label,
-            style: widget.labelStyle ??
-                TextStyle(
-                  color: widget.color,
-                  fontSize: 9,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.5,
-                ),
+          Flexible(
+            child: Text(
+              widget.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: widget.labelStyle ??
+                  TextStyle(
+                    color: widget.color,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
+                  ),
+            ),
           ),
         ],
       ),

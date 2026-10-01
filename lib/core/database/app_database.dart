@@ -124,6 +124,12 @@ class AppDatabase {
 
   /// Ensures dynamically added tables exist across migrations
   static Future<void> _onOpen(Database db) async {
+    // 1. High-Concurrency Write-Ahead Logging (WAL) to eliminate lock contention
+    try {
+      await db.execute('PRAGMA journal_mode = WAL;');
+      await db.execute('PRAGMA synchronous = NORMAL;');
+    } catch (_) {}
+
     await db.execute('''
       CREATE TABLE IF NOT EXISTS tombstoned_trips (
         tripId TEXT PRIMARY KEY,
@@ -131,6 +137,17 @@ class AppDatabase {
       )
     ''');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_tombstone_tripId ON tombstoned_trips(tripId)');
+    try {
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_expenses_trip_created ON expenses(tripId, createdAt)');
+    } catch (_) {}
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS dismissed_alerts (
+        alertId TEXT PRIMARY KEY,
+        tripId TEXT,
+        dismissedAt INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_dismissed_alerts_id ON dismissed_alerts(alertId)');
     // Non-destructive multi-currency migrations
     try {
       await db.execute('ALTER TABLE expenses ADD COLUMN originalCurrency TEXT');
@@ -146,6 +163,30 @@ class AppDatabase {
     } catch (_) {}
     try {
       await db.execute('ALTER TABLE trips ADD COLUMN memberReviewsJson TEXT');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE expenses ADD COLUMN isPersonal INTEGER NOT NULL DEFAULT 0');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE audit_logs ADD COLUMN amount REAL');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE audit_logs ADD COLUMN currency TEXT');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE audit_logs ADD COLUMN targetItemId TEXT');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE audit_logs ADD COLUMN reason TEXT');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE proximity_alerts ADD COLUMN amount REAL');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE proximity_alerts ADD COLUMN currency TEXT');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE stoppages ADD COLUMN createdByName TEXT');
     } catch (_) {}
   }
 
@@ -192,6 +233,7 @@ class AppDatabase {
         departedAt TEXT,
         notes TEXT,
         createdBy TEXT NOT NULL,
+        createdByName TEXT,
         orderIndex INTEGER NOT NULL DEFAULT 0
       )
     ''');
@@ -216,12 +258,14 @@ class AppDatabase {
         createdAt TEXT NOT NULL,
         originalCurrency TEXT,
         originalAmount REAL,
-        exchangeRate REAL
+        exchangeRate REAL,
+        isPersonal INTEGER NOT NULL DEFAULT 0
       )
     ''');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_expenses_tripId ON expenses(tripId)');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_expenses_stoppageId ON expenses(stoppageId)');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_expenses_createdAt ON expenses(createdAt)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_expenses_trip_created ON expenses(tripId, createdAt)');
 
     // 4. Memories
     await db.execute('''
@@ -268,7 +312,11 @@ class AppDatabase {
         performedByMemberId TEXT NOT NULL,
         performedByName TEXT NOT NULL,
         timestamp TEXT NOT NULL,
-        changeDetails TEXT NOT NULL
+        changeDetails TEXT NOT NULL,
+        amount REAL,
+        currency TEXT,
+        targetItemId TEXT,
+        reason TEXT
       )
     ''');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_audit_tripId ON audit_logs(tripId, timestamp)');
@@ -305,7 +353,9 @@ class AppDatabase {
         distanceMeters REAL,
         timestamp TEXT NOT NULL,
         urgency TEXT NOT NULL,
-        isRead INTEGER NOT NULL DEFAULT 0
+        isRead INTEGER NOT NULL DEFAULT 0,
+        amount REAL,
+        currency TEXT
       )
     ''');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_alerts_tripId ON proximity_alerts(tripId, isRead)');
@@ -685,6 +735,37 @@ class AppDatabase {
     await _db.delete('proximity_alerts', where: 'id = ?', whereArgs: [alertId]);
   }
 
+  Future<void> recordAlertDismissed(String alertId, {String? tripId}) async {
+    await _db.insert(
+      'dismissed_alerts',
+      {
+        'alertId': alertId,
+        'tripId': tripId,
+        'dismissedAt': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<Set<String>> getDismissedAlertIds() async {
+    try {
+      final rows = await _db.query('dismissed_alerts', columns: ['alertId']);
+      return rows.map((r) => r['alertId'] as String).toSet();
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  Future<void> clearDismissedAlerts() async {
+    try {
+      await _db.delete('dismissed_alerts');
+    } catch (_) {}
+  }
+
+  Future<void> deleteAlertsByTripId(String tripId) async {
+    await _db.delete('proximity_alerts', where: 'tripId = ?', whereArgs: [tripId]);
+  }
+
   Future<void> clearAllAlerts() async {
     await _db.delete('proximity_alerts');
   }
@@ -751,6 +832,15 @@ class AppDatabase {
         'userRecordJson': jsonEncode(recordToSave),
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> deleteRegisteredUser(String idOrEmail) async {
+    final clean = idOrEmail.toLowerCase().trim();
+    await _db.delete(
+      'registered_users',
+      where: 'LOWER(email) = ? OR LOWER(username) = ?',
+      whereArgs: [clean, clean],
     );
   }
 
@@ -904,6 +994,7 @@ class AppDatabase {
     'departedAt': s.departedAt?.toIso8601String(),
     'notes': s.notes,
     'createdBy': s.createdBy,
+    'createdByName': s.createdByName,
     'orderIndex': s.orderIndex,
   };
 
@@ -919,6 +1010,7 @@ class AppDatabase {
     departedAt: r['departedAt'] != null ? DateTime.parse(r['departedAt'] as String) : null,
     notes: r['notes'] as String?,
     createdBy: r['createdBy'] as String,
+    createdByName: r['createdByName'] as String?,
     orderIndex: r['orderIndex'] as int,
   );
 
@@ -939,6 +1031,7 @@ class AppDatabase {
     'originalCurrency': e.originalCurrency,
     'originalAmount': e.originalAmount,
     'exchangeRate': e.exchangeRate,
+    'isPersonal': e.isPersonal ? 1 : 0,
   };
 
   Expense _expenseFromRow(Map<String, dynamic> r) => Expense(
@@ -960,6 +1053,7 @@ class AppDatabase {
     originalCurrency: r['originalCurrency'] as String?,
     originalAmount: (r['originalAmount'] as num?)?.toDouble(),
     exchangeRate: (r['exchangeRate'] as num?)?.toDouble(),
+    isPersonal: r['isPersonal'] == 1 || r['isPersonal'] == true,
   );
 
   Map<String, dynamic> _memoryToRow(Memory m) => {
@@ -1025,7 +1119,11 @@ class AppDatabase {
     'performedByMemberId': a.performedByMemberId,
     'performedByName': a.performedByName,
     'timestamp': a.timestamp.toIso8601String(),
-    'changeDetails': a.changeDetails,
+    'changeDetails': a.changeDetails ?? '',
+    'amount': a.amount,
+    'currency': a.currency,
+    'targetItemId': a.targetItemId,
+    'reason': a.reason,
   };
 
   TripAuditLog _auditLogFromRow(Map<String, dynamic> r) => TripAuditLog(
@@ -1036,7 +1134,11 @@ class AppDatabase {
     performedByMemberId: r['performedByMemberId'] as String,
     performedByName: r['performedByName'] as String,
     timestamp: DateTime.parse(r['timestamp'] as String),
-    changeDetails: r['changeDetails'] as String,
+    changeDetails: (r['changeDetails'] as String?)?.isNotEmpty == true ? r['changeDetails'] as String : null,
+    amount: (r['amount'] as num?)?.toDouble(),
+    currency: r['currency'] as String?,
+    targetItemId: r['targetItemId'] as String?,
+    reason: r['reason'] as String?,
   );
 
   Map<String, dynamic> _mutationToRow(SyncMutation m) => {
@@ -1079,6 +1181,8 @@ class AppDatabase {
     'timestamp': a.timestamp.toIso8601String(),
     'urgency': a.urgency.name,
     'isRead': a.isRead ? 1 : 0,
+    'amount': a.amount,
+    'currency': a.currency,
   };
 
   ProximityAlert _alertFromRow(Map<String, dynamic> r) => ProximityAlert(
@@ -1095,6 +1199,8 @@ class AppDatabase {
     timestamp: DateTime.parse(r['timestamp'] as String),
     urgency: AlertUrgency.values.firstWhere((u) => u.name == r['urgency'], orElse: () => AlertUrgency.normal),
     isRead: (r['isRead'] as int) == 1,
+    amount: (r['amount'] as num?)?.toDouble(),
+    currency: r['currency'] as String?,
   );
 
   Map<String, dynamic> _invitationToRow(TripInvitation i) => {
@@ -1137,6 +1243,8 @@ class AppDatabase {
       'auth_session',
       'registered_users',
       'trip_invitations',
+      'tombstoned_trips',
+      'dismissed_alerts',
     ];
     for (final table in tables) {
       try {

@@ -1,4 +1,4 @@
-package com.triptracker.trip_tracker_app
+package com.trackmytrip.app
 
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
@@ -6,7 +6,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity: FlutterActivity() {
-    private val CHANNEL = "com.triptracker.trip_tracker_app/security"
+    private val CHANNEL = "com.trackmytrip.app/security"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)

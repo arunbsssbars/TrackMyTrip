@@ -28,12 +28,13 @@ class UserProfile {
   String get handle => username.startsWith('@') ? username : '@$username';
 
   String get initials {
-    if (displayName.trim().isEmpty) return '?';
-    final parts = displayName.trim().split(' ');
+    final clean = displayName.trim();
+    if (clean.isEmpty) return '?';
+    final parts = clean.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
     if (parts.length >= 2) {
       return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
     }
-    return displayName.trim().substring(0, 1).toUpperCase();
+    return clean[0].toUpperCase();
   }
 
   UserProfile copyWith({

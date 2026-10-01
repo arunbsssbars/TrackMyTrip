@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/cloud_trip_sync_service.dart';
 import '../../core/services/live_location_tracker_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/app_snackbar.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../models/trip.dart';
 import '../../providers/auth_provider.dart';
@@ -12,11 +13,10 @@ import '../../providers/expense_provider.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/settlement_provider.dart';
 import '../../providers/stoppage_provider.dart';
+import '../../models/stoppage.dart';
 import '../../providers/trip_provider.dart';
-import '../expenses/add_expense_screen.dart';
 import '../memories/add_memory_dialog.dart';
 import '../stoppage/add_stoppage_dialog.dart';
-import '../../core/utils/page_transitions.dart';
 import 'tabs/expenses_tab.dart';
 import 'tabs/map_tab.dart';
 import 'tabs/memories_tab.dart';
@@ -24,12 +24,11 @@ import 'tabs/settlement_tab.dart';
 import 'tabs/timeline_tab.dart';
 import 'tabs/members_tab.dart';
 import '../../core/services/firestore_sync_service.dart';
-import '../../core/services/proximity_alert_service.dart';
-import '../../models/proximity_alert.dart';
 import '../notifications/notification_center_sheet.dart';
 import '../common/sos_badge_icon.dart';
 import '../common/universal_bottom_bar.dart';
 import '../../widgets/app_floating_button.dart';
+import '../../widgets/quick_bill_action_sheet.dart';
 
 class TripDetailScreen extends ConsumerStatefulWidget {
   final String tripId;
@@ -122,27 +121,10 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
           FilledButton.icon(
             onPressed: () async {
               Navigator.of(ctx).pop();
-              final updatedTrip = trip.copyWith(isCompleted: false);
-              await ref.read(tripListProvider.notifier).updateTrip(updatedTrip);
-
-              // Broadcast notification to all members
-              final authUser = ref.read(authNotifierProvider).valueOrNull;
-              final creatorName = (authUser?.displayName.isNotEmpty == true) ? authUser!.displayName : 'Trip Leader';
-              ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
-                tripId: trip.id,
-                type: AlertType.memberJoined,
-                title: 'Journey Reopened',
-                message: '$creatorName reopened "${trip.title}". You can now add stops and record bills.',
-              );
+              await ref.read(tripListProvider.notifier).reopenTrip(trip.id);
 
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Journey reopened! Members have been notified.'),
-                    backgroundColor: Color(0xFF10B981),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
+                AppSnackBar.showSuccess(context, 'Journey reopened! Members have been notified.');
               }
             },
             style: FilledButton.styleFrom(backgroundColor: const Color(0xFF10B981)),
@@ -164,13 +146,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (context.mounted) {
                 Navigator.of(context).popUntil((route) => route.isFirst);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('This trip was deleted or removed.'),
-                    backgroundColor: Colors.redAccent,
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
+                AppSnackBar.showError(context, 'This trip was deleted or removed.');
               }
             });
           }
@@ -203,20 +179,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
         if (mounted && Navigator.of(context).canPop()) {
           Navigator.of(context).pop();
           if (!_isExiting) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Row(
-                  children: [
-                    Icon(Icons.info_outline_rounded, color: Colors.white, size: 18),
-                    SizedBox(width: 8),
-                    Expanded(child: Text('This trip is no longer active or was deleted.')),
-                  ],
-                ),
-                backgroundColor: Color(0xFFE11D48),
-                behavior: SnackBarBehavior.floating,
-                duration: Duration(seconds: 3),
-              ),
-            );
+            AppSnackBar.showError(context, 'This trip is no longer active or was deleted.');
           }
         }
       });
@@ -507,7 +470,70 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
       ),
       body: Column(
         children: [
-          if (trip.isCompleted)
+          if (trip.isArchivedByCreator)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              color: Colors.amber.withAlpha(isDark ? 30 : 20),
+              child: Row(
+                children: [
+                  const Icon(Icons.archive_outlined, size: 16, color: Colors.amber),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Trip archived by creator • Your expenses & ledger are preserved',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.amber[200] : Colors.amber[900],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      visualDensity: VisualDensity.compact,
+                      foregroundColor: Colors.redAccent,
+                    ),
+                    onPressed: () async {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          title: const Text('Delete from Workspace?'),
+                          content: const Text(
+                            'This will remove the archived trip, expenses, and settlements from your personal workspace permanently.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(false),
+                              child: const Text('Cancel'),
+                            ),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                              onPressed: () => Navigator.of(ctx).pop(true),
+                              child: const Text('Delete'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirm == true && context.mounted) {
+                        await ref.read(tripListProvider.notifier).deleteTripLocally(trip.id);
+                        if (context.mounted && Navigator.of(context).canPop()) {
+                          Navigator.of(context).pop();
+                        }
+                      }
+                    },
+                    child: const Text(
+                      'Delete',
+                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else if (trip.isCompleted)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
               color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
@@ -600,32 +626,32 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
           } else if (index == 3) {
             // Tab 3: Bills & Splits / Budget tab
             customIcon = const OcrAddIcon();
-            label = 'Add Bill';
+            label = 'Quick Bill';
             onPressed = () {
-              AppNavigator.push(
-                context,
-                AddExpenseScreen(tripId: trip.id),
-              );
+              QuickBillActionSheet.show(context, trip: trip);
             };
           } else if (index == (_tabCount - 1)) {
             // Last tab: Memories tab
             icon = Icons.add_a_photo_rounded;
             label = 'Add Photo';
             onPressed = () {
-              final stoppages = ref.read(currentTripStoppagesProvider);
-              if (stoppages.isNotEmpty) {
-                showDialog(
-                  context: context,
-                  builder: (context) => AddMemoryDialog(tripId: trip.id, stoppage: stoppages.first),
-                );
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Please tag a stoppage before adding photos.'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              }
+              final stoppages = ref.read(tripStoppagesProvider(trip.id));
+              final Stoppage targetStoppage = stoppages.isNotEmpty
+                  ? stoppages.first
+                  : Stoppage(
+                      id: 'general_${trip.id}',
+                      tripId: trip.id,
+                      name: trip.title,
+                      latitude: 0.0,
+                      longitude: 0.0,
+                      arrivedAt: DateTime.now(),
+                      category: 'general',
+                      createdBy: trip.createdByMemberId,
+                    );
+              showDialog(
+                context: context,
+                builder: (context) => AddMemoryDialog(tripId: trip.id, stoppage: targetStoppage),
+              );
             };
           } else {
             return const SizedBox.shrink();

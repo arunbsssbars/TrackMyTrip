@@ -119,23 +119,29 @@ class _GlobalExpensesSheetState extends ConsumerState<GlobalExpensesSheet> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Global Expenses Ledger',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: -0.3),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${filteredExpenses.length} bills across all expeditions • Total: ${CurrencyFormatter.format(totalSpent, currency: defaultCurrency)}',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
-                        fontWeight: FontWeight.w500,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Global Expenses Ledger',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: -0.3),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      Text(
+                        '${filteredExpenses.length} bills across all expeditions • Total: ${CurrencyFormatter.format(totalSpent, currency: defaultCurrency)}',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
                 ),
                 IconButton(
                   onPressed: () => Navigator.of(context).pop(),
@@ -333,16 +339,23 @@ class _GlobalExpensesSheetState extends ConsumerState<GlobalExpensesSheet> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  const Icon(Icons.explore_rounded, size: 14, color: AppTheme.primary),
-                  const SizedBox(width: 6),
-                  Text(
-                    tripTitle,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                  ),
-                ],
+              Expanded(
+                child: Row(
+                  children: [
+                    const Icon(Icons.explore_rounded, size: 14, color: AppTheme.primary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        tripTitle,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
               ),
+              const SizedBox(width: 8),
               Text(
                 '${tripExpenses.length} bills • ${CurrencyFormatter.format(tripTotal, currency: currency)}',
                 style: TextStyle(
@@ -350,6 +363,8 @@ class _GlobalExpensesSheetState extends ConsumerState<GlobalExpensesSheet> {
                   fontWeight: FontWeight.bold,
                   color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -466,8 +481,12 @@ class _GlobalExpensesSheetState extends ConsumerState<GlobalExpensesSheet> {
           color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
         ),
       ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
         onTap: () {
           if (trip != null) {
             Navigator.of(context).push(
@@ -539,6 +558,7 @@ class _GlobalExpensesSheetState extends ConsumerState<GlobalExpensesSheet> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

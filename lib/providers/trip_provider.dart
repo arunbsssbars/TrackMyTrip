@@ -7,6 +7,7 @@ import '../core/services/location_service.dart';
 import '../core/services/offline_sync_engine.dart';
 import '../core/services/realtime_sync_service.dart';
 import '../core/services/tombstone_service.dart';
+import '../core/services/media_cache_service.dart';
 import '../core/services/trip_share_service.dart';
 import '../models/auth_user.dart';
 import '../models/trip.dart';
@@ -19,9 +20,20 @@ import 'memory_provider.dart';
 import 'settlement_provider.dart';
 import 'stoppage_provider.dart';
 import 'audit_log_provider.dart';
+import '../models/trip_audit_log.dart';
+import '../core/services/user_service.dart';
+import 'package:uuid/uuid.dart';
 
 final currencyNotifierProvider = ChangeNotifierProvider<ValueNotifier<String>>((ref) {
-  return LocationService.currencyNotifier;
+  final notifier = ValueNotifier<String>(LocationService.currencyNotifier.value);
+  void listener() {
+    notifier.value = LocationService.currencyNotifier.value;
+  }
+  LocationService.currencyNotifier.addListener(listener);
+  ref.onDispose(() {
+    LocationService.currencyNotifier.removeListener(listener);
+  });
+  return notifier;
 });
 
 final isSyncingTripsProvider = StateProvider<bool>((ref) => false);
@@ -78,6 +90,7 @@ class TripNotifier extends StateNotifier<List<Trip>> {
               name: authUser.displayName.isNotEmpty ? authUser.displayName : 'Trip Lead',
               email: authUser.email.isNotEmpty ? authUser.email : null,
               isCurrentUser: true,
+              role: 'creator',
               colorHex: '0xFF0D9488',
             ),
           );
@@ -243,6 +256,44 @@ class TripNotifier extends StateNotifier<List<Trip>> {
     } catch (_) {}
   }
 
+  /// Canonically reopens a concluded journey, logging to Trust History and notifying companions
+  Future<void> reopenTrip(String tripId) async {
+    final tripIndex = state.indexWhere((t) => t.id == tripId);
+    if (tripIndex == -1) return;
+
+    final trip = state[tripIndex];
+    final updatedTrip = trip.copyWith(
+      isCompleted: false,
+      status: 'active',
+    );
+    await updateTrip(updatedTrip);
+
+    final currentUser = UserService.getCurrentUser();
+    // 1. Audit log
+    try {
+      final auditLog = TripAuditLog(
+        id: const Uuid().v4(),
+        tripId: tripId,
+        actionType: 'trip_reopened',
+        itemTitle: trip.title,
+        performedByMemberId: currentUser.id,
+        performedByName: currentUser.displayName,
+        timestamp: DateTime.now(),
+        changeDetails: '${currentUser.displayName} reopened "${trip.title}". Edits and live tracking re-enabled.',
+      );
+      await _ref.read(allAuditLogsProvider.notifier).logAction(auditLog);
+    } catch (_) {}
+
+    // 2. Broadcast Alert to companions and workspace
+    try {
+      await _ref.read(proximityAlertServiceProvider).broadcastTripReopened(
+        tripId: trip.id,
+        tripTitle: trip.title,
+        reopenerName: currentUser.displayName,
+      );
+    } catch (_) {}
+  }
+
   Future<void> deleteTrip(String tripId) async {
     // 0. Mark tombstone FIRST in dual-layer persistent cache
     await TombstoneService.markTombstoned(tripId);
@@ -277,8 +328,25 @@ class TripNotifier extends StateNotifier<List<Trip>> {
     } catch (_) {}
 
     // 4. Purge locally
+    // Clean up local media files on disk for this trip
+    try {
+      final tripMemories = _storage.getMemories(tripId);
+      for (final m in tripMemories) {
+        MediaCacheService.deleteMediaFile(m.mediaPath);
+      }
+      final tripExpenses = _storage.getExpenses(tripId);
+      for (final e in tripExpenses) {
+        if (e.receiptImagePath != null) {
+          MediaCacheService.deleteMediaFile(e.receiptImagePath);
+        }
+      }
+    } catch (_) {}
+
     state = state.where((t) => t.id != tripId).toList();
     await _storage.deleteTrip(tripId);
+    try {
+      await _ref.read(proximityAlertServiceProvider).clearAlertsForTrip(tripId);
+    } catch (_) {}
     if (_ref.read(selectedTripIdProvider) == tripId) {
       _ref.read(selectedTripIdProvider.notifier).state = null;
     }
@@ -338,6 +406,9 @@ class TripNotifier extends StateNotifier<List<Trip>> {
     // 4. Purge locally for this user
     state = state.where((t) => t.id != tripId).toList();
     await _storage.deleteTrip(tripId);
+    try {
+      await _ref.read(proximityAlertServiceProvider).clearAlertsForTrip(tripId);
+    } catch (_) {}
     if (_ref.read(selectedTripIdProvider) == tripId) {
       _ref.read(selectedTripIdProvider.notifier).state = null;
     }
@@ -352,9 +423,39 @@ class TripNotifier extends StateNotifier<List<Trip>> {
     } catch (_) {}
     state = state.where((t) => t.id != tripId).toList();
     await _storage.deleteTrip(tripId);
+    try {
+      await _ref.read(proximityAlertServiceProvider).clearAlertsForTrip(tripId);
+    } catch (_) {}
     if (_ref.read(selectedTripIdProvider) == tripId) {
       _ref.read(selectedTripIdProvider.notifier).state = null;
     }
+    _reloadDependentProviders();
+  }
+
+  /// When a creator deletes a shared journey, industry standard (Splitwise/Tricount)
+  /// dictates preserving companions' personal ledgers & global accounting rather than
+  /// destroying their financial trail. This transitions the trip into a preserved archive.
+  Future<void> archiveTripByCreator(String tripId) async {
+    final tripIndex = state.indexWhere((t) => t.id == tripId);
+    if (tripIndex == -1) return;
+
+    final trip = state[tripIndex];
+    final currentUser = UserService.getCurrentUser();
+    if (trip.isCreator(currentUser.id) || trip.isCreator(trip.currentUserMember?.id)) {
+      await deleteTripLocally(tripId);
+      return;
+    }
+
+    CloudTripSyncService.stopLiveSync(tripId);
+    final updatedTrip = trip.copyWith(
+      status: 'archived_by_creator',
+      isCompleted: true,
+    );
+    await _storage.saveTrip(updatedTrip);
+    state = [
+      for (final t in state)
+        if (t.id == tripId) updatedTrip else t
+    ];
     _reloadDependentProviders();
   }
 
@@ -375,7 +476,17 @@ class TripNotifier extends StateNotifier<List<Trip>> {
     if (tripIndex == -1) return;
 
     final trip = state[tripIndex];
-    final updatedMembers = [...trip.members.where((m) => m.id != member.id), member];
+    final memberEmail = member.email?.trim().toLowerCase();
+    final updatedMembers = [
+      ...trip.members.where((m) {
+        if (m.id == member.id) return false;
+        if (memberEmail != null && memberEmail.isNotEmpty && m.email != null) {
+          if (m.email!.trim().toLowerCase() == memberEmail) return false;
+        }
+        return true;
+      }),
+      member,
+    ];
     final updatedTrip = trip.copyWith(members: updatedMembers);
 
     await updateTrip(updatedTrip);

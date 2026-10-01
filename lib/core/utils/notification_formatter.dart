@@ -11,9 +11,13 @@ class NotificationFormatter {
     String? currentUserEmail,
     String? currentUsername,
   }) {
-    String msg = alert.message;
-
     final isSender = alert.senderMemberId == currentUserId || alert.isOutgoing;
+
+    // Concise reassuring message for SOS sender
+    if (alert.type == AlertType.sosEmergency && isSender) {
+      return 'SOS broadcast sent • Location shared with companions';
+    }
+
     final cleanName = currentUserName.trim();
     final cleanEmail = currentUserEmail?.trim();
     final cleanUsername = currentUsername?.trim();
@@ -30,6 +34,8 @@ class NotificationFormatter {
       namesToReplace.add(cleanUsername);
       namesToReplace.add('@$cleanUsername');
     }
+
+    String msg = alert.message;
 
     // Direct verb conjugation replacements when current user is the actor
     for (final name in namesToReplace) {
@@ -60,6 +66,7 @@ class NotificationFormatter {
       msg = msg.replaceAll(RegExp('$escapedName updated', caseSensitive: false), 'You updated');
       msg = msg.replaceAll(RegExp('$escapedName created', caseSensitive: false), 'You created');
       msg = msg.replaceAll(RegExp('$escapedName shared', caseSensitive: false), 'You shared');
+      msg = msg.replaceAll(RegExp('$escapedName reopened', caseSensitive: false), 'You reopened');
 
       // General fallback replace when this user is the sender
       if (isSender) {
@@ -83,5 +90,41 @@ class NotificationFormatter {
       return 'You';
     }
     return alert.senderName;
+  }
+
+  /// Formats the notification title (e.g. customized for SOS sender and clean concise labels)
+  static String formatTitle(
+    ProximityAlert alert, {
+    required String currentUserId,
+  }) {
+    final isSender = alert.senderMemberId == currentUserId || alert.isOutgoing;
+    if (alert.type == AlertType.sosEmergency && isSender) {
+      return '🚨 SOS Distress Active';
+    }
+
+    String title = alert.title.trim();
+    // Strip redundant leading "New " / "new "
+    if (title.startsWith(RegExp(r'^New\s+', caseSensitive: false))) {
+      title = title.replaceFirst(RegExp(r'^New\s+', caseSensitive: false), '').trim();
+    }
+
+    final lower = title.toLowerCase();
+    if (lower == 'waypoint added' ||
+        lower == 'stoppage added' ||
+        lower == 'stoppages added' ||
+        lower == 'stopages added' ||
+        lower == 'stop added') {
+      return 'Stop Added';
+    }
+    if (lower == 'photo added' ||
+        lower == 'memory added') {
+      return 'Memory Added';
+    }
+    if (lower == 'expense added' ||
+        lower == 'bill added') {
+      return 'Bill Added';
+    }
+
+    return title;
   }
 }

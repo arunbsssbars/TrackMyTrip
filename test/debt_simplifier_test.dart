@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:trip_tracker_app/core/utils/debt_simplifier.dart';
+import 'package:trackmytrip/core/utils/debt_simplifier.dart';
 
 void main() {
   group('DebtSimplifier Tests', () {

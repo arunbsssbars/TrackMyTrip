@@ -1,16 +1,16 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:trip_tracker_app/core/database/app_database.dart';
+import 'package:trackmytrip/core/database/app_database.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:trip_tracker_app/core/services/local_storage_service.dart';
-import 'package:trip_tracker_app/core/services/user_service.dart';
-import 'package:trip_tracker_app/core/services/media_cache_service.dart';
-import 'package:trip_tracker_app/models/user_profile.dart';
-import 'package:trip_tracker_app/models/sync_mutation.dart';
-import 'package:trip_tracker_app/models/trip_audit_log.dart';
-import 'package:trip_tracker_app/models/memory.dart';
-import 'package:trip_tracker_app/models/expense.dart';
-import 'package:trip_tracker_app/models/stoppage.dart';
+import 'package:trackmytrip/core/services/local_storage_service.dart';
+import 'package:trackmytrip/core/services/user_service.dart';
+import 'package:trackmytrip/core/services/media_cache_service.dart';
+import 'package:trackmytrip/models/user_profile.dart';
+import 'package:trackmytrip/models/sync_mutation.dart';
+import 'package:trackmytrip/models/trip_audit_log.dart';
+import 'package:trackmytrip/models/memory.dart';
+import 'package:trackmytrip/models/expense.dart';
+import 'package:trackmytrip/models/stoppage.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -159,14 +159,14 @@ void main() {
         tripId: 'trip_1',
         stoppageId: 'stp_1',
         uploadedByMemberId: 'usr_1',
-        mediaPath: '/data/user/0/com.example.triptracker/trip_media/photo1.jpg',
-        localPath: '/data/user/0/com.example.triptracker/trip_media/photo1.jpg',
+        mediaPath: '/data/user/0/com.trackmytrip.app/trip_media/photo1.jpg',
+        localPath: '/data/user/0/com.trackmytrip.app/trip_media/photo1.jpg',
         uploadStatus: MediaUploadStatus.local,
         createdAt: DateTime.now(),
       );
 
       expect(memLocal.isUserPhoto, isTrue);
-      expect(memLocal.displayPath, equals('/data/user/0/com.example.triptracker/trip_media/photo1.jpg'));
+      expect(memLocal.displayPath, equals('/data/user/0/com.trackmytrip.app/trip_media/photo1.jpg'));
 
       final json = memLocal.toJson();
       expect(json['uploadStatus'], equals('local'));

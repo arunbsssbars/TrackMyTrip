@@ -26,6 +26,7 @@ class Expense {
   final String? originalCurrency;
   final double? originalAmount;
   final double? exchangeRate;
+  final bool isPersonal;
 
   const Expense({
     required this.id,
@@ -44,6 +45,7 @@ class Expense {
     this.originalCurrency,
     this.originalAmount,
     this.exchangeRate,
+    this.isPersonal = false,
   });
 
   bool get hasForeignConversion =>
@@ -76,6 +78,7 @@ class Expense {
     String? originalCurrency,
     double? originalAmount,
     double? exchangeRate,
+    bool? isPersonal,
   }) {
     return Expense(
       id: id ?? this.id,
@@ -94,6 +97,7 @@ class Expense {
       originalCurrency: originalCurrency ?? this.originalCurrency,
       originalAmount: originalAmount ?? this.originalAmount,
       exchangeRate: exchangeRate ?? this.exchangeRate,
+      isPersonal: isPersonal ?? this.isPersonal,
     );
   }
 
@@ -115,6 +119,7 @@ class Expense {
       'originalCurrency': originalCurrency,
       'originalAmount': originalAmount,
       'exchangeRate': exchangeRate,
+      'isPersonal': isPersonal,
     };
   }
 
@@ -142,6 +147,7 @@ class Expense {
       originalCurrency: json['originalCurrency'] as String?,
       originalAmount: (json['originalAmount'] as num?)?.toDouble(),
       exchangeRate: (json['exchangeRate'] as num?)?.toDouble(),
+      isPersonal: json['isPersonal'] == true || json['isPersonal'] == 1,
     );
   }
 }

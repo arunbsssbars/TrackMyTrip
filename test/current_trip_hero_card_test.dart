@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:trip_tracker_app/core/services/live_location_tracker_service.dart';
-import 'package:trip_tracker_app/models/trip.dart';
-import 'package:trip_tracker_app/models/trip_member.dart';
-import 'package:trip_tracker_app/widgets/current_trip_hero_card.dart';
+import 'package:trackmytrip/core/services/live_location_tracker_service.dart';
+import 'package:trackmytrip/models/trip.dart';
+import 'package:trackmytrip/models/trip_member.dart';
+import 'package:trackmytrip/widgets/current_trip_hero_card.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -68,8 +68,8 @@ void main() {
       expect(find.text('45'), findsOneWidget);
       expect(find.text('KM DISTANCE'), findsOneWidget);
       expect(find.text('12.3'), findsOneWidget);
-      expect(find.text('Total Spent: '), findsOneWidget);
-      expect(find.text('\$1,200.00'), findsOneWidget);
+      expect(find.textContaining('Total Spent:'), findsOneWidget);
+      expect(find.textContaining('\$1,200.00'), findsOneWidget);
       expect(find.text('4 bills'), findsOneWidget);
     });
 

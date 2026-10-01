@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/trip.dart';
 import '../../providers/trip_provider.dart';
 import '../theme/app_theme.dart';
+import 'app_snackbar.dart';
 
 class TripGuardHelper {
   /// Checks if [trip] is concluded/ended.
@@ -16,9 +17,7 @@ class TripGuardHelper {
     String actionLabel = 'make changes',
   }) async {
     final liveTrip = ref.read(tripListProvider).where((t) => t.id == trip.id).firstOrNull ?? trip;
-    final isEnded = liveTrip.isCompleted || liveTrip.status == 'completed';
-
-    if (!isEnded) return true;
+    if (!liveTrip.isEnded) return true;
 
     // Show reopening dialog
     final shouldReopen = await showDialog<bool>(
@@ -100,22 +99,12 @@ class TripGuardHelper {
 
     if (shouldReopen == true && context.mounted) {
       // Reopen trip to live status
-      final updated = liveTrip.copyWith(isCompleted: false);
-      await ref.read(tripListProvider.notifier).updateTrip(updated);
+      await ref.read(tripListProvider.notifier).reopenTrip(liveTrip.id);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Row(
-              children: [
-                Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
-                SizedBox(width: 8),
-                Text('Journey reopened to live status. Edits enabled!'),
-              ],
-            ),
-            backgroundColor: Color(0xFF10B981),
-            behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 2),
-          ),
+        AppSnackBar.showSuccess(
+          context,
+          'Journey reopened to live status. Edits enabled!',
+          duration: const Duration(seconds: 2),
         );
       }
       return true;

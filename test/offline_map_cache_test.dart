@@ -1,9 +1,9 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:trip_tracker_app/core/services/map_tile_cache_service.dart';
+import 'package:trackmytrip/core/services/map_tile_cache_service.dart';
 
 void main() {
   group('Offline Map Cache & Tile Provider Verification Tests', () {
@@ -36,7 +36,7 @@ void main() {
       const coords = TileCoordinates(1300, 3100, 13);
       final tileLayer = TileLayer(
         urlTemplate: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png',
-        userAgentPackageName: 'com.triptracker.trip_tracker_app',
+        userAgentPackageName: 'com.trackmytrip.app',
       );
 
       final imageProvider = provider.getImage(coords, tileLayer);
@@ -55,7 +55,7 @@ void main() {
       const coords = TileCoordinates(9999, 8888, 12);
       final tileLayer = TileLayer(
         urlTemplate: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png',
-        userAgentPackageName: 'com.triptracker.trip_tracker_app',
+        userAgentPackageName: 'com.trackmytrip.app',
       );
 
       final imageProvider = provider.getImage(coords, tileLayer);
@@ -64,7 +64,7 @@ void main() {
       expect(imageProvider, isA<NetworkImage>());
       final networkImage = imageProvider as NetworkImage;
       expect(networkImage.url, contains('12/9999/8888.png'));
-      expect(networkImage.headers?['User-Agent'], contains('TripTrackerApp'));
+      expect(networkImage.headers?['User-Agent'], contains('TrackMyTrip'));
     });
 
     test('OfflineCachedTileProvider rejects corrupt/empty (<500 bytes) tiles and falls back to NetworkImage', () async {

@@ -1,14 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:trip_tracker_app/core/database/app_database.dart';
+import 'package:trackmytrip/core/database/app_database.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:trip_tracker_app/core/services/local_storage_service.dart';
-import 'package:trip_tracker_app/core/services/proximity_alert_service.dart';
-import 'package:trip_tracker_app/models/proximity_alert.dart';
-import 'package:trip_tracker_app/models/stoppage.dart';
-import 'package:trip_tracker_app/models/trip_member.dart';
-import 'package:trip_tracker_app/providers/trip_provider.dart';
+import 'package:trackmytrip/core/services/local_storage_service.dart';
+import 'package:trackmytrip/core/services/proximity_alert_service.dart';
+import 'package:trackmytrip/models/proximity_alert.dart';
+import 'package:trackmytrip/models/stoppage.dart';
+import 'package:trackmytrip/models/trip_member.dart';
+import 'package:trackmytrip/providers/trip_provider.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -237,7 +237,8 @@ void main() {
       final sos = service.alerts.first;
       expect(sos.type, equals(AlertType.sosEmergency));
       expect(sos.urgency, equals(AlertUrgency.critical));
-      expect(sos.message, contains('Vehicle breakdown near bend 4'));
+      // Sender receives a crisp confirmation message with coordinate sharing
+      expect(sos.message, contains('SOS broadcast sent'));
       expect(sos.latitude, equals(32.2396));
       expect(sos.longitude, equals(77.1887));
     });

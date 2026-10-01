@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/services/media_cache_service.dart';
+import '../../core/services/image_compression_service.dart';
+import '../../core/services/firebase_storage_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/memory.dart';
 import '../../models/stoppage.dart';
@@ -29,24 +31,10 @@ class AddMemoryDialog extends ConsumerStatefulWidget {
 class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
   final _captionController = TextEditingController();
   String? _selectedMemberId;
-  XFile? _pickedFile;        // Raw picked file
+  XFile? _pickedFile;
+  String? _activePhoto;
   bool _isLoadingImage = false;
   bool _isSaving = false;
-
-  final List<String> _presetPhotos = [
-    'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=80',
-    'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=800&q=80',
-    'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80',
-    'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=800&q=80',
-  ];
-
-  late String _activePhoto;
-
-  @override
-  void initState() {
-    super.initState();
-    _activePhoto = _presetPhotos.first;
-  }
 
   @override
   void dispose() {
@@ -57,12 +45,12 @@ class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
   Future<void> _pickImage(ImageSource source) async {
     try {
       setState(() => _isLoadingImage = true);
-      final picker = ImagePicker();
-      final picked = await picker.pickImage(
+      final picked = await ImageCompressionService.pickOptimizedImage(
+        picker: ImagePicker(),
         source: source,
-        maxWidth: 1600,
-        maxHeight: 1600,
-        imageQuality: 85,
+        maxWidth: 1920,
+        maxHeight: 1080,
+        imageQuality: 75,
       );
 
       if (picked != null) {
@@ -76,7 +64,6 @@ class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
         } else {
           setState(() {
             _activePhoto = picked.path;
-            // Will be permanently cached via MediaCacheService on submit
           });
         }
       }
@@ -113,7 +100,7 @@ class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
   }
 
   Future<void> _submit() async {
-    if (_isSaving) return;
+    if (_activePhoto == null || _isSaving) return;
     setState(() => _isSaving = true);
 
     final currentTrip = ref.read(currentTripProvider);
@@ -121,24 +108,24 @@ class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
     const uuid = Uuid();
     final memoryId = uuid.v4();
 
-    String finalMediaPath = _activePhoto;
+    String finalMediaPath = _activePhoto!;
     String? localPath;
     MediaUploadStatus uploadStatus = MediaUploadStatus.local;
 
-    // If user picked a real local image (not a preset URL), cache it permanently
-    if (_pickedFile != null && !kIsWeb && !_activePhoto.startsWith('data:image')) {
+    // Cache image permanently into local app storage
+    if (_pickedFile != null && !kIsWeb && !_activePhoto!.startsWith('data:image')) {
       try {
         final mediaService = ref.read(mediaCacheServiceProvider);
         final item = await mediaService.cacheAndQueue(
-          sourcePath: _activePhoto,
+          sourcePath: _activePhoto!,
           entityType: 'memory',
           entityId: memoryId,
+          tripId: widget.tripId,
         );
         finalMediaPath = item.localPath;
         localPath = item.localPath;
         uploadStatus = item.status;
       } catch (e) {
-        // Fallback: use picked path directly (will not survive reinstall)
         localPath = _activePhoto;
       }
     }
@@ -159,6 +146,30 @@ class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
     );
 
     ref.read(allMemoriesProvider.notifier).addMemory(newMemory);
+
+    // Asynchronously upload directly to Firebase Cloud Storage and update memory remoteUrl
+    if (!kIsWeb && localPath != null) {
+      final storageService = ref.read(firebaseStorageServiceProvider);
+      if (storageService.isAvailable) {
+        final f = File(localPath);
+        if (await f.exists()) {
+          storageService.uploadMemoryPhoto(
+            tripId: widget.tripId,
+            memoryId: memoryId,
+            file: f,
+          ).then((cloudUrl) {
+            if (cloudUrl != null && cloudUrl.isNotEmpty) {
+              ref.read(allMemoriesProvider.notifier).updateMemoryMediaUrl(memoryId, cloudUrl);
+            } else {
+              ref.read(allMemoriesProvider.notifier).updateMemoryUploadStatus(memoryId, MediaUploadStatus.local);
+            }
+          }).catchError((_) {
+            ref.read(allMemoriesProvider.notifier).updateMemoryUploadStatus(memoryId, MediaUploadStatus.local);
+          });
+        }
+      }
+    }
+
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -167,7 +178,7 @@ class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
     final currentTrip = ref.watch(currentTripProvider);
     final members = currentTrip?.members ?? [];
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bool isUserPhoto = _pickedFile != null;
+    final hasPhoto = _activePhoto != null;
 
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
@@ -199,168 +210,164 @@ class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // --- Upload buttons ---
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: isDark ? AppTheme.surfaceMutedDark : const Color(0xFFF1F5F9),
+              // --- Photo Picker or Preview Area ---
+              if (!hasPhoto)
+                InkWell(
+                  onTap: _isLoadingImage ? null : () => _pickImage(ImageSource.gallery),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: isDark ? AppTheme.borderDark : AppTheme.borderLight),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Text(
-                      'Browse Phone Photos',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: isDark ? AppTheme.surfaceMutedDark : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1),
+                        width: 1.2,
+                      ),
                     ),
-                    const SizedBox(height: 8),
-                    Row(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Expanded(
-                          child: FilledButton.icon(
-                            onPressed: _isLoadingImage ? null : () => _pickImage(ImageSource.gallery),
-                            icon: const Icon(Icons.photo_library_rounded, size: 16),
-                            label: const Text('Gallery', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: AppTheme.secondary,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        if (_isLoadingImage)
+                          const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: CircularProgressIndicator(),
+                          )
+                        else ...[
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppTheme.secondary.withAlpha(25),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.add_photo_alternate_rounded,
+                              size: 32,
+                              color: AppTheme.secondary,
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: _isLoadingImage ? null : () => _pickImage(ImageSource.camera),
-                            icon: const Icon(Icons.camera_alt_rounded, size: 16),
-                            label: const Text('Camera', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              side: const BorderSide(color: AppTheme.secondary, width: 1.2),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          const SizedBox(height: 10),
+                          const Text(
+                            'Select a Photo for this Memory',
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'Choose from gallery or take a new picture',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                             ),
                           ),
-                        ),
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: FilledButton.icon(
+                                  onPressed: () => _pickImage(ImageSource.gallery),
+                                  icon: const Icon(Icons.photo_library_rounded, size: 16),
+                                  label: const Text('Gallery', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: AppTheme.secondary,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: () => _pickImage(ImageSource.camera),
+                                  icon: const Icon(Icons.camera_alt_rounded, size: 16),
+                                  label: const Text('Camera', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                                    side: const BorderSide(color: AppTheme.secondary, width: 1.2),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              // --- Preview ---
-              ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: Container(
-                  height: 150,
-                  width: double.infinity,
-                  color: isDark ? Colors.black38 : Colors.grey[200],
-                  child: _isLoadingImage
-                      ? const Center(child: CircularProgressIndicator())
-                      : Stack(
+                  ),
+                )
+              else
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Container(
+                        height: 170,
+                        width: double.infinity,
+                        color: isDark ? Colors.black38 : Colors.grey[200],
+                        child: Stack(
                           fit: StackFit.expand,
                           children: [
-                            _buildPhotoPreview(_activePhoto),
-                            if (isUserPhoto)
-                              Positioned(
-                                top: 8,
-                                right: 8,
+                            _buildPhotoPreview(_activePhoto!),
+                            Positioned(
+                              top: 8,
+                              right: 8,
+                              child: InkWell(
+                                onTap: () {
+                                  setState(() {
+                                    _pickedFile = null;
+                                    _activePhoto = null;
+                                  });
+                                },
+                                borderRadius: BorderRadius.circular(20),
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                                   decoration: BoxDecoration(
-                                    color: Colors.black.withAlpha(170),
-                                    borderRadius: BorderRadius.circular(12),
+                                    color: Colors.black.withAlpha(190),
+                                    borderRadius: BorderRadius.circular(20),
                                   ),
                                   child: const Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(Icons.save_rounded, color: Colors.white, size: 12),
+                                      Icon(Icons.cached_rounded, color: Colors.white, size: 13),
                                       SizedBox(width: 4),
                                       Text(
-                                        'Will save to device',
-                                        style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                        'Change',
+                                        style: TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold),
                                       ),
                                     ],
                                   ),
                                 ),
                               ),
+                            ),
+                            Positioned(
+                              bottom: 8,
+                              left: 8,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withAlpha(180),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.cloud_done_rounded, color: Colors.greenAccent, size: 12),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      'Firebase Storage Ready',
+                                      style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
                           ],
                         ),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              // --- Preset selector ---
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Or Pick Scenic Preset:',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey),
-                  ),
-                  if (isUserPhoto)
-                    TextButton(
-                      style: TextButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        visualDensity: VisualDensity.compact,
                       ),
-                      onPressed: () {
-                        setState(() {
-                          _pickedFile = null;
-                          _activePhoto = _presetPhotos.first;
-                        });
-                      },
-                      child: const Text('Reset', style: TextStyle(fontSize: 11)),
                     ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              SizedBox(
-                height: 60,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _presetPhotos.length,
-                  itemBuilder: (context, index) {
-                    final photo = _presetPhotos[index];
-                    final isSelected = !isUserPhoto && photo == _activePhoto;
-                    return GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          _pickedFile = null;
-                          _activePhoto = photo;
-                        });
-                      },
-                      child: Container(
-                        margin: const EdgeInsets.only(right: 8),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: isSelected ? AppTheme.secondary : Colors.transparent,
-                            width: 2.5,
-                          ),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            photo,
-                            width: 60,
-                            height: 60,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
-                              width: 60,
-                              height: 60,
-                              color: Colors.grey[300],
-                              child: const Icon(Icons.broken_image, size: 20),
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
+                  ],
                 ),
-              ),
               const SizedBox(height: 14),
 
               // --- Caption ---
@@ -377,6 +384,7 @@ class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
 
               // --- Uploader ---
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 initialValue: _selectedMemberId ?? (members.isNotEmpty ? members.first.id : null),
                 decoration: const InputDecoration(
                   labelText: 'Captured By',
@@ -385,37 +393,16 @@ class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
                 items: members.map((m) {
                   return DropdownMenuItem(
                     value: m.id,
-                    child: Text(m.isCurrentUser ? '${m.name} (Me)' : m.name),
+                    child: Text(
+                      m.isCurrentUser ? '${m.name} (Me)' : m.name,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   );
                 }).toList(),
                 onChanged: (val) {
                   if (val != null) setState(() => _selectedMemberId = val);
                 },
               ),
-
-              if (isUserPhoto) ...[
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withAlpha(20),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.green.withAlpha(80)),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.cloud_upload_outlined, color: Colors.green, size: 16),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Photo will be saved locally & queued for cloud sync.',
-                          style: TextStyle(fontSize: 11, color: Colors.green),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
             ],
           ),
         ),
@@ -426,7 +413,7 @@ class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton.icon(
-          onPressed: _isSaving ? null : _submit,
+          onPressed: (_isSaving || !hasPhoto) ? null : _submit,
           icon: _isSaving
               ? const SizedBox(
                   width: 14,

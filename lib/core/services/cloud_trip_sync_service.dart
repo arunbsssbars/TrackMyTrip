@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_database/firebase_database.dart';
 import '../../models/trip.dart';
 import 'tombstone_service.dart';
 import 'trip_share_service.dart';
@@ -16,6 +18,14 @@ class CloudTripSyncService {
   static set customDb(FirebaseFirestore? db) => _customDb = db;
   static FirebaseFirestore get firestore => _customDb ?? FirebaseFirestore.instance;
   static FirebaseFirestore get _firestore => firestore;
+
+  static bool get isFirebaseAvailable {
+    try {
+      return Firebase.apps.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// Generates a clean, memorable 6-character room join code (e.g. "TRIP-7482" or "TRIP-9K2M")
   static String generateRoomCode(String tripId) {
@@ -66,12 +76,12 @@ class CloudTripSyncService {
       });
       _lastSyncedTimes[package.trip.id] = package.exportedAt;
       if (kDebugMode) {
-        print('Successfully published live trip room $code to Firestore (Expenses: ${package.expenses.length})');
+        debugPrint('[CloudTripSyncService] Successfully published live trip room $code to Firestore (Expenses: ${package.expenses.length})');
       }
       return true;
     } catch (e) {
       if (kDebugMode) {
-        print('Failed to publish trip to Firestore: $e');
+        debugPrint('[CloudTripSyncService] Failed to publish trip to Firestore: $e');
       }
       return false;
     }
@@ -97,7 +107,7 @@ class CloudTripSyncService {
       }
     } catch (e) {
       if (kDebugMode) {
-        print('Failed to fetch trip from Firestore: $e');
+        debugPrint('[CloudTripSyncService] Failed to fetch trip from Firestore: $e');
       }
     }
     return null;
@@ -113,11 +123,14 @@ class CloudTripSyncService {
     stopLiveSync(tripId);
     registerRoomCode(tripId, roomCode);
 
-    _activeSubscriptions[tripId] = _firestore
-        .collection('rooms')
-        .doc(roomCode)
-        .snapshots()
-        .listen((docSnapshot) {
+    if (!isFirebaseAvailable && _customDb == null) return;
+
+    try {
+      _activeSubscriptions[tripId] = _firestore
+          .collection('rooms')
+          .doc(roomCode)
+          .snapshots()
+          .listen((docSnapshot) {
       if (docSnapshot.exists) {
         final data = docSnapshot.data()!;
         if (data.containsKey('package')) {
@@ -134,6 +147,7 @@ class CloudTripSyncService {
         }
       }
     });
+    } catch (_) {}
   }
 
   /// Starts global synchronization for all active trips (e.g. on HomeScreen)
@@ -185,6 +199,27 @@ class CloudTripSyncService {
       } catch (_) {}
       _tripRoomCodes.remove(tripId);
     }
+    try {
+      final snap = await _firestore
+          .collection('rooms')
+          .where('package.trip.id', isEqualTo: tripId)
+          .get();
+      for (final doc in snap.docs) {
+        await doc.reference.delete();
+      }
+    } catch (_) {}
+    try {
+      final snap2 = await _firestore
+          .collection('rooms')
+          .where('tripId', isEqualTo: tripId)
+          .get();
+      for (final doc in snap2.docs) {
+        await doc.reference.delete();
+      }
+    } catch (_) {}
+    try {
+      await FirebaseDatabase.instance.ref('trips/$tripId').remove();
+    } catch (_) {}
   }
 
   /// Removes a companion from the live room package

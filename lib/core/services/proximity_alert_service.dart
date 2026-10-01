@@ -11,6 +11,7 @@ import 'realtime_sync_service.dart';
 import 'firestore_sync_service.dart';
 import 'user_service.dart';
 import '../../providers/trip_provider.dart';
+import '../../providers/stoppage_provider.dart';
 
 class ProximityAlertService extends ChangeNotifier {
   final LocalStorageService _storage;
@@ -25,6 +26,9 @@ class ProximityAlertService extends ChangeNotifier {
 
   // Debounce duplicate alerts (key -> last time triggered)
   final Map<String, DateTime> _debounceTimestamps = {};
+
+  // Debounce duplicate banner emissions within short window (key -> last shown)
+  final Map<String, DateTime> _recentlyEmittedBanners = {};
 
   // Broadcast stream for in-app floating notification banners
   final StreamController<ProximityAlert> _bannerController = StreamController<ProximityAlert>.broadcast();
@@ -71,6 +75,7 @@ class ProximityAlertService extends ChangeNotifier {
     final allSettlements = _storage.getAllSettlements();
     final allStoppages = _storage.getAllStoppages();
     final existingAlertIds = _alerts.map((a) => a.id).toSet();
+    final clearedAt = _storage.getAlertsClearedAt();
     final newAlerts = <ProximityAlert>[];
 
     for (final trip in trips) {
@@ -78,26 +83,14 @@ class ProximityAlertService extends ChangeNotifier {
       final creatorId = creator?.id ?? 'usr_me';
       final creatorName = creator?.name ?? 'Trip Leader';
 
-      // 1. Trip Creation Alert
-      if (!existingAlertIds.contains('alert_create_${trip.id}')) {
+      // Budget Notification
+      final budgetAlertId = 'alert_budget_${trip.id}';
+      if (trip.budget != null && trip.budget! > 0 && 
+          !existingAlertIds.contains(budgetAlertId) &&
+          !_storage.isAlertDismissed(budgetAlertId) &&
+          (clearedAt == null || !trip.startDate.isBefore(clearedAt))) {
         newAlerts.add(ProximityAlert(
-          id: 'alert_create_${trip.id}',
-          tripId: trip.id,
-          type: AlertType.general,
-          title: 'Journey Initialized',
-          message: 'Welcome to "${trip.title}". Itinerary & expense ledger ready.',
-          senderMemberId: creatorId,
-          senderName: creatorName,
-          timestamp: trip.startDate,
-          isRead: true,
-          urgency: AlertUrgency.normal,
-        ));
-      }
-
-      // 2. Budget Notification
-      if (trip.budget != null && trip.budget! > 0 && !existingAlertIds.contains('alert_budget_${trip.id}')) {
-        newAlerts.add(ProximityAlert(
-          id: 'alert_budget_${trip.id}',
+          id: budgetAlertId,
           tripId: trip.id,
           type: AlertType.general,
           title: 'Budget Target Set',
@@ -112,28 +105,48 @@ class ProximityAlertService extends ChangeNotifier {
 
       // 3. Stoppages
       for (final s in allStoppages.where((stop) => stop.tripId == trip.id)) {
-        if (!existingAlertIds.contains('alert_stop_${s.id}')) {
+        final stopAlertId = 'alert_stop_${s.id}';
+        final alreadyLogged = existingAlertIds.contains(stopAlertId) ||
+            existingAlertIds.contains('act_stop_${s.id}') ||
+            _alerts.any((a) =>
+                a.id == stopAlertId ||
+                a.id == 'act_stop_${s.id}' ||
+                (a.tripId == trip.id && (a.itemId == s.id || a.id.contains(s.id))));
+        if (!alreadyLogged &&
+            !_storage.isAlertDismissed(stopAlertId) &&
+            !_storage.isAlertDismissed('act_stop_${s.id}') &&
+            (clearedAt == null || !s.arrivedAt.isBefore(clearedAt))) {
+          final authorName = s.createdByName ??
+              (s.createdBy.isNotEmpty ? trip.getMemberName(s.createdBy) : creatorName);
           newAlerts.add(ProximityAlert(
-            id: 'alert_stop_${s.id}',
+            id: stopAlertId,
             tripId: trip.id,
-            type: AlertType.stoppageArrival,
-            title: 'Waypoint Added',
-            message: 'Stop "${s.name}" registered on journey route.',
+            type: AlertType.stoppageAdded,
+            title: 'Stop Added',
+            message: '$authorName added stop "${s.name}".',
             senderMemberId: s.createdBy.isNotEmpty ? s.createdBy : creatorId,
-            senderName: creatorName,
+            senderName: authorName,
             timestamp: s.arrivedAt,
             isRead: true,
             urgency: AlertUrgency.normal,
+            itemId: s.id,
+            itemType: 'stop',
           ));
         }
       }
 
-      // 4. Expenses
+      // 4. Expenses (exclude personal expenses, deduplicate, and respect dismissal/clear tombstones)
       for (final e in allExpenses.where((exp) => exp.tripId == trip.id)) {
-        if (!existingAlertIds.contains('alert_exp_${e.id}')) {
+        if (e.isPersonal) continue;
+        final expAlertId = 'alert_exp_${e.id}';
+        final alreadyLogged = existingAlertIds.contains(expAlertId) ||
+            _alerts.any((a) => a.id == expAlertId || (a.tripId == trip.id && a.type == AlertType.billAdded && a.id.contains(e.id)));
+        if (!alreadyLogged &&
+            !_storage.isAlertDismissed(expAlertId) &&
+            (clearedAt == null || !e.createdAt.isBefore(clearedAt))) {
           final payerName = trip.getMemberName(e.paidByMemberId);
           newAlerts.add(ProximityAlert(
-            id: 'alert_exp_${e.id}',
+            id: expAlertId,
             tripId: trip.id,
             type: AlertType.billAdded,
             title: 'Bill Added',
@@ -143,6 +156,10 @@ class ProximityAlertService extends ChangeNotifier {
             timestamp: e.createdAt,
             isRead: true,
             urgency: AlertUrgency.normal,
+            itemId: e.id,
+            itemType: 'bill',
+            amount: e.totalAmount,
+            currency: e.currency,
           ));
         }
       }
@@ -152,7 +169,9 @@ class ProximityAlertService extends ChangeNotifier {
         final alertId = 'alert_settle_${s.id}';
         final alreadyLogged = existingAlertIds.contains(alertId) ||
             _alerts.any((a) => a.tripId == trip.id && a.type == AlertType.settlementRecorded && (a.id == alertId || a.id.contains(s.id)));
-        if (!alreadyLogged) {
+        if (!alreadyLogged &&
+            !_storage.isAlertDismissed(alertId) &&
+            (clearedAt == null || !s.settledAt.isBefore(clearedAt))) {
           final payerName = trip.getMemberName(s.payerMemberId);
           final payeeName = trip.getMemberName(s.receiverMemberId);
           final isAdv = s.isAdvance;
@@ -169,6 +188,10 @@ class ProximityAlertService extends ChangeNotifier {
             timestamp: s.settledAt,
             isRead: true,
             urgency: AlertUrgency.normal,
+            itemId: s.id,
+            itemType: 'settlement',
+            amount: s.amount,
+            currency: s.currency,
           ));
         }
       }
@@ -214,7 +237,7 @@ class ProximityAlertService extends ChangeNotifier {
   }) {
     if (!_strayAlertsEnabled) return;
     final trip = _storage.getTrips().where((t) => t.id == tripId).firstOrNull;
-    if (trip != null && (trip.isCompleted || trip.status == 'completed')) return;
+    if (trip != null && trip.isEnded) return;
 
     for (final companion in companions) {
       if (companion.isCurrentUser || companion.latitude == null || companion.longitude == null) {
@@ -256,6 +279,15 @@ class ProximityAlertService extends ChangeNotifier {
     }
   }
 
+  /// Seeds debounce for a stoppage that was just manually added at current location,
+  /// preventing an immediate duplicate "Arrived at Stop" alert.
+  void seedStoppageArrivalDebounce({
+    required String tripId,
+    required String stoppageId,
+  }) {
+    _debounceTimestamps['arrival_${tripId}_$stoppageId'] = DateTime.now();
+  }
+
   /// Evaluates distance to upcoming pitstops and triggers arrival alerts
   void evaluateStoppageArrivals({
     required String tripId,
@@ -267,7 +299,7 @@ class ProximityAlertService extends ChangeNotifier {
   }) {
     if (!_stoppageAlertsEnabled) return;
     final trip = _storage.getTrips().where((t) => t.id == tripId).firstOrNull;
-    if (trip != null && (trip.isCompleted || trip.status == 'completed')) return;
+    if (trip != null && trip.isEnded) return;
 
     for (final stop in activeStoppages) {
       final distance = Geolocator.distanceBetween(
@@ -307,6 +339,34 @@ class ProximityAlertService extends ChangeNotifier {
     }
   }
 
+  /// Evaluates and notifies companions if a member's battery falls <= 15% and not charging
+  void evaluateBatteryWarning({
+    required String tripId,
+    required String memberId,
+    required String memberName,
+    required int batteryLevel,
+  }) {
+    final debounceKey = 'battery_${tripId}_$memberId';
+    final lastSent = _debounceTimestamps[debounceKey];
+    if (lastSent == null || DateTime.now().difference(lastSent).inMinutes >= 30) {
+      _debounceTimestamps[debounceKey] = DateTime.now();
+
+      final alert = ProximityAlert(
+        id: 'battery_${memberId}_${DateTime.now().millisecondsSinceEpoch}',
+        tripId: tripId,
+        type: AlertType.general,
+        title: '⚠️ Low Battery Warning',
+        message: "$memberName's battery is at $batteryLevel%. They may lose connection soon.",
+        senderMemberId: memberId,
+        senderName: memberName,
+        timestamp: DateTime.now(),
+        urgency: AlertUrgency.high,
+      );
+
+      _recordAndBroadcastAlert(alert);
+    }
+  }
+
   /// Sends a critical SOS Emergency broadcast to all companions with live GPS
   Future<void> triggerEmergencySos({
     required String tripId,
@@ -316,8 +376,12 @@ class ProximityAlertService extends ChangeNotifier {
     required double lng,
     String? customNote,
   }) async {
-    final alert = ProximityAlert(
-      id: 'sos_${const Uuid().v4().substring(0, 8)}',
+    final alertId = 'sos_${const Uuid().v4().substring(0, 8)}';
+    final now = DateTime.now();
+
+    // Broadcast alert payload to all companions
+    final broadcastAlert = ProximityAlert(
+      id: alertId,
       tripId: tripId,
       type: AlertType.sosEmergency,
       title: '🚨 EMERGENCY SOS ALERT',
@@ -328,11 +392,88 @@ class ProximityAlertService extends ChangeNotifier {
       senderName: memberName,
       latitude: lat,
       longitude: lng,
-      timestamp: DateTime.now(),
+      timestamp: now,
       urgency: AlertUrgency.critical,
     );
 
-    await _recordAndBroadcastAlert(alert);
+    // Customized reassuring local record for the sender with crisp coordinate reference
+    final senderAlert = ProximityAlert(
+      id: alertId,
+      tripId: tripId,
+      type: AlertType.sosEmergency,
+      title: '🚨 SOS Emergency Active',
+      message: 'SOS broadcast sent • Location shared with companions',
+      senderMemberId: memberId,
+      senderName: memberName,
+      latitude: lat,
+      longitude: lng,
+      timestamp: now,
+      urgency: AlertUrgency.critical,
+    );
+
+    _alerts.insert(0, senderAlert);
+    await _storage.addAlert(senderAlert);
+    if (_inAppBannersEnabled || senderAlert.urgency == AlertUrgency.critical) {
+      _bannerController.add(senderAlert);
+    }
+    notifyListeners();
+
+    // Automatically create an emergency stoppage on the trip
+    if (tripId.isNotEmpty && tripId != 'trip_general') {
+      try {
+        final sosStoppage = Stoppage(
+          id: 'sos_stop_${const Uuid().v4().substring(0, 8)}',
+          tripId: tripId,
+          name: '🚨 Emergency SOS ($memberName)',
+          latitude: lat,
+          longitude: lng,
+          category: 'emergency',
+          arrivedAt: now,
+          notes: customNote != null && customNote.isNotEmpty
+              ? 'Emergency SOS: "$customNote"'
+              : 'Emergency SOS broadcast by $memberName at ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}',
+          createdBy: memberId,
+          createdByName: memberName,
+        );
+        _ref.read(allStoppagesProvider.notifier).addStoppage(sosStoppage, broadcast: false);
+      } catch (e) {
+        if (kDebugMode) debugPrint('[ProximityAlertService] SOS stoppage creation error: $e');
+      }
+    }
+
+    try {
+      _ref.read(realtimeSyncServiceProvider).broadcastProximityAlert(broadcastAlert);
+    } catch (_) {}
+    try {
+      _ref.read(firestoreSyncServiceProvider).pushProximityAlert(broadcastAlert);
+    } catch (_) {}
+
+    // Improvement 4: Enqueue a direct RTDB wake message for every trip member
+    // as a reliable delivery fallback for companions with stale FCM tokens or
+    // who are temporarily offline. Messages are consumed on next app open.
+    try {
+      final trips = _storage.getTrips();
+      final trip = trips.where((t) => t.id == tripId).firstOrNull;
+      if (trip != null) {
+        final rtdb = _ref.read(realtimeSyncServiceProvider);
+        final myUid = UserService.getCurrentUser().id;
+        final wakePayload = <String, dynamic>{
+          ...broadcastAlert.toJson(),
+          'type': 'PROXIMITY_ALERT',
+        };
+        for (final member in trip.members) {
+          final memberUid = member.id;
+          if (memberUid.isEmpty || memberUid == myUid) continue;
+          rtdb.enqueueDirectMessage(
+            targetUid: memberUid,
+            msgId: broadcastAlert.id,
+            payload: wakePayload,
+            senderUid: myUid,
+            ttlMs: 3600000, // SOS wake messages expire in 1 hour
+          );
+        }
+      }
+    } catch (_) {}
   }
 
   /// Broadcasts an alert when a concluded trip is reopened
@@ -344,7 +485,7 @@ class ProximityAlertService extends ChangeNotifier {
     final alert = ProximityAlert(
       id: 'reopen_${const Uuid().v4().substring(0, 8)}',
       tripId: tripId,
-      type: AlertType.general,
+      type: AlertType.tripReopened,
       title: 'Journey Reopened',
       message: '$reopenerName reopened "$tripTitle". Edits and live tracking are re-enabled.',
       senderMemberId: UserService.getCurrentUser().id,
@@ -369,6 +510,16 @@ class ProximityAlertService extends ChangeNotifier {
   /// Ingests an incoming alert received from a companion over WebSocket or Firestore
   Future<void> ingestRemoteAlert(ProximityAlert alert, {bool isHistorical = false}) async {
     if (_alerts.any((a) => a.id == alert.id)) return; // Prevent duplicate
+
+    // Prevent resurrection of deleted / dismissed alerts
+    if (_storage.isAlertDismissed(alert.id)) return;
+
+    // Prevent resurrection of alerts cleared globally or trip-wise
+    final globalClearedAt = _storage.getAlertsClearedAt();
+    if (globalClearedAt != null && alert.timestamp.isBefore(globalClearedAt)) return;
+
+    final tripClearedAt = _storage.getTripAlertsClearedAt(alert.tripId);
+    if (tripClearedAt != null && alert.timestamp.isBefore(tripClearedAt)) return;
 
     final currentUser = UserService.getCurrentUser();
     // Do not re-ingest self-sent alerts
@@ -443,6 +594,11 @@ class ProximityAlertService extends ChangeNotifier {
     AlertUrgency urgency = AlertUrgency.normal,
     String? senderMemberId,
     String? senderName,
+    String? itemId,
+    String? itemType,
+    double? amount,
+    String? currency,
+    bool showLocalBanner = true,
   }) async {
     final alertId = id ?? 'act_${const Uuid().v4().substring(0, 8)}';
     if (_alerts.any((a) => a.id == alertId)) return;
@@ -458,15 +614,35 @@ class ProximityAlertService extends ChangeNotifier {
       senderName: senderName ?? currentUser.displayName,
       timestamp: DateTime.now(),
       urgency: urgency,
+      itemId: itemId,
+      itemType: itemType,
+      amount: amount,
+      currency: currency,
     );
 
-    await _recordAndBroadcastAlert(alert);
+    await _recordAndBroadcastAlert(alert, showLocalBanner: showLocalBanner);
   }
 
-  Future<void> _recordAndBroadcastAlert(ProximityAlert alert) async {
+  Future<void> _recordAndBroadcastAlert(ProximityAlert alert, {bool showLocalBanner = true}) async {
     _alerts.insert(0, alert);
+    if (_alerts.length > 150) {
+      _alerts.removeRange(150, _alerts.length);
+    }
     await _storage.addAlert(alert);
-    if (_inAppBannersEnabled || alert.urgency == AlertUrgency.critical) {
+
+    // Prune stale banner history (> 1 minute old)
+    final now = DateTime.now();
+    _recentlyEmittedBanners.removeWhere((_, time) => now.difference(time).inSeconds > 60);
+
+    // Debounce duplicate banner emissions for identical item or action within 4 seconds
+    final bannerKey = alert.itemId != null && alert.itemId!.isNotEmpty
+        ? '${alert.type.name}_${alert.itemId}'
+        : '${alert.type.name}_${alert.tripId}_${alert.title}';
+    final lastBannerTime = _recentlyEmittedBanners[bannerKey];
+    final isDuplicateBanner = lastBannerTime != null && now.difference(lastBannerTime).inSeconds < 4;
+
+    if (showLocalBanner && !isDuplicateBanner && (_inAppBannersEnabled || alert.urgency == AlertUrgency.critical)) {
+      _recentlyEmittedBanners[bannerKey] = now;
       _bannerController.add(alert);
     }
     notifyListeners();
@@ -475,8 +651,26 @@ class ProximityAlertService extends ChangeNotifier {
       _ref.read(realtimeSyncServiceProvider).broadcastProximityAlert(alert);
     } catch (_) {}
     try {
-      _ref.read(firestoreSyncServiceProvider).pushProximityAlert(alert);
-    } catch (_) {}
+      // Improvement 3: Set RTDB deduplication gate before Firestore push.
+      // This prevents duplicate system notifications for companions who are
+      // already live in the trip room and received the event via RTDB socket.
+      final rtdb = _ref.read(realtimeSyncServiceProvider);
+      final myUid = UserService.getCurrentUser().id;
+      rtdb.setNotifGate(
+        tripId: alert.tripId,
+        alertId: alert.id,
+        type: alert.type.name,
+        senderUid: myUid,
+        ttlMs: alert.urgency == AlertUrgency.critical ? 5000 : 30000,
+      ).then((_) {
+        _ref.read(firestoreSyncServiceProvider).pushProximityAlert(alert);
+      }).catchError((_) {
+        // Fail open: if RTDB gate fails, still push via Firestore
+        try { _ref.read(firestoreSyncServiceProvider).pushProximityAlert(alert); } catch (_) {}
+      });
+    } catch (_) {
+      try { _ref.read(firestoreSyncServiceProvider).pushProximityAlert(alert); } catch (_) {}
+    }
   }
 
   Future<void> updateAlert(ProximityAlert updatedAlert) async {
@@ -488,9 +682,21 @@ class ProximityAlertService extends ChangeNotifier {
     }
   }
 
-  Future<void> deleteAlert(String alertId) async {
+  Future<void> deleteAlert(String alertId, {String? tripId}) async {
+    final alert = _alerts.where((a) => a.id == alertId).firstOrNull;
+    final effectiveTripId = tripId ?? alert?.tripId;
     _alerts.removeWhere((a) => a.id == alertId);
-    await _storage.deleteAlert(alertId);
+    await _storage.deleteAlert(alertId, tripId: effectiveTripId);
+    if (effectiveTripId != null && effectiveTripId.isNotEmpty) {
+      try {
+        _ref.read(firestoreSyncServiceProvider).deleteRemoteAlert(effectiveTripId, alertId);
+      } catch (_) {}
+      if (alert?.type == AlertType.sosEmergency && alert?.senderMemberId != null) {
+        try {
+          _ref.read(realtimeSyncServiceProvider).resolveActiveSos(effectiveTripId, alert!.senderMemberId);
+        } catch (_) {}
+      }
+    }
     notifyListeners();
   }
 
@@ -509,9 +715,21 @@ class ProximityAlertService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> clearAlertsForTrip(String tripId) async {
+    _alerts.removeWhere((a) => a.tripId == tripId);
+    await _storage.clearAlertsForTrip(tripId);
+    try {
+      _ref.read(firestoreSyncServiceProvider).clearRemoteAlertsForTrip(tripId);
+    } catch (_) {}
+    notifyListeners();
+  }
+
   Future<void> clearAll() async {
     _alerts.clear();
     await _storage.clearAllAlerts();
+    try {
+      _ref.read(firestoreSyncServiceProvider).clearAllRemoteAlerts();
+    } catch (_) {}
     notifyListeners();
   }
 

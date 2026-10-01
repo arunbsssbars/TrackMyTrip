@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -7,6 +10,7 @@ import '../../models/proximity_alert.dart';
 import '../../providers/trip_provider.dart';
 import '../utils/app_logger.dart';
 import 'proximity_alert_service.dart';
+import 'realtime_sync_service.dart';
 
 final pushNotificationServiceProvider = Provider<PushNotificationService>((ref) {
   return PushNotificationService(ref);
@@ -111,6 +115,24 @@ class PushNotificationService {
         AppLogger.info('App opened from push notification: ${message.data}');
       });
 
+      // Listen for token refresh to avoid stale FCM tokens
+      _fcm.onTokenRefresh.listen((newToken) async {
+        AppLogger.info('[PushNotificationService] FCM token refreshed');
+        final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+        if (currentUserId != null && currentUserId.isNotEmpty) {
+          // Dual-write: Firestore (cold backup) + RTDB hot path with onDisconnect guard
+          unawaited(FirebaseFirestore.instance.collection('users').doc(currentUserId).set({
+            'fcmToken': newToken,
+            'lastActive': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true)));
+          if (_ref != null) {
+            unawaited(
+              _ref.read(realtimeSyncServiceProvider).registerFcmTokenInRtdb(currentUserId, newToken),
+            );
+          }
+        }
+      });
+
       _isInitialized = true;
     } catch (e) {
       if (kDebugMode) debugPrint('[PushNotificationService] Local notifications init error: $e');
@@ -171,7 +193,33 @@ class PushNotificationService {
         isCritical: true,
         payload: jsonEncode(data),
       );
+      // Improvement 2: Write delivery ACK to RTDB so the SOS sender can show
+      // a live "X/N companions notified" counter without Cloud Functions.
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null && _ref != null) {
+        final msgId = data['id']?.toString() ?? message.messageId ?? '';
+        final tripId = data['tripId']?.toString() ?? '';
+        unawaited(
+          _ref.read(realtimeSyncServiceProvider).ackNotification(
+            myUid: uid,
+            msgId: msgId.isNotEmpty ? msgId : 'sos_${DateTime.now().millisecondsSinceEpoch}',
+            type: 'sosEmergency',
+            tripId: tripId,
+          ),
+        );
+      }
     } else if (notificationsEnabled && notification != null) {
+      // Improvement 3: Suppress duplicate system notification if user is
+      // already live in this trip's RTDB room (they already saw the in-app banner).
+      // SOS is intentionally excluded — always shows regardless.
+      final tripId = data['tripId']?.toString() ?? '';
+      if (tripId.isNotEmpty && _ref != null) {
+        final rtdb = _ref.read(realtimeSyncServiceProvider);
+        if (!rtdb.shouldShowSystemNotif(tripId)) {
+          AppLogger.info('[FCM] Suppressed duplicate system notif — user is live in trip room $tripId.');
+          return;
+        }
+      }
       // Regular activity notification only if notifications are enabled
       _showLocalNotification(
         id: message.hashCode,
@@ -232,6 +280,8 @@ class PushNotificationService {
     switch (typeStr) {
       case 'billAdded':
         return AlertType.billAdded;
+      case 'billUpdated':
+        return AlertType.billUpdated;
       case 'settlementRecorded':
         return AlertType.settlementRecorded;
       case 'stoppageArrival':

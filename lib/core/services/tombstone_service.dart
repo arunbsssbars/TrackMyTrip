@@ -83,6 +83,22 @@ class TombstoneService {
     } catch (_) {}
   }
 
+  /// Wipes the entire tombstone state from memory AND SharedPreferences.
+  ///
+  /// Must be called during account deletion / full local data wipe so that the
+  /// next user who logs in on this device does not inherit stale tombstones from
+  /// the previous session (which would cause legitimate trips to appear deleted
+  /// and then vanish on first click — the "ghost deletion" bug).
+  static Future<void> wipeAll() async {
+    _tombstonedTripIds.clear();
+    try {
+      await _prefs?.remove(_prefsKey);
+    } catch (_) {}
+    if (kDebugMode) {
+      debugPrint('[TombstoneService] Full tombstone wipe executed (account deletion).');
+    }
+  }
+
   /// Returns an immutable set of all tombstoned trip IDs
   static Set<String> getAllTombstonedTripIds() => Set.unmodifiable(_tombstonedTripIds);
 }

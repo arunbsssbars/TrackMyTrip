@@ -4,12 +4,30 @@ import '../../core/services/user_service.dart';
 import '../../core/utils/notification_formatter.dart';
 
 class InAppNotificationBanner {
+  static OverlayEntry? _currentEntry;
+
+  static void dismissActive() {
+    try {
+      if (_currentEntry != null && _currentEntry!.mounted) {
+        _currentEntry!.remove();
+      }
+    } catch (_) {}
+    _currentEntry = null;
+  }
+
   static void show(
     BuildContext context,
     ProximityAlert alert, {
     VoidCallback? onMuteBanners,
   }) {
-    final overlay = Overlay.of(context);
+    if (!context.mounted) return;
+
+    // Dismiss any active banner overlay before showing a new one
+    dismissActive();
+
+    final overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+
     late OverlayEntry entry;
 
     entry = OverlayEntry(
@@ -17,11 +35,19 @@ class InAppNotificationBanner {
         alert: alert,
         onMuteBanners: onMuteBanners,
         onDismiss: () {
-          entry.remove();
+          if (_currentEntry == entry) {
+            _currentEntry = null;
+          }
+          try {
+            if (entry.mounted) {
+              entry.remove();
+            }
+          } catch (_) {}
         },
       ),
     );
 
+    _currentEntry = entry;
     overlay.insert(entry);
   }
 }
@@ -99,7 +125,10 @@ class _BannerWidgetState extends State<_BannerWidget> with SingleTickerProviderS
       case AlertType.memberLeft:
         return const Color(0xFFF97316);
       case AlertType.billAdded:
+      case AlertType.billUpdated:
         return const Color(0xFF4F46E5);
+      case AlertType.billDeleted:
+        return const Color(0xFFEF4444);
       case AlertType.settlementRecorded:
         return const Color(0xFF10B981);
       case AlertType.memoryAdded:
@@ -146,7 +175,10 @@ class _BannerWidgetState extends State<_BannerWidget> with SingleTickerProviderS
       case AlertType.memberLeft:
         return Icons.exit_to_app_rounded;
       case AlertType.billAdded:
+      case AlertType.billUpdated:
         return Icons.receipt_long_rounded;
+      case AlertType.billDeleted:
+        return Icons.delete_outline_rounded;
       case AlertType.settlementRecorded:
         return Icons.payments_rounded;
       case AlertType.memoryAdded:
@@ -232,7 +264,7 @@ class _BannerWidgetState extends State<_BannerWidget> with SingleTickerProviderS
                             children: [
                               Expanded(
                                 child: Text(
-                                  widget.alert.title,
+                                  NotificationFormatter.formatTitle(widget.alert, currentUserId: currentUser.id),
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold,
@@ -265,6 +297,33 @@ class _BannerWidgetState extends State<_BannerWidget> with SingleTickerProviderS
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
+                          if (widget.alert.type == AlertType.sosEmergency) ...[
+                            const SizedBox(height: 5),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withAlpha(40),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.done_all_rounded, size: 12, color: Colors.white),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    widget.alert.senderMemberId == currentUser.id
+                                        ? 'Emergency Broadcast • RTDB Active'
+                                        : 'Priority Dispatch • Received Live',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),

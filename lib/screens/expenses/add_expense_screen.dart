@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:geolocator/geolocator.dart';
+import '../../core/services/realtime_sync_service.dart';
 import 'dart:convert';
 import 'dart:io' show File;
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -10,9 +12,11 @@ import 'package:latlong2/latlong.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/services/location_service.dart';
+import '../../core/services/image_compression_service.dart';
 import '../../core/services/ocr_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/currency_formatter.dart';
+import '../common/user_avatar.dart';
 import '../../models/expense.dart';
 import '../../models/expense_split.dart';
 import '../../models/trip.dart';
@@ -22,6 +26,9 @@ import '../../providers/audit_log_provider.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
+import '../../core/services/proximity_alert_service.dart';
+import '../../core/services/user_service.dart';
+import '../../models/proximity_alert.dart';
 import '../stoppage/map_location_picker_dialog.dart';
 
 class AddExpenseScreen extends ConsumerStatefulWidget {
@@ -50,7 +57,7 @@ class AddExpenseScreen extends ConsumerStatefulWidget {
   ConsumerState<AddExpenseScreen> createState() => _AddExpenseScreenState();
 }
 
-class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
+class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> with WidgetsBindingObserver {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _amountController = TextEditingController();
@@ -61,8 +68,15 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
   String? _paidByMemberId;
   SplitType _splitType = SplitType.equal;
   bool _isSplitExpanded = false; // Folded by default
+  bool _isPersonal = false; // Point 24: Track personal private spending
   String? _receiptImagePath;
   bool _isScanningOcr = false;
+  bool _isSaving = false;
+
+  // Distributed Concurrency Lock State (Feature D)
+  StreamSubscription<Map<String, dynamic>?>? _lockSubscription;
+  bool _isLockedByOther = false;
+  String? _lockedByUserName;
 
   // Location tagging state
   bool _attachLocation = false;
@@ -86,6 +100,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     if (widget.initialExpense != null) {
       final exp = widget.initialExpense!;
       _titleController.text = exp.title;
@@ -96,6 +111,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
       _paidByMemberId = exp.paidByMemberId;
       _splitType = exp.splitType;
       _receiptImagePath = exp.receiptImagePath;
+      _isPersonal = exp.isPersonal;
 
       // Restore tagged location if saved in notes
       if (exp.notes != null) {
@@ -123,6 +139,29 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
         _foreignAmountController.text = exp.originalAmount != null ? exp.originalAmount!.toStringAsFixed(2) : '';
         _exchangeRateController.text = exp.exchangeRate != null ? exp.exchangeRate!.toStringAsFixed(4) : '';
       }
+
+      // Feature D: Distributed concurrency lock for expense editing
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final myId = UserService.getCurrentUser().id;
+        _lockSubscription = ref.read(realtimeSyncServiceProvider)
+            .watchExpenseLock(widget.tripId, exp.id)
+            .listen((lockData) {
+          if (!mounted) return;
+          if (lockData != null && lockData['userId'] != null && lockData['userId'] != myId) {
+            setState(() {
+              _isLockedByOther = true;
+              _lockedByUserName = lockData['userName']?.toString() ?? 'Another companion';
+            });
+          } else if (_isLockedByOther) {
+            setState(() {
+              _isLockedByOther = false;
+              _lockedByUserName = null;
+            });
+          }
+        });
+        ref.read(realtimeSyncServiceProvider).acquireExpenseLock(widget.tripId, exp.id);
+      });
     } else {
       _selectedStoppageId = widget.initialStoppageId;
       if (widget.prefillTitle != null) {
@@ -144,7 +183,23 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (widget.initialExpense != null) {
+      if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+        ref.read(realtimeSyncServiceProvider).releaseExpenseLock(widget.tripId, widget.initialExpense!.id);
+      } else if (state == AppLifecycleState.resumed && !_isLockedByOther) {
+        ref.read(realtimeSyncServiceProvider).acquireExpenseLock(widget.tripId, widget.initialExpense!.id);
+      }
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _lockSubscription?.cancel();
+    if (widget.initialExpense != null) {
+      ref.read(realtimeSyncServiceProvider).releaseExpenseLock(widget.tripId, widget.initialExpense!.id);
+    }
     _titleController.dispose();
     _amountController.dispose();
     _notesController.dispose();
@@ -164,9 +219,10 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
 
   void _initMemberSplits(List<TripMember> members) {
     if (_paidByMemberId == null && members.isNotEmpty) {
+      final currentUser = UserService.getCurrentUser();
       TripMember? me;
       for (final m in members) {
-        if (m.isCurrentUser) {
+        if (m.isCurrentUser || m.id == currentUser.id || (m.email != null && currentUser.email != null && m.email!.toLowerCase() == currentUser.email!.toLowerCase())) {
           me = m;
           break;
         }
@@ -335,12 +391,12 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
 
   Future<void> _scanReceiptWithOcr([ImageSource source = ImageSource.camera]) async {
     try {
-      final picker = ImagePicker();
-      final picked = await picker.pickImage(
+      final picked = await ImageCompressionService.pickOptimizedImage(
+        picker: ImagePicker(),
         source: source,
-        maxWidth: 1600,
-        maxHeight: 1600,
-        imageQuality: 85,
+        maxWidth: 1920,
+        maxHeight: 1080,
+        imageQuality: 75,
       );
       if (picked == null) return;
 
@@ -680,12 +736,16 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
               children: [
                 const Icon(Icons.currency_exchange_rounded, size: 20, color: Colors.blue),
                 const SizedBox(width: 8),
-                Text(
-                  'Paid in Foreign Currency?',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: _useForeignCurrency ? Colors.blue : null,
+                Expanded(
+                  child: Text(
+                    'Paid in Foreign Currency?',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: _useForeignCurrency ? Colors.blue : null,
+                    ),
                   ),
                 ),
               ],
@@ -816,7 +876,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
     );
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
     final totalAmount = double.tryParse(_amountController.text.trim());
@@ -827,69 +887,97 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
       return;
     }
 
-    final trip = ref.read(currentTripProvider);
+    if (_isSaving || _isLockedByOther) return;
+
+    final tripList = ref.read(tripListProvider);
+    final trip = tripList.where((t) => t.id == widget.tripId).firstOrNull ?? ref.read(currentTripProvider);
     if (trip == null) return;
 
-    final splits = _buildSplits(totalAmount, trip.members);
+    final currentMember = trip.currentUserMember ?? trip.members.first;
+
+    if (!_isPersonal && (_paidByMemberId == null || _paidByMemberId!.isEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select who paid this bill before saving.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final List<ExpenseSplit> splits;
+    if (_isPersonal) {
+      splits = [
+        ExpenseSplit(
+          memberId: currentMember.id,
+          allocatedAmount: totalAmount,
+        ),
+      ];
+    } else {
+      splits = _buildSplits(totalAmount, trip.members);
+    }
+
     if (!_attachLocation && widget.initialStoppageId == null) {
       _selectedStoppageId = null;
     }
 
-    // Strict senior-dev financial integrity validation
-    if (_splitType == SplitType.equal) {
-      final includedCount = _equalIncluded.values.where((v) => v).length;
-      if (includedCount == 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('At least one companion must be included in the bill split.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-    } else if (_splitType == SplitType.exact) {
-      final sum = splits.fold<double>(0, (acc, s) => acc + s.allocatedAmount);
-      final diff = sum - totalAmount;
-      if (diff.abs() > 0.01) {
-        final symbol = CurrencyFormatter.getCurrencySymbol(trip.defaultCurrency);
-        final status = diff > 0
-            ? 'over-allocated by +$symbol${diff.toStringAsFixed(2)}'
-            : 'under-allocated by -$symbol${(-diff).toStringAsFixed(2)}';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Split sum ($symbol${sum.toStringAsFixed(2)}) does not match bill total ($symbol${totalAmount.toStringAsFixed(2)}). It is $status.'),
-            backgroundColor: Colors.red[800],
-          ),
-        );
-        return;
-      }
-    } else if (_splitType == SplitType.percentage) {
-      double totalPct = 0.0;
-      for (final member in trip.members) {
-        totalPct += double.tryParse(_percentControllers[member.id]?.text ?? '0') ?? 0.0;
-      }
-      if ((totalPct - 100.0).abs() > 0.1) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Percentages must sum to exactly 100.0% (Current sum: ${totalPct.toStringAsFixed(1)}%).'),
-            backgroundColor: Colors.red[800],
-          ),
-        );
-        return;
-      }
-    } else if (_splitType == SplitType.shares) {
-      double totalShares = 0.0;
-      for (final member in trip.members) {
-        totalShares += double.tryParse(_sharesControllers[member.id]?.text ?? '0') ?? 0.0;
-      }
-      if (totalShares <= 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('At least one member must have shares greater than 0.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
+    // Strict senior-dev financial integrity validation (only applies to shared bills)
+    if (!_isPersonal) {
+      if (_splitType == SplitType.equal) {
+        final includedCount = _equalIncluded.values.where((v) => v).length;
+        if (includedCount == 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('At least one companion must be included in the bill split.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          return;
+        }
+      } else if (_splitType == SplitType.exact) {
+        final sum = splits.fold<double>(0, (acc, s) => acc + s.allocatedAmount);
+        final diff = sum - totalAmount;
+        if (diff.abs() > 0.01) {
+          final symbol = CurrencyFormatter.getCurrencySymbol(trip.defaultCurrency);
+          final status = diff > 0
+              ? 'over-allocated by +$symbol${diff.toStringAsFixed(2)}'
+              : 'under-allocated by -$symbol${(-diff).toStringAsFixed(2)}';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Split sum ($symbol${sum.toStringAsFixed(2)}) does not match bill total ($symbol${totalAmount.toStringAsFixed(2)}). It is $status.'),
+              backgroundColor: Colors.red[800],
+            ),
+          );
+          return;
+        }
+      } else if (_splitType == SplitType.percentage) {
+        double totalPct = 0.0;
+        for (final member in trip.members) {
+          totalPct += double.tryParse(_percentControllers[member.id]?.text ?? '0') ?? 0.0;
+        }
+        if ((totalPct - 100.0).abs() > 0.1) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Percentages must sum to exactly 100.0% (Current sum: ${totalPct.toStringAsFixed(1)}%).'),
+              backgroundColor: Colors.red[800],
+            ),
+          );
+          return;
+        }
+      } else if (_splitType == SplitType.shares) {
+        double totalShares = 0.0;
+        for (final member in trip.members) {
+          totalShares += double.tryParse(_sharesControllers[member.id]?.text ?? '0') ?? 0.0;
+        }
+        if (totalShares <= 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('At least one member must have shares greater than 0.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          return;
+        }
       }
     }
 
@@ -933,8 +1021,8 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
         totalAmount: totalAmount,
         currency: trip.defaultCurrency,
         category: _selectedCategory,
-        paidByMemberId: _paidByMemberId ?? trip.members.first.id,
-        splitType: _splitType,
+        paidByMemberId: _isPersonal ? currentMember.id : (_paidByMemberId ?? trip.members.first.id),
+        splitType: _isPersonal ? SplitType.equal : _splitType,
         splits: splits,
         receiptImagePath: _receiptImagePath,
         notes: finalNotes,
@@ -942,6 +1030,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
         originalAmount: originalAmount,
         exchangeRate: exchangeRate,
         createdAt: oldExp.createdAt,
+        isPersonal: _isPersonal,
       );
 
       final stoppages = ref.read(currentTripStoppagesProvider);
@@ -970,34 +1059,72 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
       if (changeList.isEmpty) {
         changeList.add('Updated splits or invoice details');
       }
-
       final changeDesc = changeList.join(' • ');
 
-      ref.read(allExpensesProvider.notifier).updateExpense(updatedExpense);
+      setState(() => _isSaving = true);
 
-      final currentMember = trip.currentUserMember;
-      ref.read(allAuditLogsProvider.notifier).logAction(
-        TripAuditLog(
-          id: const Uuid().v4(),
-          tripId: widget.tripId,
-          actionType: 'edit_expense',
-          itemTitle: updatedExpense.title,
-          performedByMemberId: currentMember?.id ?? 'User',
-          performedByName: currentMember?.name ?? 'Companion',
-          timestamp: DateTime.now(),
-          reason: 'Updated via bill edit',
-          changeDetails: changeDesc,
-        ),
-      );
+      try {
+        await ref.read(allExpensesProvider.notifier).updateExpense(updatedExpense).timeout(
+          const Duration(seconds: 4),
+          onTimeout: () {},
+        );
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✓ Updated "${updatedExpense.title}" & logged in Trust History.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+        await ref.read(allAuditLogsProvider.notifier).logAction(
+          TripAuditLog(
+            id: const Uuid().v4(),
+            tripId: widget.tripId,
+            actionType: 'edit_expense',
+            itemTitle: updatedExpense.title,
+            performedByMemberId: currentMember.id,
+            performedByName: currentMember.name,
+            timestamp: DateTime.now(),
+            reason: 'Updated via bill edit',
+            changeDetails: changeDesc,
+            amount: updatedExpense.totalAmount,
+            currency: updatedExpense.currency,
+            targetItemId: updatedExpense.id,
+          ),
+        );
 
-      Navigator.of(context).pop();
+        // Broadcast activity notification for bill edit to companions
+        // showLocalBanner: false ensures editor doesn't get duplicate banners on their screen
+        try {
+          ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
+            id: 'alert_edit_${updatedExpense.id}_${DateTime.now().millisecondsSinceEpoch}',
+            tripId: updatedExpense.tripId,
+            type: AlertType.billUpdated,
+            title: 'Bill Updated',
+            message: '${currentMember.name} updated "${updatedExpense.title}" ($changeDesc)',
+            senderMemberId: currentMember.id,
+            senderName: currentMember.name,
+            itemId: updatedExpense.id,
+            itemType: 'bill',
+            amount: updatedExpense.totalAmount,
+            currency: updatedExpense.currency,
+            showLocalBanner: false,
+          );
+        } catch (_) {}
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✓ Updated "${updatedExpense.title}" & logged in Trust History.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          Navigator.of(context).pop();
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() => _isSaving = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to update bill: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
     } else {
       final newExpense = Expense(
         id: const Uuid().v4(),
@@ -1007,8 +1134,8 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
         totalAmount: totalAmount,
         currency: trip.defaultCurrency,
         category: _selectedCategory,
-        paidByMemberId: _paidByMemberId ?? trip.members.first.id,
-        splitType: _splitType,
+        paidByMemberId: _isPersonal ? currentMember.id : (_paidByMemberId ?? trip.members.first.id),
+        splitType: _isPersonal ? SplitType.equal : _splitType,
         splits: splits,
         receiptImagePath: _receiptImagePath,
         notes: finalNotes,
@@ -1016,24 +1143,12 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
         originalAmount: originalAmount,
         exchangeRate: exchangeRate,
         createdAt: DateTime.now(),
+        isPersonal: _isPersonal,
       );
 
+      // Point 22 fix: addExpense centrally creates the audit log and broadcasts alerts.
+      // Removed duplicate TripAuditLog here to eliminate double notifications in Activity tab!
       ref.read(allExpensesProvider.notifier).addExpense(newExpense);
-
-      // Log creation
-      final currentMember = trip.currentUserMember;
-      ref.read(allAuditLogsProvider.notifier).logAction(
-        TripAuditLog(
-          id: const Uuid().v4(),
-          tripId: widget.tripId,
-          actionType: 'create_expense',
-          itemTitle: newExpense.title,
-          performedByMemberId: currentMember?.id ?? 'User',
-          performedByName: currentMember?.name ?? 'Companion',
-          timestamp: DateTime.now(),
-          changeDetails: 'Added bill of ${CurrencyFormatter.format(newExpense.totalAmount, currency: trip.defaultCurrency)}',
-        ),
-      );
 
       Navigator.of(context).pop();
     }
@@ -1042,7 +1157,8 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
   @override
   Widget build(BuildContext context) {
     final isEditing = widget.initialExpense != null;
-    final trip = ref.watch(currentTripProvider);
+    final tripList = ref.watch(tripListProvider);
+    final trip = tripList.where((t) => t.id == widget.tripId).firstOrNull ?? ref.watch(currentTripProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (trip == null) {
@@ -1051,7 +1167,14 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
           Navigator.of(context).pop();
         }
       });
-      return const Scaffold(body: Center(child: CircularProgressIndicator(strokeWidth: 2)));
+      return const Scaffold(
+        body: Center(
+          child: Text(
+            'Trip not found',
+            style: TextStyle(color: Colors.grey),
+          ),
+        ),
+      );
     }
 
     _initMemberSplits(trip.members);
@@ -1066,8 +1189,14 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
             onPressed: _isScanningOcr ? null : _showOcrSourceDialog,
           ),
           TextButton(
-            onPressed: _submit,
-            child: Text(isEditing ? 'Update' : 'Save', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            onPressed: (_isSaving || _isLockedByOther) ? null : _submit,
+            child: _isSaving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text(isEditing ? 'Update' : 'Save', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           ),
         ],
       ),
@@ -1076,6 +1205,36 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
+            if (_isLockedByOther)
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF451A03) : const Color(0xFFFEF3C7),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: const Color(0xFFF59E0B),
+                    width: 1.5,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.lock_clock_rounded, color: Color(0xFFD97706), size: 22),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        '$_lockedByUserName is currently editing this bill. Edits are locked to prevent overwrite conflicts.',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
             // Smart OCR Quick-Fill Banner
             Container(
               margin: const EdgeInsets.only(bottom: 16),
@@ -1122,9 +1281,13 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                             children: [
                               Row(
                                 children: [
-                                  Text(
-                                    _isScanningOcr ? 'Scanning Receipt...' : 'Scan Bill with Smart OCR',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  Expanded(
+                                    child: Text(
+                                      _isScanningOcr ? 'Scanning Receipt...' : 'Scan Bill with Smart OCR',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                    ),
                                   ),
                                   const SizedBox(width: 6),
                                   Container(
@@ -1232,8 +1395,127 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
             _buildCurrencyConversionCard(trip),
             const SizedBox(height: 14),
 
-            // Payer & Split Section (Omitted for solo trips to maintain clean, professional UX)
+            // Point 24: Bill Scope Toggle (Group Split vs Personal Private Expense)
             if (!trip.isSolo) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 14),
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() => _isPersonal = false),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          decoration: BoxDecoration(
+                            color: !_isPersonal ? AppTheme.primary : Colors.transparent,
+                            borderRadius: BorderRadius.circular(10),
+                            boxShadow: !_isPersonal
+                                ? [BoxShadow(color: AppTheme.primary.withAlpha(80), blurRadius: 4, offset: const Offset(0, 2))]
+                                : null,
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.group_rounded,
+                                size: 16,
+                                color: !_isPersonal ? Colors.white : (isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  'Shared Bill',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: !_isPersonal ? Colors.white : (isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() => _isPersonal = true),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          decoration: BoxDecoration(
+                            color: _isPersonal ? const Color(0xFF6366F1) : Colors.transparent,
+                            borderRadius: BorderRadius.circular(10),
+                            boxShadow: _isPersonal
+                                ? [BoxShadow(color: const Color(0xFF6366F1).withAlpha(80), blurRadius: 4, offset: const Offset(0, 2))]
+                                : null,
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.lock_outline_rounded,
+                                size: 16,
+                                color: _isPersonal ? Colors.white : (isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  'Personal (Private)',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: _isPersonal ? Colors.white : (isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_isPersonal)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 14),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6366F1).withAlpha(20),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFF6366F1).withAlpha(60)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.privacy_tip_outlined, size: 16, color: Color(0xFF6366F1)),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Personal Expense: Tracked in your overall trip spend. Not shared or split with companions, and no alerts sent.',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF6366F1)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+
+            // Payer & Split Section (Omitted for solo trips or personal private expenses)
+            if (!trip.isSolo && !_isPersonal) ...[
               if (trip.isFamily) ...[
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -1267,20 +1549,15 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                   itemBuilder: (context, index) {
                     final member = trip.members[index];
                     final isSelected = _paidByMemberId == member.id;
-                    final memberColor = member.colorHex != null
-                        ? Color(int.parse(member.colorHex!))
-                        : AppTheme.primary;
-
                     return ChoiceChip(
                       showCheckmark: false,
                       selected: isSelected,
                       label: Text(member.name),
-                      avatar: CircleAvatar(
-                        backgroundColor: memberColor,
-                        child: Text(
-                          member.name.isNotEmpty ? member.name[0].toUpperCase() : '?',
-                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                        ),
+                      avatar: UserAvatar(
+                        name: member.name,
+                        colorHex: member.colorHex,
+                        size: 24,
+                        fontSize: 11,
                       ),
                       selectedColor: AppTheme.primary,
                       labelStyle: TextStyle(
@@ -1337,13 +1614,15 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Row(
+                                  Wrap(
+                                    spacing: 6,
+                                    runSpacing: 4,
+                                    crossAxisAlignment: WrapCrossAlignment.center,
                                     children: [
                                       const Text(
                                         'Split Method',
                                         style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
                                       ),
-                                      const SizedBox(width: 6),
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                         decoration: BoxDecoration(
@@ -1573,7 +1852,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                                   allocated += double.tryParse(_exactControllers[m.id]?.text ?? '0') ?? 0.0;
                                 }
                                 final diff = allocated - total;
-                                final isBalanced = (diff).abs() < 0.01;
+                                final isBalanced = diff.abs() < 0.01;
                                 return Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
@@ -1686,20 +1965,27 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.place_rounded,
-                            size: 18,
-                            color: _attachLocation ? const Color(0xFF0EA5E9) : AppTheme.primary,
-                          ),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'Attach Location (GPS / Map)',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                          ),
-                        ],
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.place_rounded,
+                              size: 18,
+                              color: _attachLocation ? const Color(0xFF0EA5E9) : AppTheme.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'Attach Location (GPS / Map)',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
+                      const SizedBox(width: 8),
                       Switch(
                         value: _attachLocation,
                         activeThumbColor: const Color(0xFF0EA5E9),
@@ -1817,20 +2103,27 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.receipt_long_rounded,
-                            size: 18,
-                            color: _receiptImagePath != null ? Colors.green : AppTheme.primary,
-                          ),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'Attach Bill / Receipt Photo',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                          ),
-                        ],
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.receipt_long_rounded,
+                              size: 18,
+                              color: _receiptImagePath != null ? Colors.green : AppTheme.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'Attach Bill / Receipt Photo',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
+                      const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                         decoration: BoxDecoration(

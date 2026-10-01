@@ -1,10 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:trip_tracker_app/core/services/location_service.dart';
-import 'package:trip_tracker_app/models/trip.dart';
-import 'package:trip_tracker_app/models/trip_member.dart';
-import 'package:trip_tracker_app/models/stoppage.dart';
-import 'package:trip_tracker_app/core/services/trip_share_service.dart';
-import 'package:trip_tracker_app/models/trip_invitation.dart';
+import 'package:trackmytrip/core/services/location_service.dart';
+import 'package:trackmytrip/models/trip.dart';
+import 'package:trackmytrip/models/trip_member.dart';
+import 'package:trackmytrip/models/stoppage.dart';
+import 'package:trackmytrip/core/services/trip_share_service.dart';
+import 'package:trackmytrip/models/trip_invitation.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

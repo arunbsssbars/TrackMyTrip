@@ -186,6 +186,7 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
       name: myName,
       email: myEmail,
       isCurrentUser: true,
+      role: 'creator',
       colorHex: authUser?.colorHex ?? '0xFF0F766E',
     );
 
@@ -198,6 +199,8 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
     final generatedRoomCode = CloudTripSyncService.generateRoomCode(newTripId);
     CloudTripSyncService.registerRoomCode(newTripId, generatedRoomCode);
 
+    final parsedBudget = double.tryParse(_budgetController.text.trim());
+
     final newTrip = Trip(
       id: newTripId,
       title: _titleController.text.trim(),
@@ -205,6 +208,7 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
       startDate: _startDate,
       endDate: _endDate,
       defaultCurrency: _selectedCurrency,
+      budget: parsedBudget != null && parsedBudget > 0 ? parsedBudget : null,
       tripType: _tripType,
       members: memberList,
       createdByMemberId: myMemberId,
@@ -635,9 +639,13 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
       children: [
         Icon(icon, size: 16, color: AppTheme.primary),
         const SizedBox(width: 6),
-        Text(
-          title,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: -0.2),
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: -0.2),
+          ),
         ),
       ],
     );
@@ -684,16 +692,18 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
                 color: isSelected ? Colors.white : activeColor,
               ),
               const SizedBox(width: 5),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-                  color: isSelected ? Colors.white : (isDark ? Colors.white70 : const Color(0xFF334155)),
+              Flexible(
+                child: Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                    color: isSelected ? Colors.white : (isDark ? Colors.white70 : const Color(0xFF334155)),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),

@@ -140,7 +140,7 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                 children: [
                   TileLayer(
                     urlTemplate: AppConstants.getMapTileUrl(isDark: isDark),
-                    userAgentPackageName: 'com.triptracker.trip_tracker_app',
+                    userAgentPackageName: 'com.trackmytrip.app',
                   ),
                 ],
               ),

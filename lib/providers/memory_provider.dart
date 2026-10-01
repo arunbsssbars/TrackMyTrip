@@ -3,6 +3,7 @@ import '../core/services/cloud_trip_sync_service.dart';
 import '../core/services/local_storage_service.dart';
 import '../core/services/trip_share_service.dart';
 import '../models/memory.dart';
+import '../core/services/media_cache_service.dart';
 import 'trip_provider.dart';
 
 import 'package:uuid/uuid.dart';
@@ -49,12 +50,17 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
         final currentTrip = _ref.read(tripListProvider).where((t) => t.id == memory.tripId).firstOrNull;
         final uploaderName = currentTrip?.getMemberName(memory.uploadedByMemberId) ?? 'Companion';
         _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
+          id: 'act_mem_${memory.id}',
           tripId: memory.tripId,
           type: AlertType.memoryAdded,
-          title: 'New Memory Added',
-          message: '$uploaderName shared a new memory: "${memory.caption?.isNotEmpty == true ? memory.caption! : "Trip photo"}"',
+          title: 'Memory Added',
+          message: '$uploaderName shared a memory: "${memory.caption?.isNotEmpty == true ? memory.caption! : "Trip photo"}"',
           senderMemberId: memory.uploadedByMemberId,
           senderName: uploaderName,
+          itemId: memory.id,
+          itemType: 'memory',
+          urgency: AlertUrgency.low,
+          showLocalBanner: false,
         );
       } catch (_) {}
     }
@@ -87,6 +93,33 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
     } catch (_) {}
   }
 
+  Future<void> updateMemoryMediaUrl(String memoryId, String remoteUrl) async {
+    final index = state.indexWhere((m) => m.id == memoryId);
+    if (index == -1) return;
+    final updated = state[index].copyWith(
+      mediaPath: remoteUrl,
+      remoteUrl: remoteUrl,
+      uploadStatus: MediaUploadStatus.uploaded,
+    );
+    state = [
+      for (final m in state)
+        if (m.id == memoryId) updated else m
+    ];
+    await _storage.saveAllMemories(state);
+    _syncToCloud(updated.tripId);
+  }
+
+  Future<void> updateMemoryUploadStatus(String memoryId, MediaUploadStatus status) async {
+    final index = state.indexWhere((m) => m.id == memoryId);
+    if (index == -1) return;
+    final updated = state[index].copyWith(uploadStatus: status);
+    state = [
+      for (final m in state)
+        if (m.id == memoryId) updated else m
+    ];
+    await _storage.saveAllMemories(state);
+  }
+
   Future<void> toggleLike(String memoryId, String memberId) async {
     final index = state.indexWhere((m) => m.id == memoryId);
     if (index == -1) return;
@@ -109,10 +142,13 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
   }
 
   Future<void> deleteMemory(String memoryId) async {
-    final existing = state.firstWhere((m) => m.id == memoryId, orElse: () => state.first);
+    final existing = state.where((m) => m.id == memoryId).firstOrNull;
+    if (existing == null) return;
+
     state = state.where((m) => m.id != memoryId).toList();
     await _storage.saveAllMemories(state);
     _syncToCloud(existing.tripId);
+    MediaCacheService.deleteMediaFile(existing.mediaPath);
 
     try {
       _ref.read(allAuditLogsProvider.notifier).logAction(

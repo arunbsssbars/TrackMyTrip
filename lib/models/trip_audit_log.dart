@@ -8,6 +8,9 @@ class TripAuditLog {
   final DateTime timestamp;
   final String? reason;
   final String? changeDetails;
+  final double? amount;
+  final String? currency;
+  final String? targetItemId;
 
   const TripAuditLog({
     required this.id,
@@ -19,6 +22,9 @@ class TripAuditLog {
     required this.timestamp,
     this.reason,
     this.changeDetails,
+    this.amount,
+    this.currency,
+    this.targetItemId,
   });
 
   String get category {
@@ -53,10 +59,15 @@ class TripAuditLog {
       'timestamp': timestamp.toIso8601String(),
       'reason': reason,
       'changeDetails': changeDetails,
+      'amount': amount,
+      'currency': currency,
+      'targetItemId': targetItemId,
     };
   }
 
   factory TripAuditLog.fromJson(Map<String, dynamic> json) {
+    final rawAmt = json['amount'];
+    final double? parsedAmt = rawAmt is num ? rawAmt.toDouble() : null;
     return TripAuditLog(
       id: json['id'] as String,
       tripId: json['tripId'] as String,
@@ -67,6 +78,9 @@ class TripAuditLog {
       timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ?? DateTime.now(),
       reason: json['reason'] as String?,
       changeDetails: json['changeDetails'] as String?,
+      amount: parsedAmt,
+      currency: json['currency'] as String?,
+      targetItemId: json['targetItemId'] as String?,
     );
   }
 }

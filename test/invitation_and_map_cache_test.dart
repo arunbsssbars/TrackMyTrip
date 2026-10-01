@@ -2,12 +2,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:trip_tracker_app/core/database/app_database.dart';
-import 'package:trip_tracker_app/core/services/local_storage_service.dart';
-import 'package:trip_tracker_app/core/services/map_tile_cache_service.dart';
-import 'package:trip_tracker_app/core/services/user_service.dart';
-import 'package:trip_tracker_app/models/trip_invitation.dart';
-import 'package:trip_tracker_app/models/user_profile.dart';
+import 'package:trackmytrip/core/database/app_database.dart';
+import 'package:trackmytrip/core/services/local_storage_service.dart';
+import 'package:trackmytrip/core/services/map_tile_cache_service.dart';
+import 'package:trackmytrip/core/services/user_service.dart';
+import 'package:trackmytrip/models/trip_invitation.dart';
+import 'package:trackmytrip/models/user_profile.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

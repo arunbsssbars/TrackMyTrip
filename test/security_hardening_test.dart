@@ -2,11 +2,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:trip_tracker_app/core/database/app_database.dart';
-import 'package:trip_tracker_app/core/services/security_service.dart';
-import 'package:trip_tracker_app/core/utils/security_sanitizer.dart';
-import 'package:trip_tracker_app/core/utils/app_logger.dart';
-import 'package:trip_tracker_app/core/services/live_companion_tracker_service.dart';
+import 'package:trackmytrip/core/database/app_database.dart';
+import 'package:trackmytrip/core/services/security_service.dart';
+import 'package:trackmytrip/core/utils/security_sanitizer.dart';
+import 'package:trackmytrip/core/utils/app_logger.dart';
+import 'package:trackmytrip/core/services/live_companion_tracker_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 void main() {

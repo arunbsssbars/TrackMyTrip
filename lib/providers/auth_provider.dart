@@ -20,7 +20,7 @@ class AuthNotifier extends StateNotifier<AsyncValue<AuthUser?>> {
   final Ref _ref;
 
   AuthNotifier(this._authService, this._ref) : super(const AsyncValue.loading()) {
-    _initAuthSession();
+    Future.microtask(() => _initAuthSession());
   }
 
   Future<void> _onAuthChanged(AuthUser? user) async {
@@ -42,13 +42,21 @@ class AuthNotifier extends StateNotifier<AsyncValue<AuthUser?>> {
       _ref.read(allAuditLogsProvider.notifier).reload();
       _ref.read(invitationProvider.notifier).refreshListeners();
       _authService.syncCurrentUserToFirestore(user);
+      // Improvement 1 + 4: Register FCM token in RTDB (with onDisconnect guard)
+      // and start listening to the wake-queue for offline-delivered messages.
+      _registerRtdbToken(user.id);
+      _ref.read(realtimeSyncServiceProvider).listenWakeQueue(user.id);
     } else {
       // 1. Terminate all background sync listeners immediately
       try {
-        _ref.read(firestoreSyncServiceProvider).disconnectAll();
+        final syncSvc = _ref.read(firestoreSyncServiceProvider);
+        syncSvc.cancelUserTripsSubscription(); // stop cross-user trip stream first
+        syncSvc.disconnectAll();
       } catch (_) {}
       try {
-        _ref.read(realtimeSyncServiceProvider).disconnect();
+        final rtdb = _ref.read(realtimeSyncServiceProvider);
+        rtdb.cancelWakeQueue();   // Improvement 4: stop wake queue listener
+        rtdb.disconnect();
       } catch (_) {}
       try {
         CloudTripSyncService.stopGlobalSync();
@@ -92,6 +100,9 @@ class AuthNotifier extends StateNotifier<AsyncValue<AuthUser?>> {
         _ref.read(allAuditLogsProvider.notifier).reload();
         _ref.read(invitationProvider.notifier).refreshListeners();
         _authService.syncCurrentUserToFirestore(user);
+        // Improvement 1 + 4: Register FCM token in RTDB and start wake queue on cold start
+        _registerRtdbToken(user.id);
+        _ref.read(realtimeSyncServiceProvider).listenWakeQueue(user.id);
 
         // Asynchronously hydrate latest phone, bio, and profile attributes from Firestore
         UserService.fetchUserProfile(user.id, forceRefresh: true).then((cloudProfile) async {
@@ -114,6 +125,18 @@ class AuthNotifier extends StateNotifier<AsyncValue<AuthUser?>> {
     } catch (e, st) {
       state = AsyncValue.error(e, st);
     }
+  }
+
+  /// Fetches the current FCM token and registers it in RTDB with an
+  /// [onDisconnect] auto-invalidation hook (Improvement 1).
+  /// Fire-and-forget — never blocks the login flow.
+  void _registerRtdbToken(String uid) {
+    if (uid.isEmpty) return;
+    _ref.read(pushNotificationServiceProvider).getToken().then((token) {
+      if (token != null && token.isNotEmpty) {
+        _ref.read(realtimeSyncServiceProvider).registerFcmTokenInRtdb(uid, token);
+      }
+    }).catchError((_) {});
   }
 
   bool get isAuthenticated => state.valueOrNull != null;
@@ -210,9 +233,19 @@ class AuthNotifier extends StateNotifier<AsyncValue<AuthUser?>> {
   }
 
   Future<void> deleteAccountAndData() async {
+    final user = state.valueOrNull;
+    final uid = user?.id ?? '';
+    final email = user?.email;
     state = const AsyncValue.loading();
     try {
-      await _authService.deleteAccountAndData();
+      // Remove RTDB token entry before deleting the Firebase Auth user
+      // (must happen while auth is still valid)
+      if (uid.isNotEmpty) {
+        try {
+          await _ref.read(realtimeSyncServiceProvider).unregisterFcmTokenInRtdb(uid);
+        } catch (_) {}
+      }
+      await _authService.deleteAccountAndData(userId: uid, userEmail: email);
       state = const AsyncValue.data(null);
       await _onAuthChanged(null);
       try {

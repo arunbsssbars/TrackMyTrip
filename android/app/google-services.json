@@ -1,10 +1,47 @@
 {
   "project_info": {
     "project_number": "731719697818",
+    "firebase_url": "https://trackmytrip-sync-2026-default-rtdb.asia-southeast1.firebasedatabase.app",
     "project_id": "trackmytrip-sync-2026",
     "storage_bucket": "trackmytrip-sync-2026.firebasestorage.app"
   },
   "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:731719697818:android:9eebe113d9181780bce623",
+        "android_client_info": {
+          "package_name": "com.trackmytrip.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "731719697818-ljfrslc4gbqucih5n6qfnt01v5ct3nsj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD3xg07jKRC-jDcfKCXBLC5-EMCzz4VRgc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "731719697818-ljfrslc4gbqucih5n6qfnt01v5ct3nsj.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "731719697818-g985psnmkv32n4bb14q477capf1s316u.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.triptracker.tripTrackerApp"
+              }
+            }
+          ]
+        }
+      }
+    },
     {
       "client_info": {
         "mobilesdk_app_id": "1:731719697818:android:fbf3b3bfba7fa282bce623",

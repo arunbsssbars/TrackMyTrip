@@ -33,7 +33,31 @@ class MemoriesTab extends ConsumerWidget {
     );
   }
 
-  static Widget buildMemoryImage(String imagePath) {
+  static Widget buildMemoryImage(String imagePath, {String? localPath}) {
+    // 1. Prioritize local file copy for instant zero-latency rendering
+    if (!kIsWeb && localPath != null && localPath.isNotEmpty) {
+      final f = File(localPath);
+      if (f.existsSync()) {
+        return Image.file(
+          f,
+          fit: BoxFit.cover,
+          errorBuilder: (ctx, err, stack) =>
+              const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
+        );
+      }
+    }
+    if (!kIsWeb && !imagePath.startsWith('http://') && !imagePath.startsWith('https://') && !imagePath.startsWith('data:image')) {
+      final f = File(imagePath);
+      if (f.existsSync()) {
+        return Image.file(
+          f,
+          fit: BoxFit.cover,
+          errorBuilder: (ctx, err, stack) =>
+              const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
+        );
+      }
+    }
+
     if (imagePath.startsWith('data:image')) {
       final base64Str = imagePath.split(',').last;
       return Image.memory(
@@ -49,21 +73,18 @@ class MemoriesTab extends ConsumerWidget {
         loadingBuilder: (context, child, progress) {
           if (progress == null) return child;
           return Center(
-            child: CircularProgressIndicator(
-              value: progress.expectedTotalBytes != null
-                  ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
-                  : null,
-              strokeWidth: 2,
+            child: SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                value: progress.expectedTotalBytes != null
+                    ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
+                    : null,
+                strokeWidth: 2,
+              ),
             ),
           );
         },
-        errorBuilder: (ctx, err, stack) =>
-            const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
-      );
-    } else if (!kIsWeb) {
-      return Image.file(
-        File(imagePath),
-        fit: BoxFit.cover,
         errorBuilder: (ctx, err, stack) =>
             const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
       );
@@ -126,9 +147,11 @@ class MemoriesTab extends ConsumerWidget {
 
     if (memories.isEmpty) {
       return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
@@ -264,26 +287,36 @@ class MemoriesTab extends ConsumerWidget {
                             fit: StackFit.expand,
                             children: [
                               // Photo
-                              buildMemoryImage(memory.displayPath),
+                              buildMemoryImage(memory.displayPath, localPath: memory.localPath),
 
-                              // Upload progress overlay
+                              // Non-blocking upload indicator pill in top-left
                               if (memory.uploadStatus == MediaUploadStatus.uploading)
-                                Container(
-                                  color: Colors.black.withAlpha(100),
-                                  child: const Center(
-                                    child: Column(
+                                Positioned(
+                                  top: 8,
+                                  left: 8,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withAlpha(160),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: const Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        CircularProgressIndicator(
-                                          color: Colors.white,
-                                          strokeWidth: 2.5,
+                                        SizedBox(
+                                          width: 10,
+                                          height: 10,
+                                          child: CircularProgressIndicator(
+                                            color: Colors.white,
+                                            strokeWidth: 1.8,
+                                          ),
                                         ),
-                                        SizedBox(height: 6),
+                                        SizedBox(width: 4.5),
                                         Text(
-                                          'Uploading...',
+                                          'Syncing',
                                           style: TextStyle(
                                             color: Colors.white,
-                                            fontSize: 11,
+                                            fontSize: 9.5,
                                             fontWeight: FontWeight.bold,
                                           ),
                                         ),
@@ -491,7 +524,7 @@ class _FullScreenMemoryViewer extends StatelessWidget {
         children: [
           Center(
             child: InteractiveViewer(
-              child: MemoriesTab.buildMemoryImage(memory.displayPath),
+              child: MemoriesTab.buildMemoryImage(memory.displayPath, localPath: memory.localPath),
             ),
           ),
 

@@ -4,6 +4,7 @@ import '../core/services/local_storage_service.dart';
 import '../core/services/offline_sync_engine.dart';
 import '../core/services/proximity_alert_service.dart';
 import '../core/services/user_service.dart';
+import '../core/utils/currency_formatter.dart';
 import '../core/utils/debt_simplifier.dart';
 import '../models/proximity_alert.dart';
 import '../models/settlement.dart';
@@ -53,6 +54,9 @@ class SettlementNotifier extends StateNotifier<List<Settlement>> {
   }
 
   Future<void> addSettlement(Settlement settlement) async {
+    if (settlement.amount <= 0 || settlement.payerMemberId == settlement.receiverMemberId) {
+      return;
+    }
     state = [settlement, ...state.where((s) => s.id != settlement.id)];
     await _storage.saveAllSettlements(state);
 
@@ -100,6 +104,9 @@ class SettlementNotifier extends StateNotifier<List<Settlement>> {
         message: isAdv
             ? '$payerName paid $payeeName an advance of ${settlement.currency} ${settlement.amount.toStringAsFixed(0)}'
             : '$payerName paid $payeeName ${settlement.currency} ${settlement.amount.toStringAsFixed(0)} to settle balance',
+        itemId: settlement.id,
+        itemType: 'settlement',
+        showLocalBanner: true,
       );
     } catch (_) {}
   }
@@ -211,8 +218,9 @@ final tripNetBalancesProvider = Provider<Map<String, double>>((ref) {
     balances[member.id] = 0.0;
   }
 
-  // Factor in all trip expenses
+  // Factor in all trip expenses (exclude personal expenses - they have no group split debt)
   for (final expense in expenses) {
+    if (expense.isPersonal) continue;
     // Payer is credited the total amount they paid upfront
     balances[expense.paidByMemberId] = (balances[expense.paidByMemberId] ?? 0.0) + expense.totalAmount;
 
@@ -233,7 +241,7 @@ final tripNetBalancesProvider = Provider<Map<String, double>>((ref) {
   // Round each balance to exact cents to eliminate IEEE 754 floating point dust
   final Map<String, double> roundedBalances = {};
   balances.forEach((memberId, bal) {
-    final rounded = double.parse(bal.toStringAsFixed(2));
+    final rounded = CurrencyFormatter.roundTo2Decimals(bal);
     roundedBalances[memberId] = rounded.abs() < 0.001 ? 0.0 : rounded;
   });
 
@@ -245,7 +253,7 @@ final ledgerImbalanceProvider = Provider<double>((ref) {
   final balances = ref.watch(tripNetBalancesProvider);
   if (balances.isEmpty) return 0.0;
   final sum = balances.values.fold<double>(0.0, (acc, b) => acc + b);
-  return double.parse(sum.toStringAsFixed(2));
+  return CurrencyFormatter.roundTo2Decimals(sum);
 });
 
 /// Computes the minimal number of direct transfers to settle all trip debts

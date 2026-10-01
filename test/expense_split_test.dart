@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:trip_tracker_app/models/expense.dart';
-import 'package:trip_tracker_app/models/expense_split.dart';
-import 'package:trip_tracker_app/models/stoppage.dart';
+import 'package:trackmytrip/models/expense.dart';
+import 'package:trackmytrip/models/expense_split.dart';
+import 'package:trackmytrip/models/stoppage.dart';
 
 void main() {
   group('Expense Model & Split Tests', () {

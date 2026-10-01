@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../core/services/cloud_trip_sync_service.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/app_snackbar.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../models/trip.dart';
 import '../../../models/trip_invitation.dart';
@@ -12,8 +13,11 @@ import '../../../providers/expense_provider.dart';
 import '../../../providers/invitation_provider.dart';
 import '../../../providers/trip_provider.dart';
 import '../../../widgets/app_floating_button.dart';
+import '../../common/user_avatar.dart';
 import '../../trip/companion_search_dialog.dart';
 import '../../../core/utils/trip_guard_helper.dart';
+import '../../../core/services/live_companion_tracker_service.dart';
+import '../../../core/services/realtime_sync_service.dart';
 
 class MembersTab extends ConsumerStatefulWidget {
   final Trip trip;
@@ -55,13 +59,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
         );
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Trip invitation sent to "${user.displayName}"! They will join once accepted.'),
-              backgroundColor: AppTheme.primary,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+          AppSnackBar.showSuccess(context, 'Trip invitation sent to "${user.displayName}"! They will join once accepted.');
         }
       },
       onCompanionSelected: (newMember) async {
@@ -69,13 +67,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
         if (newMember.id.startsWith('custom_') || newMember.id.startsWith('offline_') || newMember.id.startsWith('member_')) {
           await ref.read(tripListProvider.notifier).addMemberToTrip(currentTrip.id, newMember);
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Added "${newMember.name}" as custom member!'),
-                backgroundColor: AppTheme.primary,
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
+            AppSnackBar.showSuccess(context, 'Added "${newMember.name}" as custom member!');
           }
           return;
         }
@@ -97,13 +89,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
         );
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Trip invitation sent to "${newMember.name}"! They will join once accepted.'),
-              backgroundColor: AppTheme.primary,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+          AppSnackBar.showSuccess(context, 'Trip invitation sent to "${newMember.name}"! They will join once accepted.');
         }
       },
     );
@@ -180,13 +166,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
               );
               await ref.read(tripListProvider.notifier).addMemberToTrip(currentTrip.id, offlineMember);
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Added "$name" as custom member!'),
-                    backgroundColor: AppTheme.primary,
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
+                AppSnackBar.showSuccess(context, 'Added "$name" as custom member!');
               }
             },
             child: const Text('Add Member'),
@@ -203,15 +183,57 @@ class _MembersTabState extends ConsumerState<MembersTab> {
   }
 
 
-  void _confirmRemoveMember(TripMember member) {
+  void _confirmRemoveMember(TripMember member) async {
+    final canProceed = await TripGuardHelper.ensureTripOpenForEdit(
+      context,
+      ref,
+      widget.trip,
+      actionLabel: 'remove a member',
+    );
+    if (!canProceed || !mounted) return;
+
+    final tripExpenses = ref.read(allExpensesProvider).where((e) => e.tripId == widget.trip.id).toList();
+    final hasFinancialRecords = tripExpenses.any((e) =>
+        e.paidByMemberId == member.id ||
+        e.splits.any((s) => s.memberId == member.id && s.allocatedAmount > 0));
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: Text('Remove ${member.name}?'),
-        content: Text(
-          'Are you sure you want to remove ${member.name} from this trip? They will lose access to shared expenses and route tracking.',
-          style: const TextStyle(fontSize: 13.5),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Are you sure you want to remove ${member.name} from this trip? They will lose access to shared expenses and route tracking.',
+              style: const TextStyle(fontSize: 13.5),
+            ),
+            if (hasFinancialRecords) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withAlpha(25),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.amber.withAlpha(80)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.account_balance_wallet_rounded, size: 18, color: Colors.amber),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${member.name} has existing bills or splits. Historical records will remain in the accounting ledger.',
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
         ),
         actions: [
           TextButton(
@@ -224,9 +246,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
               Navigator.of(ctx).pop();
               await ref.read(tripListProvider.notifier).removeMemberFromTrip(widget.trip.id, member.id);
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Removed ${member.name}')),
-                );
+                AppSnackBar.showSuccess(context, 'Removed ${member.name}');
               }
             },
             child: const Text('Remove'),
@@ -238,13 +258,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
 
   void _confirmLeaveTrip() {
     if (widget.trip.isCompleted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('🔒 Concluded journeys cannot be abandoned. All splits and member records are preserved.'),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      AppSnackBar.showError(context, '🔒 Concluded journeys cannot be abandoned. All splits and member records are preserved.');
       return;
     }
     showDialog(
@@ -284,7 +298,9 @@ class _MembersTabState extends ConsumerState<MembersTab> {
     final currentTrip = trips.where((t) => t.id == widget.trip.id).firstOrNull ?? widget.trip;
     final authUser = ref.watch(authNotifierProvider).valueOrNull;
     final currentUid = authUser?.id;
-    final isCreator = currentTrip.isCreator(currentUid) || currentTrip.isCreator(currentTrip.currentUserMember?.id);
+    final isCreator = currentTrip.isCreator(currentUid, authUser?.email) ||
+        currentTrip.isCreator(currentTrip.currentUserMember?.id) ||
+        (currentTrip.createdByMemberId.isNotEmpty && currentUid != null && currentTrip.createdByMemberId == currentUid);
 
     final shareCode = (currentTrip.shareCode != null && currentTrip.shareCode!.isNotEmpty)
         ? currentTrip.shareCode!
@@ -304,6 +320,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
 
     final allExpenses = ref.watch(allExpensesProvider);
     final tripExpenses = allExpenses.where((e) => e.tripId == currentTrip.id).toList();
+    final companionPositions = ref.watch(liveCompanionTrackerProvider);
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -322,35 +339,43 @@ class _MembersTabState extends ConsumerState<MembersTab> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(
-              children: [
-                const Icon(Icons.groups_rounded, size: 20, color: AppTheme.primary),
-                const SizedBox(width: 8),
-                Text(
-                  'Travelers (${currentTrip.members.length})',
-                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
-                ),
-              ],
+            Expanded(
+              child: Row(
+                children: [
+                  const Icon(Icons.groups_rounded, size: 20, color: AppTheme.primary),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Travelers (${currentTrip.members.length})',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
             ),
+            const SizedBox(width: 8),
             Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 OutlinedButton.icon(
                   onPressed: _showAddOfflineMemberDialog,
                   icon: const Icon(Icons.person_add_alt_1_rounded, size: 14),
-                  label: const Text('+ Custom', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+                  label: const Text('Custom', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
                   style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 FilledButton.icon(
                   onPressed: _openCompanionSearch,
                   icon: const Icon(Icons.person_search_rounded, size: 14),
-                  label: const Text('Invite', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+                  label: const Text('Invite', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTheme.primary,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
@@ -363,24 +388,26 @@ class _MembersTabState extends ConsumerState<MembersTab> {
         const SizedBox(height: 10),
 
         // 3. Members List — Individual Container Cards
-        ListView.separated(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          padding: EdgeInsets.zero,
-          itemCount: currentTrip.members.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
-          itemBuilder: (context, index) {
-              final member = currentTrip.members[index];
-              final isMemberCreator = currentTrip.isCreator(member.id);
+        () {
+          final hasExplicitCreator = currentTrip.members.any((m) => currentTrip.isMemberCreator(m));
+
+          return Column(
+            children: [
+              for (int index = 0; index < currentTrip.members.length; index++) ...[
+                if (index > 0) const SizedBox(height: 8),
+                Builder(
+                  builder: (context) {
+                    final member = currentTrip.members[index];
               final isMe = (currentUid != null && member.id == currentUid) ||
                   (authUser?.email != null && member.email != null && authUser!.email.toLowerCase() == member.email!.toLowerCase());
+
+              final isMemberCreator = currentTrip.isMemberCreator(member) ||
+                  (isMe && isCreator) ||
+                  (!hasExplicitCreator && index == 0);
 
               final memberPaid = tripExpenses
                   .where((e) => e.paidByMemberId == member.id || e.paidByMemberId == member.name)
                   .fold<double>(0.0, (sum, e) => sum + e.totalAmount);
-
-              final colorInt = int.tryParse(member.colorHex ?? '0xFF0D9488') ?? 0xFF0D9488;
-              final avatarColor = Color(colorInt);
 
               // Action widget for trailing area
               Widget? actionWidget;
@@ -404,9 +431,25 @@ class _MembersTabState extends ConsumerState<MembersTab> {
               return Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                  color: isMemberCreator
+                      ? (isDark ? const Color(0xFF1F2430) : const Color(0xFFFFFDF5))
+                      : (isDark ? const Color(0xFF1E293B) : Colors.white),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                  border: Border.all(
+                    color: isMemberCreator
+                        ? (isDark ? const Color(0xFFD97706).withAlpha(160) : const Color(0xFFF59E0B))
+                        : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                    width: isMemberCreator ? 1.5 : 1.0,
+                  ),
+                  boxShadow: isMemberCreator
+                      ? [
+                          BoxShadow(
+                            color: const Color(0xFFF59E0B).withAlpha(isDark ? 28 : 22),
+                            blurRadius: 10,
+                            offset: const Offset(0, 3),
+                          ),
+                        ]
+                      : null,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -416,26 +459,43 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                       children: [
                         // Avatar with creator badge
                         Stack(
+                          clipBehavior: Clip.none,
                           children: [
-                            CircleAvatar(
-                              radius: 22,
-                              backgroundColor: avatarColor,
-                              child: Text(
-                                member.initials,
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                            UserAvatar(
+                              name: member.name,
+                              colorHex: member.colorHex,
+                              size: 44,
+                              border: Border.all(
+                                color: isMemberCreator
+                                    ? const Color(0xFFF59E0B)
+                                    : (isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1)),
+                                width: isMemberCreator ? 2.0 : 1.0,
                               ),
                             ),
                             if (isMemberCreator)
                               Positioned(
-                                right: 0,
-                                bottom: 0,
+                                right: -2,
+                                bottom: -2,
                                 child: Container(
-                                  padding: const EdgeInsets.all(2),
-                                  decoration: const BoxDecoration(
-                                    color: Colors.amber,
+                                  padding: const EdgeInsets.all(2.5),
+                                  decoration: BoxDecoration(
+                                    gradient: const LinearGradient(
+                                      colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
+                                    ),
                                     shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: isDark ? const Color(0xFF1F2430) : Colors.white,
+                                      width: 1.5,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withAlpha(50),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 1),
+                                      ),
+                                    ],
                                   ),
-                                  child: const Icon(Icons.star_rounded, size: 10, color: Colors.white),
+                                  child: const Icon(Icons.workspace_premium_rounded, size: 11, color: Colors.white),
                                 ),
                               ),
                           ],
@@ -451,23 +511,63 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                                   Flexible(
                                     child: Text(
                                       member.name,
-                                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5),
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 14.5,
+                                        color: isMemberCreator && !isDark ? const Color(0xFF78350F) : null,
+                                      ),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
-                                  if (isMe) ...[
+                                  if (isMemberCreator) ...[
                                     const SizedBox(width: 6),
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                       decoration: BoxDecoration(
-                                        color: AppTheme.primary.withAlpha(30),
+                                        gradient: const LinearGradient(
+                                          colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
+                                        ),
                                         borderRadius: BorderRadius.circular(6),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: const Color(0xFFD97706).withAlpha(80),
+                                            blurRadius: 3,
+                                            offset: const Offset(0, 1),
+                                          ),
+                                        ],
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.workspace_premium_rounded, size: 10, color: Colors.white),
+                                          SizedBox(width: 3),
+                                          Text(
+                                            'CREATOR',
+                                            style: TextStyle(
+                                              fontSize: 9.5,
+                                              fontWeight: FontWeight.w900,
+                                              letterSpacing: 0.5,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                  if (isMe) ...[
+                                    const SizedBox(width: 5),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: isDark ? AppTheme.primary.withAlpha(50) : AppTheme.primary.withAlpha(25),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: AppTheme.primary.withAlpha(80), width: 0.8),
                                       ),
                                       child: const Text(
                                         'You',
                                         style: TextStyle(
-                                          fontSize: 10.5,
+                                          fontSize: 9.5,
                                           fontWeight: FontWeight.w800,
                                           color: AppTheme.primary,
                                         ),
@@ -499,23 +599,39 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                       runSpacing: 4,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: isMemberCreator ? Colors.amber.withAlpha(25) : Colors.blue.withAlpha(25),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            isMemberCreator ? 'Trip Lead' : 'Member',
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.bold,
-                              color: isMemberCreator ? Colors.amber[800] : Colors.blue[700],
+                        if (!isMemberCreator)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                            decoration: BoxDecoration(
+                              color: isDark ? Colors.white.withAlpha(12) : const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                                width: 0.8,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.person_outline_rounded,
+                                  size: 11.5,
+                                  color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Member',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark ? Colors.grey[300] : const Color(0xFF475569),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                           decoration: BoxDecoration(
                             color: memberPaid > 0 ? const Color(0xFF10B981).withAlpha(25) : (isDark ? Colors.white10 : Colors.grey.withAlpha(30)),
                             borderRadius: BorderRadius.circular(6),
@@ -531,6 +647,87 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
+                        if (companionPositions.containsKey(member.id) && companionPositions[member.id]?.batteryLevel != null) ...[
+                          Builder(
+                            builder: (context) {
+                              final pos = companionPositions[member.id]!;
+                              final batt = pos.batteryLevel!;
+                              final isCharging = pos.isCharging == true;
+                              final isLow = pos.isLowBattery;
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+                                decoration: BoxDecoration(
+                                  color: isLow
+                                      ? (isDark ? const Color(0xFF451A03) : const Color(0xFFFEF3C7))
+                                      : (isCharging ? const Color(0xFF10B981).withAlpha(20) : (isDark ? Colors.white10 : Colors.grey.withAlpha(25))),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: isLow ? const Color(0xFFF59E0B) : Colors.transparent,
+                                    width: 0.8,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      isCharging
+                                          ? Icons.battery_charging_full_rounded
+                                          : (isLow ? Icons.battery_alert_rounded : Icons.battery_std_rounded),
+                                      size: 11,
+                                      color: isLow
+                                          ? const Color(0xFFF59E0B)
+                                          : (isCharging ? const Color(0xFF10B981) : (isDark ? Colors.grey[400] : Colors.grey[700])),
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      '$batt%',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: isLow
+                                            ? (isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E))
+                                            : (isCharging ? const Color(0xFF059669) : (isDark ? Colors.grey[300] : Colors.grey[700])),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                        if (!isMe && !member.id.startsWith('offline_')) ...[
+                          InkWell(
+                            borderRadius: BorderRadius.circular(6),
+                            onTap: () {
+                              final myName = authUser?.displayName ?? 'A companion';
+                              ref.read(realtimeSyncServiceProvider).nudgeCompanion(currentTrip.id, member.id, myName);
+                              AppSnackBar.showSuccess(context, 'Convoy ping sent to ${member.name}');
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+                              decoration: BoxDecoration(
+                                color: isDark ? AppTheme.primary.withAlpha(30) : AppTheme.primary.withAlpha(20),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: AppTheme.primary.withAlpha(60), width: 0.8),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.notifications_active_outlined, size: 11, color: AppTheme.primary),
+                                  SizedBox(width: 3),
+                                  Text(
+                                    'Nudge',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.primary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ],
@@ -538,6 +735,10 @@ class _MembersTabState extends ConsumerState<MembersTab> {
               );
             },
           ),
+        ],
+      ],
+    );
+  }(),
 
         const SizedBox(height: 20),
 
@@ -561,38 +762,41 @@ class _MembersTabState extends ConsumerState<MembersTab> {
               side: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
             ),
             color: isDark ? const Color(0xFF1E293B) : Colors.white,
-            child: ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: tripInvitations.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final inv = tripInvitations[index];
-                return ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: Colors.orange.withAlpha(25),
-                    child: const Icon(Icons.hourglass_top_rounded, color: Colors.orange, size: 18),
-                  ),
-                  title: Text(
-                    inv.inviteeEmail ?? inv.inviteeUsername,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    'Status: Pending • Sent recently',
-                    style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : AppTheme.textMutedLight),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  trailing: TextButton(
-                    onPressed: () {
-                      ref.read(invitationProvider.notifier).cancelInvitation(inv.id);
+            child: Column(
+              children: [
+                for (int index = 0; index < tripInvitations.length; index++) ...[
+                  if (index > 0) const Divider(height: 1),
+                  Builder(
+                    builder: (context) {
+                      final inv = tripInvitations[index];
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: Colors.orange.withAlpha(25),
+                          child: const Icon(Icons.hourglass_top_rounded, color: Colors.orange, size: 18),
+                        ),
+                        title: Text(
+                          inv.inviteeEmail ?? inv.inviteeUsername,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          'Status: Pending • Sent recently',
+                          style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : AppTheme.textMutedLight),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: TextButton(
+                          onPressed: () {
+                            ref.read(invitationProvider.notifier).cancelInvitation(inv.id);
+                          },
+                          child: const Text('Cancel', style: TextStyle(color: Colors.red, fontSize: 12)),
+                        ),
+                      );
                     },
-                    child: const Text('Cancel', style: TextStyle(color: Colors.red, fontSize: 12)),
                   ),
-                );
-              },
+                ],
+              ],
             ),
           ),
           const SizedBox(height: 16),

@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../utils/currency_formatter.dart';
 import '../../models/expense.dart';
 import '../../models/settlement.dart';
 import '../../models/trip_member.dart';
@@ -108,7 +109,7 @@ class LedgerIntegrityService {
     );
 
     final netSum = balances.values.fold<double>(0.0, (acc, b) => acc + b);
-    final drift = double.parse(netSum.toStringAsFixed(2));
+    final drift = CurrencyFormatter.roundTo2Decimals(netSum);
 
     if (kDebugMode && violations.isNotEmpty) {
       debugPrint('[LedgerIntegrityService] Detected ${violations.length} conservation violation(s):');

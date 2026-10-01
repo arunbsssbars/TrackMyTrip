@@ -353,11 +353,16 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                   const SizedBox(height: 12),
                   Text(
                     currentUser.displayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
                   ),
                   const SizedBox(height: 4),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -371,19 +376,22 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                           children: [
                             const Icon(Icons.lock_outline_rounded, size: 12, color: AppTheme.primary),
                             const SizedBox(width: 4),
-                            Text(
-                              currentUser.handle,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.primary,
-                                fontWeight: FontWeight.w800,
+                            Flexible(
+                              child: Text(
+                                currentUser.handle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppTheme.primary,
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                             ),
                           ],
                         ),
                       ),
-                      if (authService.isEmailVerified) ...[
-                        const SizedBox(width: 6),
+                      if (authService.isEmailVerified)
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                           decoration: BoxDecoration(
@@ -407,7 +415,6 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                             ],
                           ),
                         ),
-                      ],
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -452,16 +459,23 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Row(
-                          children: [
-                            Icon(Icons.assignment_turned_in_outlined, size: 18, color: AppTheme.primary),
-                            SizedBox(width: 8),
-                            Text(
-                              'Profile Completeness',
-                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
-                            ),
-                          ],
+                        const Expanded(
+                          child: Row(
+                            children: [
+                              Icon(Icons.assignment_turned_in_outlined, size: 18, color: AppTheme.primary),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Profile Completeness',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
+                        const SizedBox(width: 8),
                         Text(
                           '$completeness%',
                           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: AppTheme.primary),
@@ -501,9 +515,13 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                     children: [
                       Icon(Icons.badge_rounded, size: 16, color: AppTheme.primary),
                       SizedBox(width: 8),
-                      Text(
-                        'Identity & Contact Details',
-                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                      Expanded(
+                        child: Text(
+                          'Identity & Contact Details',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                        ),
                       ),
                     ],
                   ),
@@ -597,9 +615,13 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                     children: [
                       Icon(Icons.edit_note_rounded, size: 18, color: AppTheme.primary),
                       SizedBox(width: 8),
-                      Text(
-                        'Traveler Bio & Status',
-                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                      Expanded(
+                        child: Text(
+                          'Traveler Bio & Status',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                        ),
                       ),
                     ],
                   ),
@@ -640,39 +662,17 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
             ),
             const SizedBox(height: 12),
 
-            // Action: Sign Out
+            // Action: Sign Out (Direct signout without confirmation dialog)
             OutlinedButton.icon(
               onPressed: _isSigningOut || _isDeletingAccount
                   ? null
                   : () async {
-                      final confirm = await showDialog<bool>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                          title: const Text('Confirm Sign Out', style: TextStyle(fontWeight: FontWeight.bold)),
-                          content: const Text('Are you sure you want to sign out from your travel session?'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.of(ctx).pop(false),
-                              child: const Text('Cancel'),
-                            ),
-                            FilledButton(
-                              style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                              onPressed: () => Navigator.of(ctx).pop(true),
-                              child: const Text('Sign Out'),
-                            ),
-                          ],
-                        ),
-                      );
-
-                      if (confirm == true) {
-                        setState(() => _isSigningOut = true);
-                        try {
-                          await ref.read(authNotifierProvider.notifier).logout();
-                        } finally {
-                          if (mounted) {
-                            setState(() => _isSigningOut = false);
-                          }
+                      setState(() => _isSigningOut = true);
+                      try {
+                        await ref.read(authNotifierProvider.notifier).logout();
+                      } finally {
+                        if (mounted) {
+                          setState(() => _isSigningOut = false);
                         }
                       }
                     },
@@ -770,23 +770,29 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
   }
 
   Widget _buildHeaderStat(String label, String value, IconData icon, bool isDark) {
-    return Column(
-      children: [
-        Icon(icon, size: 18, color: AppTheme.primary),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-        ),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 11,
-            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
-            fontWeight: FontWeight.w600,
+    return Expanded(
+      child: Column(
+        children: [
+          Icon(icon, size: 18, color: AppTheme.primary),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
           ),
-        ),
-      ],
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

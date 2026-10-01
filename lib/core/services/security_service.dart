@@ -175,7 +175,7 @@ class SecurityService {
   // =========================================================================
 
   static const MethodChannel _securityChannel =
-      MethodChannel('com.triptracker.trip_tracker_app/security');
+      MethodChannel('com.trackmytrip.app/security');
 
   /// Toggles WindowManager.LayoutParams.FLAG_SECURE to prevent screenshots/screen recordings
   /// on sensitive screens (Expenses, Billing, Auth, Profile).

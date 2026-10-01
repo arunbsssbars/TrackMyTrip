@@ -13,6 +13,8 @@ class CompanionLivePosition {
   final DateTime lastUpdated;
   final bool isLiveNetwork;
   final int waypointIndex;
+  final int? batteryLevel;
+  final bool? isCharging;
 
   const CompanionLivePosition({
     required this.memberId,
@@ -23,7 +25,11 @@ class CompanionLivePosition {
     required this.lastUpdated,
     this.isLiveNetwork = false,
     this.waypointIndex = 0,
+    this.batteryLevel,
+    this.isCharging,
   });
+
+  bool get isLowBattery => batteryLevel != null && batteryLevel! <= 15 && isCharging != true;
 
   CompanionLivePosition copyWith({
     String? memberId,
@@ -34,6 +40,8 @@ class CompanionLivePosition {
     DateTime? lastUpdated,
     bool? isLiveNetwork,
     int? waypointIndex,
+    int? batteryLevel,
+    bool? isCharging,
   }) {
     return CompanionLivePosition(
       memberId: memberId ?? this.memberId,
@@ -44,12 +52,13 @@ class CompanionLivePosition {
       lastUpdated: lastUpdated ?? this.lastUpdated,
       isLiveNetwork: isLiveNetwork ?? this.isLiveNetwork,
       waypointIndex: waypointIndex ?? this.waypointIndex,
+      batteryLevel: batteryLevel ?? this.batteryLevel,
+      isCharging: isCharging ?? this.isCharging,
     );
   }
 }
 
 class LiveCompanionTrackerNotifier extends StateNotifier<Map<String, CompanionLivePosition>> {
-  Timer? _convoyTicker;
   Timer? _ttlCleanupTimer;
 
   LiveCompanionTrackerNotifier(Ref _) : super({}) {
@@ -60,7 +69,6 @@ class LiveCompanionTrackerNotifier extends StateNotifier<Map<String, CompanionLi
 
   @override
   void dispose() {
-    _convoyTicker?.cancel();
     _ttlCleanupTimer?.cancel();
     super.dispose();
   }
@@ -87,6 +95,8 @@ class LiveCompanionTrackerNotifier extends StateNotifier<Map<String, CompanionLi
     double lng, {
     double speedKmh = 0.0,
     double heading = 0.0,
+    int? batteryLevel,
+    bool? isCharging,
   }) {
     final existing = state[memberId];
     final updated = (existing ?? CompanionLivePosition(
@@ -95,19 +105,37 @@ class LiveCompanionTrackerNotifier extends StateNotifier<Map<String, CompanionLi
       longitude: lng,
       lastUpdated: DateTime.now(),
       isLiveNetwork: true,
+      batteryLevel: batteryLevel,
+      isCharging: isCharging,
     )).copyWith(
       latitude: lat,
       longitude: lng,
       speedKmh: speedKmh,
       heading: heading,
       lastUpdated: DateTime.now(),
-      isLiveNetwork: true, // Flags that this companion is actively reporting live GPS
+      isLiveNetwork: true,
+      batteryLevel: batteryLevel ?? existing?.batteryLevel,
+      isCharging: isCharging ?? existing?.isCharging,
     );
 
     state = {
       ...state,
       memberId: updated,
     };
+  }
+
+  /// Updates companion presence (online/offline) from real-time WebSocket connection state
+  void updateCompanionOnlineStatus(String memberId, bool isOnline) {
+    final existing = state[memberId];
+    if (existing != null) {
+      state = {
+        ...state,
+        memberId: existing.copyWith(
+          isLiveNetwork: isOnline,
+          lastUpdated: isOnline ? DateTime.now() : existing.lastUpdated,
+        ),
+      };
+    }
   }
 
   /// Synchronizes companions from real reported member data.
@@ -145,8 +173,6 @@ class LiveCompanionTrackerNotifier extends StateNotifier<Map<String, CompanionLi
 
   /// Stops any companion ticker
   void stopConvoySimulation() {
-    _convoyTicker?.cancel();
-    _convoyTicker = null;
   }
 }
 

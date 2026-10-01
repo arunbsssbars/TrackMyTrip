@@ -252,12 +252,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             children: [
                               const GoogleLogo(size: 22),
                               const SizedBox(width: 12),
-                              Text(
-                                'Continue with Google (Gmail)',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  color: isDark ? Colors.white : const Color(0xFF1E293B),
+                              Flexible(
+                                child: Text(
+                                  'Continue with Google (Gmail)',
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    color: isDark ? Colors.white : const Color(0xFF1E293B),
+                                  ),
                                 ),
                               ),
                             ],
@@ -274,11 +278,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: Text(
-                        'OR CONTINUE WITH EMAIL',
+                        'OR',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          letterSpacing: 0.8,
+                          letterSpacing: 1.0,
                           color: isDark ? Colors.grey[500] : const Color(0xFF94A3B8),
                         ),
                       ),
@@ -360,8 +364,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
                 // Don't have an account? Sign Up
                 Center(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  child: Wrap(
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text(
                         "Don't have an account? ",

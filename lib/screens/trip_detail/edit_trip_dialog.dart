@@ -3,9 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/app_snackbar.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../core/utils/date_formatter.dart';
+import '../../core/utils/trip_guard_helper.dart';
 import '../../models/trip.dart';
+import '../common/user_avatar.dart';
 import '../../models/trip_member.dart';
 import '../../models/trip_audit_log.dart';
 import '../../providers/audit_log_provider.dart';
@@ -120,13 +123,7 @@ class _EditTripDialogState extends ConsumerState<EditTripDialog> {
         );
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Trip invitation sent to "${user.displayName}"! They will join once accepted.'),
-              backgroundColor: AppTheme.primary,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+          AppSnackBar.showSuccess(context, 'Trip invitation sent to "${user.displayName}"! They will join once accepted.');
         }
       },
       onCompanionSelected: (member) async {
@@ -134,13 +131,7 @@ class _EditTripDialogState extends ConsumerState<EditTripDialog> {
           if (!_members.any((m) => m.id == member.id)) {
             setState(() => _members.add(member));
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Added "${member.name}" to trip roster.'),
-                  backgroundColor: AppTheme.primary,
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
+              AppSnackBar.showSuccess(context, 'Added "${member.name}" to trip roster.');
             }
           }
           return;
@@ -162,13 +153,7 @@ class _EditTripDialogState extends ConsumerState<EditTripDialog> {
         );
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Trip invitation sent to "${member.name}"! They will join once accepted.'),
-              backgroundColor: AppTheme.primary,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+          AppSnackBar.showSuccess(context, 'Trip invitation sent to "${member.name}"! They will join once accepted.');
         }
       },
 
@@ -177,12 +162,7 @@ class _EditTripDialogState extends ConsumerState<EditTripDialog> {
 
   void _removeCompanion(TripMember member) {
     if (member.isCurrentUser) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Cannot remove yourself (creator) from the trip.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      AppSnackBar.showWarning(context, 'Cannot remove yourself (creator) from the trip.');
       return;
     }
     setState(() {
@@ -209,10 +189,27 @@ class _EditTripDialogState extends ConsumerState<EditTripDialog> {
     }
   }
 
-  void _save() {
+  void _save() async {
     if (!_formKey.currentState!.validate()) return;
 
+    if (_endDate.isBefore(_startDate)) {
+      AppSnackBar.showError(context, 'Trip end date cannot be earlier than start date.');
+      return;
+    }
+
     final budgetVal = double.tryParse(_budgetController.text.trim());
+    if (budgetVal != null && budgetVal < 0) {
+      AppSnackBar.showError(context, 'Trip budget cannot be negative.');
+      return;
+    }
+
+    final canProceed = await TripGuardHelper.ensureTripOpenForEdit(
+      context,
+      ref,
+      widget.trip,
+      actionLabel: 'edit trip details',
+    );
+    if (!canProceed || !mounted) return;
 
     final updated = widget.trip.copyWith(
       title: _titleController.text.trim(),
@@ -449,9 +446,13 @@ class _EditTripDialogState extends ConsumerState<EditTripDialog> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'Travelers & Companions (${_members.length})',
-                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+                    Expanded(
+                      child: Text(
+                        'Travelers & Companions (${_members.length})',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+                      ),
                     ),
                     if (_tripType == 'solo')
                       const Text('(Solo Mode)', style: TextStyle(fontSize: 11.5, color: Colors.blue, fontWeight: FontWeight.bold)),
@@ -466,13 +467,11 @@ class _EditTripDialogState extends ConsumerState<EditTripDialog> {
                   children: _members.map((m) {
                     final isMe = m.isCurrentUser;
                     return Chip(
-                      avatar: CircleAvatar(
-                        radius: 10,
-                        backgroundColor: Color(int.parse(m.colorHex ?? '0xFF0F766E')),
-                        child: Text(
-                          m.name.isNotEmpty ? m.name[0].toUpperCase() : '?',
-                          style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold),
-                        ),
+                      avatar: UserAvatar(
+                        name: m.name,
+                        colorHex: m.colorHex,
+                        size: 20,
+                        fontSize: 9,
                       ),
                       label: Text(
                         isMe ? '${m.name} (You)' : m.name,
@@ -586,12 +585,16 @@ class _EditTripDialogState extends ConsumerState<EditTripDialog> {
             children: [
               Icon(icon, size: 14, color: isSelected ? color : Colors.grey),
               const SizedBox(width: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                  color: isSelected ? color : (isDark ? Colors.grey[300] : Colors.grey[700]),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                    color: isSelected ? color : (isDark ? Colors.grey[300] : Colors.grey[700]),
+                  ),
                 ),
               ),
             ],

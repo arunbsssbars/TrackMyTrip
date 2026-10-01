@@ -25,6 +25,11 @@ class CurrencyFormatter {
     return '$symbol${formatter.format(amount)}';
   }
 
+  /// Reliably rounds any double to 2 decimal places without IEEE-754 binary floating drift.
+  static double roundTo2Decimals(double value) {
+    return ((value * 100).round()) / 100.0;
+  }
+
   /// Compact formatting (e.g. ₹5K or $12.5K)
   static String formatCompact(double amount, {String? currency}) {
     final cur = (currency != null && currency.trim().isNotEmpty) ? currency.trim() : fallbackCurrency;

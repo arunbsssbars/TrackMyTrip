@@ -29,7 +29,7 @@ import 'user_service.dart';
 /// ---------------------------------------------------------------------------
 /// FirestoreSyncService
 /// ---------------------------------------------------------------------------
-/// The central offline-first sync hub for TripTracker.
+/// The central offline-first sync hub for TrackMyTrip.
 ///
 /// Replaces the previous local-WebSocket + HTTP-polling architecture with
 /// Firebase Cloud Firestore, providing:
@@ -105,15 +105,14 @@ class FirestoreSyncService {
           return;
         }
 
-        if (change.type == DocumentChangeType.removed) {
-          _ref.read(tripListProvider.notifier).deleteTripLocally(tripId);
-          return;
-        }
+        // Note: Do not aggressively delete on DocumentChangeType.removed.
+        // A doc leaving a partial query snapshot must not wipe the trip from local device.
 
         if (data != null) {
           final isDeleted = data['status'] == 'deleted' || data['isDeleted'] == true;
           if (isDeleted) {
-            _ref.read(tripListProvider.notifier).deleteTripLocally(tripId);
+            TombstoneService.markTombstoned(tripId);
+            _ref.read(tripListProvider.notifier).archiveTripByCreator(tripId);
             return;
           }
 
@@ -241,12 +240,12 @@ class FirestoreSyncService {
         return;
       }
       if (!snap.exists || snap.data() == null) {
-        disconnectAll();
-        _ref.read(tripListProvider.notifier).deleteTripLocally(tripId);
+        // Document does not exist or not accessible yet; do not nuke local data
         return;
       }
       final data = snap.data()!;
       if (data['status'] == 'deleted' || data['isDeleted'] == true) {
+        TombstoneService.markTombstoned(tripId);
         disconnectAll();
         _ref.read(tripListProvider.notifier).deleteTripLocally(tripId);
         return;
@@ -329,15 +328,19 @@ class FirestoreSyncService {
           final expense = Expense.fromJson({...data, 'id': change.doc.id});
           switch (change.type) {
             case DocumentChangeType.added:
-            case DocumentChangeType.modified:
               _ref
                   .read(allExpensesProvider.notifier)
                   .addExpense(expense, broadcast: false);
               break;
+            case DocumentChangeType.modified:
+              _ref
+                  .read(allExpensesProvider.notifier)
+                  .updateExpense(expense, broadcast: false);
+              break;
             case DocumentChangeType.removed:
               _ref
                   .read(allExpensesProvider.notifier)
-                  .deleteExpense(expense.id);
+                  .deleteExpense(expense.id, tripId: tripId, broadcast: false);
               break;
           }
         } catch (e) {
@@ -440,12 +443,10 @@ class FirestoreSyncService {
         .collection('trips')
         .doc(tripId)
         .collection('audit_logs')
-        .orderBy('timestamp', descending: true)
-        .limit(100)
         .snapshots()
         .listen((snap) {
       for (final change in snap.docChanges) {
-        if (change.type != DocumentChangeType.added) continue;
+        if (change.type != DocumentChangeType.added && change.type != DocumentChangeType.modified) continue;
         try {
           final data = change.doc.data();
           if (data == null) continue;
@@ -472,7 +473,6 @@ class FirestoreSyncService {
         .collection('trips')
         .doc(tripId)
         .collection('proximity_alerts')
-        .where('isRead', isEqualTo: false)
         .snapshots()
         .listen((snap) {
       for (final change in snap.docChanges) {
@@ -480,7 +480,17 @@ class FirestoreSyncService {
         try {
           final data = change.doc.data();
           if (data == null) continue;
-          final alert = ProximityAlert.fromJson({...data, 'id': change.doc.id});
+          final alertId = change.doc.id;
+          final storage = _ref.read(localStorageServiceProvider);
+          if (storage.isAlertDismissed(alertId)) continue;
+
+          final alert = ProximityAlert.fromJson({...data, 'id': alertId});
+          final globalClearedAt = storage.getAlertsClearedAt();
+          if (globalClearedAt != null && alert.timestamp.isBefore(globalClearedAt)) continue;
+
+          final tripClearedAt = storage.getTripAlertsClearedAt(tripId);
+          if (tripClearedAt != null && alert.timestamp.isBefore(tripClearedAt)) continue;
+
           // Historical if alert was created before subscription attached or is older than 2 minutes
           final isHistorical = alert.timestamp.isBefore(subscriptionStartTime.subtract(const Duration(seconds: 15))) ||
               DateTime.now().difference(alert.timestamp).inMinutes > 2;
@@ -761,6 +771,55 @@ class FirestoreSyncService {
     }
   }
 
+  /// Deletes a specific proximity alert from Firestore
+  Future<void> deleteRemoteAlert(String tripId, String alertId) async {
+    if (tripId.isEmpty || alertId.isEmpty || TombstoneService.isTombstoned(tripId)) return;
+    try {
+      await _db
+          .collection('trips')
+          .doc(tripId)
+          .collection('proximity_alerts')
+          .doc(alertId)
+          .delete();
+    } catch (e) {
+      if (kDebugMode) debugPrint('[FirestoreSyncService] deleteRemoteAlert error: $e');
+    }
+  }
+
+  /// Clears all proximity alerts for a specific trip in Firestore
+  Future<void> clearRemoteAlertsForTrip(String tripId) async {
+    if (tripId.isEmpty || TombstoneService.isTombstoned(tripId)) return;
+    try {
+      final snap = await _db
+          .collection('trips')
+          .doc(tripId)
+          .collection('proximity_alerts')
+          .get();
+      if (snap.docs.isEmpty) return;
+      final batch = _db.batch();
+      for (final doc in snap.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+    } catch (e) {
+      if (kDebugMode) debugPrint('[FirestoreSyncService] clearRemoteAlertsForTrip error: $e');
+    }
+  }
+
+  /// Clears all remote alerts across active trip listeners
+  Future<void> clearAllRemoteAlerts() async {
+    try {
+      for (final entry in _listeners.entries) {
+        if (entry.key.startsWith('alerts_')) {
+          final tripId = entry.key.replaceFirst('alerts_', '');
+          await clearRemoteAlertsForTrip(tripId);
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[FirestoreSyncService] clearAllRemoteAlerts error: $e');
+    }
+  }
+
   // --------------------------------------------------------------------------
   // Push Writes — Trip (top-level doc)
   // --------------------------------------------------------------------------
@@ -827,9 +886,12 @@ class FirestoreSyncService {
         } catch (_) {}
       }
 
-      // 4. Purge trip_rooms if exists
+      // 4. Purge trip_rooms and rooms if exists
       try {
         await _db.collection('trip_rooms').doc(tripId).delete();
+      } catch (_) {}
+      try {
+        await CloudTripSyncService.deleteRoom(tripId);
       } catch (_) {}
 
       // 5. Finally, permanently delete the trip doc

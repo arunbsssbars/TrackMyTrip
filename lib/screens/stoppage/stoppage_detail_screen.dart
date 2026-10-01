@@ -16,6 +16,7 @@ import '../../providers/expense_provider.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
+import '../../core/services/image_compression_service.dart';
 import '../expenses/add_expense_screen.dart';
 import '../memories/add_memory_dialog.dart';
 
@@ -436,6 +437,8 @@ class StoppageDetailScreen extends ConsumerWidget {
                 color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                 fontWeight: FontWeight.w500,
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -531,6 +534,25 @@ class StoppageDetailScreen extends ConsumerWidget {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
+                              const SizedBox(height: 3),
+                              Row(
+                                children: [
+                                  const Icon(Icons.person_pin_circle_outlined, size: 12, color: AppTheme.primary),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      'Added by ${stoppage.createdByName ?? trip?.getMemberName(stoppage.createdBy) ?? "Traveler"}',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ],
                           ),
                         ),
@@ -551,13 +573,22 @@ class StoppageDetailScreen extends ConsumerWidget {
                                 children: [
                                   Icon(Icons.login_rounded, size: 14, color: AppTheme.primary),
                                   SizedBox(width: 4),
-                                  Text('Arrival Time', style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600)),
+                                  Expanded(
+                                    child: Text(
+                                      'Arrival Time',
+                                      style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
                                 ],
                               ),
                               const SizedBox(height: 2),
                               Text(
                                 DateFormatter.formatDateTime(stoppage.arrivedAt),
                                 style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ],
                           ),
@@ -571,13 +602,22 @@ class StoppageDetailScreen extends ConsumerWidget {
                                   children: [
                                     Icon(Icons.logout_rounded, size: 14, color: AppTheme.secondary),
                                     SizedBox(width: 4),
-                                    Text('Departed & Duration', style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600)),
+                                    Expanded(
+                                      child: Text(
+                                        'Departed & Duration',
+                                        style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
                                   ],
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
                                   '${DateFormatter.formatTimeOnly(stoppage.departedAt!)} • ${DateFormatter.formatDuration(stoppage.duration ?? Duration.zero)}',
                                   style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ],
                             ),
@@ -727,10 +767,15 @@ class StoppageDetailScreen extends ConsumerWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Expenditures (${expenses.length})',
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, letterSpacing: -0.3),
+                  Expanded(
+                    child: Text(
+                      'Expenditures (${expenses.length})',
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, letterSpacing: -0.3),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
+                  const SizedBox(width: 8),
                   Text(
                     CurrencyFormatter.format(totalSpent, currency: trip?.defaultCurrency),
                     style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: AppTheme.primary),
@@ -755,13 +800,14 @@ class StoppageDetailScreen extends ConsumerWidget {
                 ),
               )
             else
-              ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
+              Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: expenses.length,
-                itemBuilder: (context, index) {
-                  final expense = expenses[index];
+                child: Column(
+                  children: [
+                    for (int index = 0; index < expenses.length; index++)
+                      Builder(
+                        builder: (context) {
+                          final expense = expenses[index];
                   final payerName = trip?.getMemberName(expense.paidByMemberId) ?? 'Companion';
                   return Material(
                     color: Colors.transparent,
@@ -943,6 +989,9 @@ class StoppageDetailScreen extends ConsumerWidget {
                   );
                 },
               ),
+                  ],
+                ),
+              ),
 
             // Captured Memories Section
             Padding(
@@ -988,7 +1037,9 @@ class StoppageDetailScreen extends ConsumerWidget {
 
                   Widget imageWidget;
                   if (!kIsWeb && File(memory.mediaPath).existsSync()) {
-                    imageWidget = Image.file(File(memory.mediaPath), fit: BoxFit.cover);
+                    final thumbFile = ImageCompressionService.getThumbnailFile(File(memory.mediaPath));
+                    final displayFile = thumbFile.existsSync() ? thumbFile : File(memory.mediaPath);
+                    imageWidget = Image.file(displayFile, fit: BoxFit.cover);
                   } else {
                     imageWidget = Image.network(
                       memory.mediaPath,

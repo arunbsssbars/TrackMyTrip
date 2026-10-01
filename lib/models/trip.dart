@@ -48,9 +48,9 @@ class Trip {
   bool get isSolo => tripType == 'solo' || members.length <= 1;
   bool get isFamily => tripType == 'family';
   bool get isGroup => tripType == 'group' && !isSolo;
-  bool get hasSettlements => isGroup;
-  bool get isRunning => !isCompleted && !isDeleted && status != 'completed' && status != 'concluded' && status != 'ended';
-  bool get isEnded => isCompleted || status == 'completed' || status == 'concluded' || status == 'ended';
+  bool get isEnded => isCompleted || status == 'completed' || status == 'concluded' || status == 'ended' || status == 'archived_by_creator';
+  bool get isRunning => !isEnded && !isDeleted;
+  bool get isArchivedByCreator => status == 'archived_by_creator';
   bool get isDeleted => status == 'deleted';
 
   TripMember? get currentUserMember {
@@ -71,12 +71,26 @@ class Trip {
     return getMember(memberId)?.name ?? 'Unknown Member';
   }
 
-  bool isCreator(String? userId) {
-    if (userId == null || userId.isEmpty) return false;
-    if (createdByMemberId == userId) return true;
-    final member = getMember(userId);
-    if (member != null && member.id == createdByMemberId) return true;
+  bool isCreator(String? userId, [String? userEmail]) {
+    if ((userId == null || userId.isEmpty) && (userEmail == null || userEmail.isEmpty)) return false;
+    if (userId != null && createdByMemberId == userId) return true;
+    final member = userId != null ? getMember(userId) : null;
+    if (member != null && (member.id == createdByMemberId || member.isCreator)) return true;
+    if (userEmail != null && userEmail.isNotEmpty) {
+      final clean = userEmail.trim().toLowerCase();
+      final creatorMember = members.where((m) => m.id == createdByMemberId || m.isCreator).firstOrNull;
+      if (creatorMember != null && creatorMember.email != null && creatorMember.email!.trim().toLowerCase() == clean) {
+        return true;
+      }
+    }
     return false;
+  }
+
+  /// Determines if a member has the Creator role for this trip
+  bool isMemberCreator(TripMember member) {
+    if (member.isCreator) return true;
+    if (createdByMemberId.isNotEmpty && member.id == createdByMemberId) return true;
+    return isCreator(member.id, member.email);
   }
 
   bool hasMember(String? userId, [String? userEmail]) {
@@ -96,6 +110,41 @@ class Trip {
       return double.parse((total / memberRatings.length).toStringAsFixed(1));
     }
     return rating;
+  }
+
+  /// Deduplicates trip members by both unique ID and case-insensitive email address.
+  /// If a registered companion joins with a verified display name, it replaces placeholder invitations.
+  static List<TripMember> deduplicateMembers(List<TripMember> memberList) {
+    final seenIds = <String>{};
+    final seenEmails = <String>{};
+    final deduped = <TripMember>[];
+    for (final m in memberList) {
+      final cleanEmail = (m.email != null && m.email!.trim().isNotEmpty)
+          ? m.email!.trim().toLowerCase()
+          : null;
+      if (seenIds.contains(m.id)) continue;
+      if (cleanEmail != null && seenEmails.contains(cleanEmail)) {
+        final existingIndex = deduped.indexWhere((existing) =>
+            existing.email != null &&
+            existing.email!.trim().toLowerCase() == cleanEmail);
+        if (existingIndex != -1) {
+          final existing = deduped[existingIndex];
+          // Upgrade placeholder or custom/offline member with verified profile
+          if (existing.id.startsWith('custom_') ||
+              existing.id.startsWith('offline_') ||
+              existing.id.startsWith('mbr_') ||
+              existing.id.startsWith('member_') ||
+              existing.name.toLowerCase().replaceAll('_', '') == cleanEmail.split('@').first) {
+            deduped[existingIndex] = m;
+          }
+        }
+        continue;
+      }
+      seenIds.add(m.id);
+      if (cleanEmail != null) seenEmails.add(cleanEmail);
+      deduped.add(m);
+    }
+    return deduped;
   }
 
   Trip copyWith({
@@ -203,10 +252,10 @@ class Trip {
       budget: (json['budget'] as num?)?.toDouble(),
       shareCode: json['shareCode'] as String?,
       tripType: json['tripType'] as String? ?? 'group',
-      members: (json['members'] as List<dynamic>?)
+      members: deduplicateMembers((json['members'] as List<dynamic>?)
               ?.map((e) => TripMember.fromJson(e as Map<String, dynamic>))
               .toList() ??
-          [],
+          []),
       createdByMemberId: (json['createdByMemberId'] as String?) ??
           (json['creatorId'] as String?) ??
           '',

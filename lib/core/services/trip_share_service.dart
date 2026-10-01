@@ -92,8 +92,10 @@ class TripPackage {
 }
 
 class TripShareService {
-  static const String prefixZ1 = 'TRIPTRACKER_Z1:';
-  static const String prefixV1 = 'TRIPTRACKER_V1:';
+  static const String prefixZ1 = 'TRACKMYTRIP_Z1:';
+  static const String prefixV1 = 'TRACKMYTRIP_V1:';
+  static const String legacyPrefixZ1 = 'TRIPTRACKER_Z1:';
+  static const String legacyPrefixV1 = 'TRIPTRACKER_V1:';
 
   /// Encodes package into a lightweight, high-speed compressed QR payload.
   static String encodePackage(TripPackage package) {
@@ -116,9 +118,13 @@ class TripShareService {
     try {
       String cleanInput = rawInput.trim();
 
-      // Check if GZIP compressed format (Z1)
-      if (cleanInput.contains(prefixZ1)) {
-        final startIndex = cleanInput.indexOf(prefixZ1) + prefixZ1.length;
+      // Check if GZIP compressed format (Z1 or legacy)
+      final activeZ1Prefix = cleanInput.contains(prefixZ1)
+          ? prefixZ1
+          : (cleanInput.contains(legacyPrefixZ1) ? legacyPrefixZ1 : null);
+
+      if (activeZ1Prefix != null) {
+        final startIndex = cleanInput.indexOf(activeZ1Prefix) + activeZ1Prefix.length;
         final remaining = cleanInput.substring(startIndex).trim();
         final codePart = remaining.split(RegExp(r'\s+')).first;
 
@@ -129,9 +135,13 @@ class TripShareService {
         return TripPackage.fromJson(map);
       }
 
-      // Check if legacy uncompressed format (V1)
-      if (cleanInput.contains(prefixV1)) {
-        final startIndex = cleanInput.indexOf(prefixV1) + prefixV1.length;
+      // Check if uncompressed format (V1 or legacy)
+      final activeV1Prefix = cleanInput.contains(prefixV1)
+          ? prefixV1
+          : (cleanInput.contains(legacyPrefixV1) ? legacyPrefixV1 : null);
+
+      if (activeV1Prefix != null) {
+        final startIndex = cleanInput.indexOf(activeV1Prefix) + activeV1Prefix.length;
         final remaining = cleanInput.substring(startIndex).trim();
         final codePart = remaining.split(RegExp(r'\s+')).first;
 

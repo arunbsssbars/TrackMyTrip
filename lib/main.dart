@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/services/local_storage_service.dart';
 import 'core/services/map_tile_cache_service.dart';
@@ -29,6 +30,12 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Lock application strictly to portrait orientation (Point 4)
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
 
   // Production Global Error Telemetry & Crash Logging
   FlutterError.onError = (FlutterErrorDetails details) {

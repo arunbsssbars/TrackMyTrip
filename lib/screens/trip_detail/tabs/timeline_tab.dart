@@ -28,6 +28,7 @@ class TimelineTab extends ConsumerStatefulWidget {
 class _TimelineTabState extends ConsumerState<TimelineTab> {
   final Set<String> _expandedDateKeys = {};
   String? _selectedDateFilterKey;
+  String? _selectedCategory;
   bool _hasInitializedExpandedDates = false;
 
   void _openAddStoppageDialog(BuildContext context, {bool autoDetectGps = true}) async {
@@ -70,7 +71,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                   children: [
                     TileLayer(
                       urlTemplate: AppConstants.getMapTileUrl(isDark: isDark),
-                      userAgentPackageName: 'com.triptracker.trip_tracker_app',
+                      userAgentPackageName: 'com.trackmytrip.app',
                     ),
                     MarkerLayer(
                       markers: [
@@ -333,6 +334,89 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     );
   }
 
+  Widget _buildCategoryFilterChip({
+    required String label,
+    IconData? icon,
+    int? count,
+    required bool isSelected,
+    required VoidCallback onTap,
+    required bool isDark,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        borderRadius: BorderRadius.circular(10),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? AppTheme.primary
+                : (isDark ? AppTheme.surfaceDark : Colors.white),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isSelected
+                  ? AppTheme.primary
+                  : (isDark ? AppTheme.borderDark : AppTheme.borderLight),
+              width: isSelected ? 1.4 : 1.0,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (icon != null) ...[
+                Icon(
+                  icon,
+                  size: 13,
+                  color: isSelected
+                      ? Colors.white
+                      : (isDark ? Colors.grey[300] : AppTheme.primary),
+                ),
+                const SizedBox(width: 5),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: isSelected
+                      ? Colors.white
+                      : (isDark ? Colors.white : AppTheme.textMainLight),
+                ),
+              ),
+              if (count != null) ...[
+                const SizedBox(width: 5),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? Colors.white.withAlpha(50)
+                        : (isDark ? Colors.grey[800] : const Color(0xFFE2E8F0)),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    '$count',
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w700,
+                      color: isSelected
+                          ? Colors.white
+                          : (isDark ? Colors.grey[300] : AppTheme.textMutedLight),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final stoppages = ref.watch(currentTripStoppagesProvider);
@@ -340,9 +424,37 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     final memories = ref.watch(currentTripMemoriesProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // Group stoppages date-wise
-    final Map<String, List<Stoppage>> groupedStoppages = {};
+    final availableCategories = stoppages.map((s) => s.category).toSet().toList()..sort();
+    final effectiveStoppages = _selectedCategory == null
+        ? stoppages
+        : stoppages.where((s) => s.category.toLowerCase() == _selectedCategory!.toLowerCase()).toList();
+
+    int totalStoppedMinutes = 0;
     for (final stop in stoppages) {
+      if (stop.duration != null) {
+        totalStoppedMinutes += stop.duration!.inMinutes;
+      }
+    }
+    final totalSpentOnStoppages = expenses
+        .where((e) => e.stoppageId != null && e.stoppageId!.isNotEmpty)
+        .fold<double>(0.0, (sum, e) => sum + e.totalAmount);
+
+    String formattedTotalDuration = '';
+    if (totalStoppedMinutes > 0) {
+      final h = totalStoppedMinutes ~/ 60;
+      final m = totalStoppedMinutes % 60;
+      if (h > 0 && m > 0) {
+        formattedTotalDuration = '${h}h ${m}m paused';
+      } else if (h > 0) {
+        formattedTotalDuration = '${h}h paused';
+      } else {
+        formattedTotalDuration = '${m}m paused';
+      }
+    }
+
+    // Group effective stoppages date-wise
+    final Map<String, List<Stoppage>> groupedStoppages = {};
+    for (final stop in effectiveStoppages) {
       final key = _getDateKey(stop.arrivedAt);
       groupedStoppages.putIfAbsent(key, () => []).add(stop);
     }
@@ -386,85 +498,251 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                 ),
               ],
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withAlpha(25),
-                        borderRadius: BorderRadius.circular(8),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primary.withAlpha(25),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.timeline_rounded, size: 18, color: AppTheme.primary),
+                          ),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              'Journey Timeline & Stops',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, letterSpacing: -0.2),
+                            ),
+                          ),
+                        ],
                       ),
-                      child: const Icon(Icons.timeline_rounded, size: 18, color: AppTheme.primary),
                     ),
                     const SizedBox(width: 8),
-                    const Text(
-                      'Journey Timeline & Stops',
-                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, letterSpacing: -0.2),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withAlpha(20),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        _selectedCategory == null
+                            ? '${stoppages.length} Stoppages'
+                            : '${effectiveStoppages.length}/${stoppages.length} Filtered',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                      ),
                     ),
                   ],
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withAlpha(20),
-                    borderRadius: BorderRadius.circular(10),
+                if (stoppages.isNotEmpty && (formattedTotalDuration.isNotEmpty || totalSpentOnStoppages > 0.01)) ...[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      if (formattedTotalDuration.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: isDark ? Colors.white.withAlpha(12) : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.timer_outlined, size: 12, color: AppTheme.secondary),
+                              const SizedBox(width: 4),
+                              Text(
+                                formattedTotalDuration,
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark ? Colors.grey[300] : AppTheme.textMainLight,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (totalSpentOnStoppages > 0.01)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: isDark ? Colors.white.withAlpha(12) : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.receipt_long_rounded, size: 12, color: Color(0xFF10B981)),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${CurrencyFormatter.format(totalSpentOnStoppages, currency: widget.trip.defaultCurrency)} spent',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark ? Colors.grey[300] : AppTheme.textMainLight,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
                   ),
-                  child: Text(
-                    '${stoppages.length} Stoppages',
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primary),
-                  ),
-                ),
+                ],
               ],
             ),
           ),
-        const SizedBox(height: 14),
+          const SizedBox(height: 12),
 
-        // Sticky Horizontal Day Navigation Bar
-        if (sortedDateKeys.length > 1) ...[
-          SizedBox(
-            height: 38,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                _buildDayFilterPill(
-                  label: 'All Days',
-                  subLabel: '${stoppages.length}',
-                  isSelected: _selectedDateFilterKey == null,
-                  onTap: () => _selectDayFilter(null),
-                  isDark: isDark,
-                ),
-                const SizedBox(width: 8),
-                ...sortedDateKeys.asMap().entries.map((entry) {
-                  final idx = entry.key;
-                  final dateKey = entry.value;
-                  final count = groupedStoppages[dateKey]?.length ?? 0;
-                  final firstStopDate = groupedStoppages[dateKey]!.first.arrivedAt;
-                  final dayTitle = 'Day ${sortedDateKeys.length - idx}';
-                  final dateSubtitle = DateFormatter.formatShortDate(firstStopDate);
-                  final isSelected = _selectedDateFilterKey == dateKey;
-                  final isToday = dateKey == todayKey;
+          // Horizontal Category Quick Filter Bar
+          if (stoppages.isNotEmpty && availableCategories.length > 1) ...[
+            SizedBox(
+              height: 32,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  _buildCategoryFilterChip(
+                    label: 'All Stops',
+                    icon: Icons.grid_view_rounded,
+                    count: stoppages.length,
+                    isSelected: _selectedCategory == null,
+                    onTap: () => setState(() => _selectedCategory = null),
+                    isDark: isDark,
+                  ),
+                  const SizedBox(width: 6),
+                  ...availableCategories.map((cat) {
+                    final catCount = stoppages.where((s) => s.category.toLowerCase() == cat.toLowerCase()).length;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: _buildCategoryFilterChip(
+                        label: cat,
+                        icon: AppConstants.getStoppageIcon(cat),
+                        count: catCount,
+                        isSelected: _selectedCategory == cat,
+                        onTap: () => setState(() => _selectedCategory = (_selectedCategory == cat ? null : cat)),
+                        isDark: isDark,
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
 
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: _buildDayFilterPill(
-                      label: isToday ? 'Today' : dayTitle,
-                      subLabel: dateSubtitle,
-                      count: count,
-                      isSelected: isSelected,
-                      isToday: isToday,
-                      onTap: () => _selectDayFilter(dateKey),
-                      isDark: isDark,
+          // Active Category Filter Indicator
+          if (_selectedCategory != null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withAlpha(isDark ? 25 : 15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.primary.withAlpha(isDark ? 60 : 40)),
+              ),
+              child: Row(
+                children: [
+                  Icon(AppConstants.getStoppageIcon(_selectedCategory!), size: 14, color: AppTheme.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Filtered: $_selectedCategory (${effectiveStoppages.length} stops)',
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  );
-                }),
-              ],
+                  ),
+                  const SizedBox(width: 8),
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => setState(() => _selectedCategory = null),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Clear',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.white70 : AppTheme.primary,
+                              ),
+                            ),
+                            const SizedBox(width: 3),
+                            Icon(
+                              Icons.close_rounded,
+                              size: 13,
+                              color: isDark ? Colors.white70 : AppTheme.primary,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 14),
-        ],
+            const SizedBox(height: 12),
+          ],
+
+          // Sticky Horizontal Day Navigation Bar
+          if (sortedDateKeys.length > 1) ...[
+            SizedBox(
+              height: 38,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  _buildDayFilterPill(
+                    label: 'All Days',
+                    subLabel: '${effectiveStoppages.length}',
+                    isSelected: _selectedDateFilterKey == null,
+                    onTap: () => _selectDayFilter(null),
+                    isDark: isDark,
+                  ),
+                  const SizedBox(width: 8),
+                  ...sortedDateKeys.asMap().entries.map((entry) {
+                    final idx = entry.key;
+                    final dateKey = entry.value;
+                    final count = groupedStoppages[dateKey]?.length ?? 0;
+                    final firstStopDate = groupedStoppages[dateKey]!.first.arrivedAt;
+                    final dayTitle = 'Day ${sortedDateKeys.length - idx}';
+                    final dateSubtitle = DateFormatter.formatShortDate(firstStopDate);
+                    final isSelected = _selectedDateFilterKey == dateKey;
+                    final isToday = dateKey == todayKey;
+
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: _buildDayFilterPill(
+                        label: isToday ? 'Today' : dayTitle,
+                        subLabel: dateSubtitle,
+                        count: count,
+                        isSelected: isSelected,
+                        isToday: isToday,
+                        onTap: () => _selectDayFilter(dateKey),
+                        isDark: isDark,
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
 
         if (stoppages.isEmpty)
           Padding(
@@ -480,6 +758,38 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                   'Tag viewpoints, cafes, stays, and gas stations along your route to organize your itinerary and bills.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.grey, fontSize: 13),
+                ),
+              ],
+            ),
+          )
+        else if (effectiveStoppages.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 16),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  AppConstants.getStoppageIcon(_selectedCategory ?? 'Other'),
+                  size: 48,
+                  color: Colors.grey[400],
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'No "$_selectedCategory" Stoppages Found',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Try selecting a different category or clear the active filter to view all itinerary stops.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey, fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                FilledButton.tonalIcon(
+                  onPressed: () => setState(() => _selectedCategory = null),
+                  icon: const Icon(Icons.clear_all_rounded, size: 16),
+                  label: const Text('Show All Stoppages'),
                 ),
               ],
             ),
@@ -551,16 +861,16 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                                   ),
                                 ),
                                 if (isToday) ...[
-                                  const SizedBox(width: 5),
+                                  const SizedBox(width: 4),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                     decoration: BoxDecoration(
                                       color: Colors.green.withAlpha(25),
-                                      borderRadius: BorderRadius.circular(8),
+                                      borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: const Text(
-                                      'Active Day',
-                                      style: TextStyle(color: Colors.green, fontSize: 9, fontWeight: FontWeight.bold),
+                                      'Now',
+                                      style: TextStyle(color: Colors.green, fontSize: 8.5, fontWeight: FontWeight.bold),
                                     ),
                                   ),
                                 ],
@@ -739,63 +1049,105 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                                               const SizedBox(height: 3),
 
                                               // Category + Time
-                                              Row(
-                                                children: [
-                                                  Text(
-                                                    stop.category,
-                                                    style: const TextStyle(fontSize: 10.5, color: AppTheme.secondary, fontWeight: FontWeight.bold),
-                                                  ),
-                                                  const Text(' • ', style: TextStyle(color: Colors.grey)),
-                                                  Text(
-                                                    DateFormatter.formatDateTime(stop.arrivedAt),
-                                                    style: TextStyle(fontSize: 10.5, color: isDark ? Colors.grey[400] : Colors.grey[600], fontWeight: FontWeight.w500),
-                                                  ),
-                                                ],
+                                              Text.rich(
+                                                TextSpan(
+                                                  children: [
+                                                    TextSpan(
+                                                      text: stop.category,
+                                                      style: const TextStyle(fontSize: 10.5, color: AppTheme.secondary, fontWeight: FontWeight.bold),
+                                                    ),
+                                                    const TextSpan(text: ' • ', style: TextStyle(color: Colors.grey)),
+                                                    TextSpan(
+                                                      text: DateFormatter.formatDateTime(stop.arrivedAt),
+                                                      style: TextStyle(fontSize: 10.5, color: isDark ? Colors.grey[400] : Colors.grey[600], fontWeight: FontWeight.w500),
+                                                    ),
+                                                  ],
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
                                               ),
 
-                                              // Location Chip
+                                              // Creator & Location Chips
                                               const SizedBox(height: 5),
-                                              Material(
-                                                color: Colors.transparent,
-                                                child: Ink(
-                                                  decoration: BoxDecoration(
-                                                    color: isDark ? Colors.black26 : const Color(0xFFF1F5F9),
-                                                    borderRadius: BorderRadius.circular(8),
-                                                    border: Border.all(color: isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1), width: 0.9),
-                                                  ),
-                                                  child: InkWell(
-                                                    onTap: () => _viewStoppageOnMap(context, stop),
-                                                    borderRadius: BorderRadius.circular(8),
-                                                    splashColor: AppTheme.primary.withAlpha(30),
-                                                    child: Padding(
-                                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+                                              Wrap(
+                                                spacing: 6,
+                                                runSpacing: 4,
+                                                crossAxisAlignment: WrapCrossAlignment.center,
+                                                children: [
+                                                  if (stop.createdByName != null && stop.createdByName!.isNotEmpty)
+                                                    Container(
+                                                      constraints: const BoxConstraints(maxWidth: 160),
+                                                      padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 3),
+                                                      decoration: BoxDecoration(
+                                                        color: AppTheme.primary.withAlpha(isDark ? 30 : 15),
+                                                        borderRadius: BorderRadius.circular(6),
+                                                        border: Border.all(color: AppTheme.primary.withAlpha(isDark ? 60 : 35), width: 0.8),
+                                                      ),
                                                       child: Row(
                                                         mainAxisSize: MainAxisSize.min,
                                                         children: [
-                                                          const Icon(Icons.location_on_outlined, size: 11, color: AppTheme.primary),
-                                                          const SizedBox(width: 4),
+                                                          const Icon(Icons.person_pin_circle_outlined, size: 10.5, color: AppTheme.primary),
+                                                          const SizedBox(width: 3.5),
                                                           Flexible(
                                                             child: Text(
-                                                              stop.address != null && stop.address!.isNotEmpty
-                                                                  ? stop.address!
-                                                                  : '${stop.latitude.toStringAsFixed(4)}, ${stop.longitude.toStringAsFixed(4)}',
-                                                              style: TextStyle(
+                                                              'Added by ${stop.createdByName}',
+                                                              style: const TextStyle(
                                                                 fontSize: 9.5,
-                                                                color: isDark ? Colors.grey[300] : Colors.grey[700],
+                                                                fontWeight: FontWeight.w700,
+                                                                color: AppTheme.primary,
                                                               ),
                                                               maxLines: 1,
                                                               overflow: TextOverflow.ellipsis,
                                                             ),
                                                           ),
-                                                          const SizedBox(width: 4),
-                                                          const Icon(Icons.map_rounded, size: 11, color: AppTheme.secondary),
                                                         ],
                                                       ),
                                                     ),
+                                                  ConstrainedBox(
+                                                    constraints: const BoxConstraints(maxWidth: 160),
+                                                    child: Material(
+                                                      color: Colors.transparent,
+                                                      child: Ink(
+                                                        decoration: BoxDecoration(
+                                                          color: isDark ? Colors.black26 : const Color(0xFFF1F5F9),
+                                                          borderRadius: BorderRadius.circular(8),
+                                                          border: Border.all(color: isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1), width: 0.9),
+                                                        ),
+                                                        child: InkWell(
+                                                          onTap: () => _viewStoppageOnMap(context, stop),
+                                                          borderRadius: BorderRadius.circular(8),
+                                                          splashColor: AppTheme.primary.withAlpha(30),
+                                                          child: Padding(
+                                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+                                                            child: Row(
+                                                              mainAxisSize: MainAxisSize.min,
+                                                              children: [
+                                                                const Icon(Icons.location_on_outlined, size: 11, color: AppTheme.primary),
+                                                                const SizedBox(width: 4),
+                                                                Flexible(
+                                                                  child: Text(
+                                                                    stop.address != null && stop.address!.isNotEmpty
+                                                                        ? stop.address!
+                                                                        : '${stop.latitude.toStringAsFixed(4)}, ${stop.longitude.toStringAsFixed(4)}',
+                                                                    style: TextStyle(
+                                                                      fontSize: 9.5,
+                                                                      color: isDark ? Colors.grey[300] : Colors.grey[700],
+                                                                    ),
+                                                                    maxLines: 1,
+                                                                    overflow: TextOverflow.ellipsis,
+                                                                  ),
+                                                                ),
+                                                                const SizedBox(width: 4),
+                                                                const Icon(Icons.map_rounded, size: 11, color: AppTheme.secondary),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
                                                   ),
-                                                ),
+                                                ],
                                               ),
-
                                               if (stop.notes != null && stop.notes!.isNotEmpty) ...[
                                                 const SizedBox(height: 5),
                                                 Text(
@@ -813,7 +1165,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                                               // Badges for expenditure and memories
                                               if (stopExpenses.isNotEmpty || stopMemories.isNotEmpty) ...[
                                                 const SizedBox(height: 7),
-                                                Row(
+                                                Wrap(spacing: 6, runSpacing: 4,
                                                   children: [
                                                     if (stopExpenses.isNotEmpty)
                                                       Material(
@@ -925,12 +1277,16 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                                         children: [
                                           const Icon(Icons.add_location_alt_rounded, size: 15, color: AppTheme.primary),
                                           const SizedBox(width: 8),
-                                          Text(
-                                            'Add Stoppage to this Day',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w700,
-                                              color: isDark ? Colors.white70 : AppTheme.primary,
+                                          Expanded(
+                                            child: Text(
+                                              'Add Stoppage to this Day',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700,
+                                                color: isDark ? Colors.white70 : AppTheme.primary,
+                                              ),
                                             ),
                                           ),
                                         ],

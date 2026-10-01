@@ -106,31 +106,40 @@ class CurrentTripHeroCard extends StatelessWidget {
 
               // Title (Tappable)
               Expanded(
+                flex: 3,
                 child: InkWell(
                   onTap: onTapCard ?? onTapLedger,
                   borderRadius: BorderRadius.circular(8),
-                  child: Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          trip.title,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.3,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final showChevron = constraints.maxWidth >= 36;
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              trip.title,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.3,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Icon(
-                        Icons.chevron_right_rounded,
-                        size: 16,
-                        color: Colors.white.withAlpha(180),
-                      ),
-                    ],
+                          if (showChevron) ...[
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.chevron_right_rounded,
+                              size: 16,
+                              color: Colors.white.withAlpha(180),
+                            ),
+                          ],
+                        ],
+                      );
+                    },
                   ),
                 ),
               ),
@@ -329,20 +338,22 @@ class CurrentTripHeroCard extends StatelessWidget {
                                 : const Color(0xFF34D399),
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        isEnded
-                            ? 'Trip Concluded'
-                            : isTracking
-                                ? 'Pause Live GPS Telemetry'
-                                : 'Start Live Convoy Telemetry',
-                        style: TextStyle(
-                          color: isEnded ? Colors.white70 : Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.1,
+                      Flexible(
+                        child: Text(
+                          isEnded
+                              ? 'Trip Concluded'
+                              : isTracking
+                                  ? 'Pause Live GPS Telemetry'
+                                  : 'Start Live Convoy Telemetry',
+                          style: TextStyle(
+                            color: isEnded ? Colors.white70 : Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.1,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
@@ -362,44 +373,57 @@ class CurrentTripHeroCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               // Total Spent (Tappable to open analytics)
-              InkWell(
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  onTapLedger();
-                },
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.account_balance_wallet_outlined,
-                        size: 14,
-                        color: Colors.white70,
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        'Total Spent: ',
-                        style: TextStyle(
-                          color: Colors.white.withAlpha(190),
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
+              Expanded(
+                child: InkWell(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    onTapLedger();
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.account_balance_wallet_outlined,
+                          size: 14,
+                          color: Colors.white70,
                         ),
-                      ),
-                      Text(
-                        CurrencyFormatter.format(totalSpent,
-                            currency: trip.defaultCurrency),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.2,
+                        const SizedBox(width: 5),
+                        Flexible(
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(
+                                  text: 'Total Spent: ',
+                                  style: TextStyle(
+                                    color: Colors.white.withAlpha(190),
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                TextSpan(
+                                  text: CurrencyFormatter.format(totalSpent,
+                                      currency: trip.defaultCurrency),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: -0.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
+              const SizedBox(width: 6),
 
               // Bills Count Pill
               InkWell(
@@ -501,19 +525,15 @@ class CurrentTripHeroCard extends StatelessWidget {
           children: [
             const Icon(Icons.copy_rounded, size: 10, color: Colors.white),
             const SizedBox(width: 3.5),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 100),
-              child: Text(
-                trip.shareCode!,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.6,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+            Text(
+              trip.shareCode!,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 9.5,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.6,
               ),
+              maxLines: 1,
             ),
           ],
         ),

@@ -34,6 +34,7 @@ class LocalStorageService {
   List<SyncMutation> _cachedMutations = [];
   List<ProximityAlert> _cachedAlerts = [];
   Set<String> _readAlertIds = {};
+  Set<String> _dismissedAlertIds = {};
   List<TripInvitation> _cachedInvitations = [];
   List<Map<String, dynamic>> _cachedRegisteredUsers = [];
   AuthUser? _cachedAuthUser;
@@ -113,6 +114,7 @@ class LocalStorageService {
     _cachedAuditLogs = [];
     _cachedMutations = [];
     _cachedAlerts = [];
+    _dismissedAlertIds.clear();
     _cachedInvitations = [];
     _cachedAuthUser = null;
   }
@@ -129,7 +131,10 @@ class LocalStorageService {
     _cachedAlerts = await _db.getAllAlerts();
     final readList = _prefs.getStringList('read_alert_ids_${_currentUserId ?? "anon"}') ?? [];
     _readAlertIds = readList.toSet();
-    _cachedAlerts = _cachedAlerts.map((a) {
+    final dismissedList = _prefs.getStringList('dismissed_alert_ids_${_currentUserId ?? "anon"}') ?? [];
+    final dbDismissed = await _db.getDismissedAlertIds();
+    _dismissedAlertIds = {...dismissedList, ...dbDismissed};
+    _cachedAlerts = _cachedAlerts.where((a) => !_dismissedAlertIds.contains(a.id)).map((a) {
       if (_readAlertIds.contains(a.id)) {
         return a.copyWith(isRead: true);
       }
@@ -507,7 +512,16 @@ class LocalStorageService {
 
   Future<void> enqueueMutation(SyncMutation mutation) async {
     final list = List<SyncMutation>.from(_cachedMutations);
-    list.add(mutation);
+    final existingIdx = list.indexWhere((m) =>
+        m.id == mutation.id ||
+        ((m.status == SyncStatus.pending || m.status == SyncStatus.failed) &&
+            m.entityType == mutation.entityType &&
+            m.entityId == mutation.entityId));
+    if (existingIdx != -1) {
+      list[existingIdx] = mutation;
+    } else {
+      list.add(mutation);
+    }
     _cachedMutations = list;
     await saveAllMutations(list);
   }
@@ -574,16 +588,55 @@ class LocalStorageService {
     await saveAllAlerts(_cachedAlerts);
   }
 
-  Future<void> deleteAlert(String alertId) async {
+  bool isAlertDismissed(String alertId) => _dismissedAlertIds.contains(alertId);
+
+  DateTime? getAlertsClearedAt() {
+    final ms = _prefs.getInt('alerts_cleared_at_${_currentUserId ?? "anon"}');
+    if (ms == null) return null;
+    return DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
+  Future<void> recordAlertDismissed(String alertId, {String? tripId}) async {
+    _dismissedAlertIds.add(alertId);
+    await _db.recordAlertDismissed(alertId, tripId: tripId);
+    await _prefs.setStringList('dismissed_alert_ids_${_currentUserId ?? "anon"}', _dismissedAlertIds.toList());
+  }
+
+  Future<void> deleteAlert(String alertId, {String? tripId}) async {
     final list = List<ProximityAlert>.from(_cachedAlerts);
+    final target = list.where((a) => a.id == alertId).firstOrNull;
     list.removeWhere((a) => a.id == alertId);
     _cachedAlerts = list;
+    await recordAlertDismissed(alertId, tripId: tripId ?? target?.tripId);
     await _db.deleteAlert(alertId);
   }
 
   Future<void> clearAllAlerts() async {
+    for (final a in _cachedAlerts) {
+      _dismissedAlertIds.add(a.id);
+    }
+    await _prefs.setStringList('dismissed_alert_ids_${_currentUserId ?? "anon"}', _dismissedAlertIds.toList());
+    await _prefs.setInt('alerts_cleared_at_${_currentUserId ?? "anon"}', DateTime.now().millisecondsSinceEpoch);
     _cachedAlerts = [];
     await _db.clearAllAlerts();
+  }
+
+  DateTime? getTripAlertsClearedAt(String tripId) {
+    final ms = _prefs.getInt('trip_alerts_cleared_at_${tripId}_${_currentUserId ?? "anon"}');
+    if (ms == null) return null;
+    return DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
+  Future<void> clearAlertsForTrip(String tripId) async {
+    final toDismiss = _cachedAlerts.where((a) => a.tripId == tripId).toList();
+    for (final a in toDismiss) {
+      _dismissedAlertIds.add(a.id);
+      await _db.recordAlertDismissed(a.id, tripId: tripId);
+    }
+    await _prefs.setStringList('dismissed_alert_ids_${_currentUserId ?? "anon"}', _dismissedAlertIds.toList());
+    await _prefs.setInt('trip_alerts_cleared_at_${tripId}_${_currentUserId ?? "anon"}', DateTime.now().millisecondsSinceEpoch);
+    _cachedAlerts = _cachedAlerts.where((a) => a.tripId != tripId).toList();
+    await _db.deleteAlertsByTripId(tripId);
   }
 
   // --- IN-APP BANNER PREFERENCES ---
@@ -623,7 +676,19 @@ class LocalStorageService {
     list.removeWhere((u) => u['email'] == userRecord['email'] || u['username'] == userRecord['username']);
     list.add(userRecord);
     _cachedRegisteredUsers = list;
-      await _db.saveRegisteredUser(userRecord);
+    await _db.saveRegisteredUser(userRecord);
+  }
+
+  Future<void> deleteRegisteredUser(String idOrEmail) async {
+    final clean = idOrEmail.toLowerCase().trim();
+    final list = List<Map<String, dynamic>>.from(_cachedRegisteredUsers);
+    list.removeWhere((u) =>
+      (u['id'] != null && u['id'].toString().toLowerCase() == clean) ||
+      (u['email'] != null && u['email'].toString().toLowerCase() == clean) ||
+      (u['username'] != null && u['username'].toString().toLowerCase() == clean)
+    );
+    _cachedRegisteredUsers = list;
+    await _db.deleteRegisteredUser(clean);
   }
 
   Future<bool> updateRegisteredUserPassword(String email, String newPassword) async {

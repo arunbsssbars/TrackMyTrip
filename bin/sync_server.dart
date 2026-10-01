@@ -60,7 +60,7 @@ final List<Map<String, dynamic>> _mockUsers = [
 void main() async {
   const port = 8086;
   final server = await HttpServer.bind(InternetAddress.anyIPv4, port);
-  stdout.writeln('TripTracker AWS-Mock Sync Server running on port $port');
+  stdout.writeln('TrackMyTrip AWS-Mock Sync Server running on port $port');
 
   await for (HttpRequest request in server) {
     _handleRequest(request);
@@ -172,7 +172,7 @@ void _handleRequest(HttpRequest request) async {
     response.headers.contentType = ContentType.json;
     response.write(jsonEncode({
       'status': 'ok',
-      'service': 'TripTracker AWS Mock Sync Server',
+      'service': 'TrackMyTrip AWS Mock Sync Server',
       'active_rooms': _rooms.length,
       'active_ws_trips': _tripWebSockets.length,
     }));

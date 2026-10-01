@@ -156,13 +156,10 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
       );
     }
 
-    // Category aggregation
+    // Category aggregation using robust normalizer (Point 21 fix)
     final Map<String, double> categoryTotals = {};
     for (final exp in expenses) {
-      final cat = exp.category.toString().split('.').last;
-      final label = AppConstants.expenseCategories.contains(cat)
-          ? '${cat[0].toUpperCase()}${cat.substring(1)}'
-          : 'General';
+      final label = AppConstants.normalizeExpenseCategory(exp.category);
       categoryTotals[label] = (categoryTotals[label] ?? 0.0) + exp.totalAmount;
     }
     final sortedCategories = categoryTotals.entries.toList()
@@ -302,10 +299,7 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
                 ...sortedCategories.map((entry) {
                   final color = AppConstants.getExpenseCategoryColor(entry.key);
                   final count = expenses.where((e) {
-                    final cat = e.category.toString().split('.').last;
-                    final label = AppConstants.expenseCategories.contains(cat)
-                        ? '${cat[0].toUpperCase()}${cat.substring(1)}'
-                        : 'General';
+                    final label = AppConstants.normalizeExpenseCategory(e.category);
                     return label == entry.key;
                   }).length;
                   final percentage = totalSpent > 0 ? (entry.value / totalSpent) * 100 : 0.0;
@@ -326,20 +320,29 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
                         Icon(AppConstants.getExpenseIcon(entry.key), size: 14, color: color),
                         const SizedBox(width: 6),
                         Expanded(
-                          child: Text(
-                            entry.key,
-                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: color),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                entry.key,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: color),
+                              ),
+                              Text(
+                                '$count bill${count == 1 ? "" : "s"} • ${percentage.toStringAsFixed(1)}%',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        Text(
-                          '$count bill${count == 1 ? "" : "s"} • ${percentage.toStringAsFixed(1)}%',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
+                        const SizedBox(width: 8),
                         Text(
                           CurrencyFormatter.format(entry.value, currency: 'INR'),
                           style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
@@ -542,7 +545,10 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
                               overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 2),
-                            Row(
+                            Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              spacing: 6,
+                              runSpacing: 2,
                               children: [
                                 Text(
                                   'Paid by: ${trip.getMemberName(expense.paidByMemberId)}',
@@ -551,9 +557,10 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
                                     color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                                     fontWeight: FontWeight.w500,
                                   ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                if (expense.receiptImagePath != null && expense.receiptImagePath!.isNotEmpty) ...[
-                                  const SizedBox(width: 6),
+                                if (expense.receiptImagePath != null && expense.receiptImagePath!.isNotEmpty)
                                   InkWell(
                                     onTap: () => _showReceiptViewer(context, expense),
                                     child: Container(
@@ -576,7 +583,6 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
                                       ),
                                     ),
                                   ),
-                                ],
                               ],
                             ),
                           ],
@@ -668,12 +674,10 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
       );
     }
 
+    // Category aggregation using robust normalizer (Point 21 fix)
     final Map<String, double> categoryTotals = {};
     for (final exp in expenses) {
-      final cat = exp.category.toString().split('.').last;
-      final label = AppConstants.expenseCategories.contains(cat)
-          ? '${cat[0].toUpperCase()}${cat.substring(1)}'
-          : 'General';
+      final label = AppConstants.normalizeExpenseCategory(exp.category);
       categoryTotals[label] = (categoryTotals[label] ?? 0.0) + exp.totalAmount;
     }
     final sortedCategories = categoryTotals.entries.toList()
@@ -722,17 +726,19 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _buildMiniStat('Stoppages', '${stoppages.length}', Colors.white),
+                  Expanded(child: _buildMiniStat('Stoppages', '${stoppages.length}', Colors.white)),
                   Container(width: 1, height: 26, color: Colors.white24),
-                  _buildMiniStat('Bills Logged', '${expenses.length}', Colors.white),
+                  Expanded(child: _buildMiniStat('Bills Logged', '${expenses.length}', Colors.white)),
                   Container(width: 1, height: 26, color: Colors.white24),
-                  _buildMiniStat(
-                    'Avg / Person',
-                    CurrencyFormatter.format(
-                      trip.members.isNotEmpty ? totalSpent / trip.members.length : totalSpent,
-                      currency: trip.defaultCurrency,
+                  Expanded(
+                    child: _buildMiniStat(
+                      'Avg / Person',
+                      CurrencyFormatter.format(
+                        trip.members.isNotEmpty ? totalSpent / trip.members.length : totalSpent,
+                        currency: trip.defaultCurrency,
+                      ),
+                      Colors.white,
                     ),
-                    Colors.white,
                   ),
                 ],
               ),
@@ -753,9 +759,13 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
                   children: [
                     Icon(Icons.pie_chart_rounded, size: 18, color: AppTheme.primary),
                     SizedBox(width: 8),
-                    Text(
-                      'Spending by Category',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    Expanded(
+                      child: Text(
+                        'Spending by Category',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ],
                 ),
@@ -812,10 +822,7 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
                 ...sortedCategories.map((entry) {
                   final color = AppConstants.getExpenseCategoryColor(entry.key);
                   final count = expenses.where((e) {
-                    final cat = e.category.toString().split('.').last;
-                    final label = AppConstants.expenseCategories.contains(cat)
-                        ? '${cat[0].toUpperCase()}${cat.substring(1)}'
-                        : 'General';
+                    final label = AppConstants.normalizeExpenseCategory(e.category);
                     return label == entry.key;
                   }).length;
                   final percentage = totalSpent > 0 ? (entry.value / totalSpent) * 100 : 0.0;
@@ -836,23 +843,160 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
                         Icon(AppConstants.getExpenseIcon(entry.key), size: 14, color: color),
                         const SizedBox(width: 6),
                         Expanded(
-                          child: Text(
-                            entry.key,
-                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: color),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                entry.key,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: color),
+                              ),
+                              Text(
+                                '$count bill${count == 1 ? "" : "s"} • ${percentage.toStringAsFixed(1)}%',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        Text(
-                          '$count bill${count == 1 ? "" : "s"} • ${percentage.toStringAsFixed(1)}%',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
+                        const SizedBox(width: 8),
                         Text(
                           CurrencyFormatter.format(entry.value, currency: trip.defaultCurrency),
                           style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Point 23: User-Wise / Member-Wise Spendings Breakdown Card
+        Card(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.people_alt_rounded, size: 18, color: AppTheme.primary),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Member-Wise Spending Breakdown',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                ...(trip.members.map((member) {
+                  final memberPaid = expenses
+                      .where((e) => e.paidByMemberId == member.id)
+                      .fold<double>(0.0, (acc, e) => acc + e.totalAmount);
+                  return (member: member, paid: memberPaid);
+                }).toList()..sort((a, b) => a.paid.compareTo(b.paid))).map((item) {
+                  final member = item.member;
+                  final memberPaid = item.paid;
+                  final pct = totalSpent > 0 ? (memberPaid / totalSpent) : 0.0;
+                  final isCurrentUser = member.id == trip.currentUserMember?.id;
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 14,
+                              backgroundColor: AppTheme.primary.withAlpha(isDark ? 50 : 30),
+                              child: Text(
+                                member.name.isNotEmpty ? member.name[0].toUpperCase() : '?',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppTheme.primary,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      member.name,
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  if (isCurrentUser) ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.primary.withAlpha(isDark ? 40 : 25),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: const Text(
+                                        'YOU',
+                                        style: TextStyle(
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.w900,
+                                          color: AppTheme.primary,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            Text(
+                              CurrencyFormatter.format(memberPaid, currency: trip.defaultCurrency),
+                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: LinearProgressIndicator(
+                                  value: pct.clamp(0.0, 1.0),
+                                  minHeight: 6,
+                                  backgroundColor: isDark ? Colors.grey[800] : const Color(0xFFE2E8F0),
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    pct > 0.5 ? AppTheme.primary : AppTheme.secondary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              '${(pct * 100).toStringAsFixed(1)}%',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -922,7 +1066,10 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 3),
-                    Row(
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 6,
+                      runSpacing: 2,
                       children: [
                         Text(
                           'Paid by ${trip.getMemberName(expense.paidByMemberId)}',
@@ -931,9 +1078,10 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
                             color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                             fontWeight: FontWeight.w500,
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        if (expense.receiptImagePath != null && expense.receiptImagePath!.isNotEmpty) ...[
-                          const SizedBox(width: 6),
+                        if (expense.receiptImagePath != null && expense.receiptImagePath!.isNotEmpty)
                           InkWell(
                             onTap: () => _showReceiptViewer(context, expense),
                             child: Container(
@@ -956,7 +1104,6 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
                               ),
                             ),
                           ),
-                        ],
                       ],
                     ),
                   ],
@@ -1030,25 +1177,28 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
     required String subtitle,
   }) {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 56, color: Colors.grey),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 13, color: Colors.grey),
-            ),
-          ],
+      child: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 48, color: Colors.grey),
+              const SizedBox(height: 14),
+              Text(
+                title,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1057,9 +1207,19 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
   Widget _buildMiniStat(String label, String value, Color color) {
     return Column(
       children: [
-        Text(value, style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.bold)),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: color, fontSize: 15, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 2),
-        Text(label, style: TextStyle(color: color.withAlpha(180), fontSize: 10)),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: color.withAlpha(180), fontSize: 10),
+        ),
       ],
     );
   }

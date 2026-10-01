@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
@@ -23,6 +24,7 @@ import '../../../core/services/map_tile_cache_service.dart';
 import '../widgets/offline_map_download_sheet.dart';
 import '../../notifications/notification_center_sheet.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class MapTab extends ConsumerStatefulWidget {
   final Trip trip;
@@ -57,6 +59,10 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
   List<LatLng> _roadGeometry = [];
   String? _lastStoppagesHash;
 
+  // Immediate self GPS fix (Point 6)
+  Position? _currentDevicePosition;
+  Timer? _positionRefreshTimer;
+
   @override
   void initState() {
     super.initState();
@@ -64,6 +70,16 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
     MapTileCacheService.getCacheDirectory().then((dir) {
       if (mounted) setState(() => _offlineCachePath = dir.path);
     });
+
+    // Obtain immediate self device location so blue marker displays without delay
+    _refreshSelfPosition();
+
+    // Keep refreshing position every 5 s so the blue dot stays accurate even
+    // when the user has not explicitly started GPS tracking.
+    _positionRefreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _refreshSelfPosition();
+    });
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Connect to Firestore & WebSocket rooms for real-time multi-device sync
       ref.read(firestoreSyncServiceProvider).connectTripRoom(widget.trip.id);
@@ -74,12 +90,37 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
         ref.read(liveLocationTrackerProvider.notifier).startTracking(widget.trip.id);
       }
 
+      final initialStoppages = ref.read(currentTripStoppagesProvider);
+      if (initialStoppages.length >= 2) {
+        _updateRoadRoute(initialStoppages);
+      }
+
       _syncCompanionSimulation();
     });
   }
 
+  /// Proactively fetches the device position and stores it for the blue dot.
+  void _refreshSelfPosition() async {
+    try {
+      // First try last-known for instant paint
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null && mounted) {
+        setState(() => _currentDevicePosition = lastKnown);
+      }
+      // Then get fresh accurate fix
+      final fresh = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 8),
+        ),
+      );
+      if (mounted) setState(() => _currentDevicePosition = fresh);
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
+    _positionRefreshTimer?.cancel();
     _sheetController.dispose();
     // Save 100% battery & CPU by stopping companion movement simulation when leaving Route tab
     ref.read(liveCompanionTrackerProvider.notifier).stopConvoySimulation();
@@ -135,9 +176,17 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
         _mapController.move(userLatLng, 14.5);
       }
     } catch (_) {
+      final liveTrip = ref.read(tripListProvider).firstWhere((t) => t.id == widget.trip.id, orElse: () => widget.trip);
+      if (liveTrip.currentUserMember?.hasLocation == true && _isMapReady) {
+        _mapController.move(LatLng(liveTrip.currentUserMember!.latitude!, liveTrip.currentUserMember!.longitude!), 14.0);
+        return;
+      }
       final stoppages = ref.read(currentTripStoppagesProvider);
       if (stoppages.isNotEmpty && _isMapReady) {
         _mapController.move(LatLng(stoppages.first.latitude, stoppages.first.longitude), 12.0);
+      } else if (liveTrip.members.any((m) => m.hasLocation) && _isMapReady) {
+        final m = liveTrip.members.firstWhere((m) => m.hasLocation);
+        _mapController.move(LatLng(m.latitude!, m.longitude!), 13.0);
       }
     }
   }
@@ -359,18 +408,37 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
 
   Future<void> _callCompanion(TripMember companion) async {
     HapticFeedback.lightImpact();
-    final phone = companion.phoneNumber?.trim();
-    if (phone != null && phone.isNotEmpty) {
-      final uri = Uri.parse('tel:$phone');
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri);
-        return;
-      }
+    String? phone = companion.phoneNumber?.trim();
+
+    // If local TripMember lacks phone number, query Firestore users collection (Point 17)
+    if (phone == null || phone.isEmpty) {
+      final uid = companion.id;
+      try {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+        if (doc.exists && doc.data() != null) {
+          final data = doc.data()!;
+          phone = (data['phone'] as String? ?? 
+                   data['phoneNumber'] as String? ?? 
+                   data['mobile'] as String?)?.trim();
+        }
+      } catch (_) {}
     }
+
+    if (phone != null && phone.isNotEmpty) {
+      final cleanPhone = phone.replaceAll(RegExp(r'[^\d+]'), '');
+      final uri = Uri.parse('tel:$cleanPhone');
+      try {
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+          return;
+        }
+      } catch (_) {}
+    }
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("No number updated by companion '${companion.name}'"),
+          content: Text("No mobile number registered for '${companion.name}'"),
           backgroundColor: Colors.orange[800],
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 3),
@@ -776,15 +844,29 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
     final companionLiveMap = ref.watch(liveCompanionTrackerProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    if (stoppages.length >= 2) {
-      _updateRoadRoute(stoppages);
-    }
+    // Reactively compute road routes only when stoppages actually mutate
+    ref.listen<List<Stoppage>>(currentTripStoppagesProvider, (_, next) {
+      if (next.length >= 2) {
+        _updateRoadRoute(next);
+      }
+    });
 
-    final LatLng userOrCenterPos = trackingState.currentPosition != null
-        ? LatLng(trackingState.currentPosition!.latitude, trackingState.currentPosition!.longitude)
-        : (stoppages.isNotEmpty
+    final effectiveUserPos = trackingState.currentPosition ?? _currentDevicePosition;
+    final currentUserMember = liveTrip.currentUserMember;
+    final LatLng? memberFallbackPos = (currentUserMember != null && currentUserMember.hasLocation)
+        ? LatLng(currentUserMember.latitude!, currentUserMember.longitude!)
+        : null;
+    final LatLng? userPos = effectiveUserPos != null
+        ? LatLng(effectiveUserPos.latitude, effectiveUserPos.longitude)
+        : memberFallbackPos;
+
+    final LatLng userOrCenterPos = userPos ??
+        (stoppages.isNotEmpty
             ? LatLng(stoppages.first.latitude, stoppages.first.longitude)
-            : const LatLng(28.6139, 77.2090));
+            : (liveTrip.members.where((m) => m.hasLocation).isNotEmpty
+                ? LatLng(liveTrip.members.firstWhere((m) => m.hasLocation).latitude!,
+                    liveTrip.members.firstWhere((m) => m.hasLocation).longitude!)
+                : const LatLng(28.6139, 77.2090)));
 
     // Live Recorded Trajectory Breadcrumbs (Actual path travelled)
     final liveBreadcrumbs = trackingState.routePoints;
@@ -974,7 +1056,16 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
               if (isCompleted) ...[
                 // Fit Route Button for completed trip
                 FilledButton.tonalIcon(
-                  onPressed: () => _fitAllStoppagesAndRoute(stoppages, liveBreadcrumbs),
+                  onPressed: () => _fitAllStoppagesAndRoute(
+                    stoppages,
+                    liveBreadcrumbs,
+                    extraPoints: [
+                      if (userPos != null) userPos,
+                      ...companionsWithLoc
+                          .where((c) => c.latitude != null && c.longitude != null)
+                          .map((c) => LatLng(c.latitude!, c.longitude!)),
+                    ],
+                  ),
                   style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     minimumSize: Size.zero,
@@ -1148,7 +1239,7 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
                   TileLayer(
                     key: ValueKey('tiles_${_offlineCachePath ?? "init"}_$isDark'),
                     urlTemplate: AppConstants.getMapTileUrl(isDark: isDark),
-                    userAgentPackageName: 'com.triptracker.trip_tracker_app',
+                    userAgentPackageName: 'com.trackmytrip.app',
                     tileProvider: OfflineCachedTileProvider(localCachePath: _offlineCachePath),
                   ),
 
@@ -1195,36 +1286,71 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
                       ],
                     ),
 
-                  // Live User GPS Location Marker with Pulsing Radar
-                  if (trackingState.currentPosition != null)
+                  // Live User Location Marker with Pulsing Radar & Labeled Identifier (Point 6)
+                  if (userPos != null)
                     MarkerLayer(
                       markers: [
                         Marker(
-                          point: LatLng(trackingState.currentPosition!.latitude, trackingState.currentPosition!.longitude),
-                          width: 50,
-                          height: 50,
-                          child: Stack(
-                            alignment: Alignment.center,
+                          point: userPos,
+                          width: 86,
+                          height: 66,
+                          alignment: Alignment.topCenter,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
                               Container(
-                                width: 38,
-                                height: 38,
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                                 decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: Colors.blue.withAlpha(35),
-                                ),
-                              ),
-                              Container(
-                                width: 18,
-                                height: 18,
-                                decoration: BoxDecoration(
-                                  color: Colors.blueAccent,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white, width: 2.5),
-                                  boxShadow: const [
-                                    BoxShadow(color: Colors.black38, blurRadius: 5, offset: Offset(0, 2)),
+                                  color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: Colors.blueAccent.withAlpha(120),
+                                    width: 1,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withAlpha(isDark ? 80 : 35),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 1.5),
+                                    ),
                                   ],
                                 ),
+                                child: Text(
+                                  'You (${currentUserMember?.name.isNotEmpty == true ? currentUserMember!.name.split(" ").first : "Me"})',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.blueAccent,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Container(
+                                    width: 32,
+                                    height: 32,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Colors.blue.withAlpha(35),
+                                    ),
+                                  ),
+                                  Container(
+                                    width: 16,
+                                    height: 16,
+                                    decoration: BoxDecoration(
+                                      color: Colors.blueAccent,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: Colors.white, width: 2),
+                                      boxShadow: const [
+                                        BoxShadow(color: Colors.black38, blurRadius: 4, offset: Offset(0, 1.5)),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -1346,11 +1472,22 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
                                       )
                                     else
                                       Container(
-                                        width: 5,
-                                        height: 5,
-                                        decoration: const BoxDecoration(
-                                          color: Color(0xFF10B981),
+                                        width: 6,
+                                        height: 6,
+                                        decoration: BoxDecoration(
+                                          color: (livePos?.isLiveNetwork ?? false)
+                                              ? const Color(0xFF10B981)
+                                              : Colors.grey.shade400,
                                           shape: BoxShape.circle,
+                                          boxShadow: (livePos?.isLiveNetwork ?? false)
+                                              ? [
+                                                  BoxShadow(
+                                                    color: const Color(0xFF10B981).withAlpha(140),
+                                                    blurRadius: 4,
+                                                    spreadRadius: 1,
+                                                  ),
+                                                ]
+                                              : null,
                                         ),
                                       ),
                                     const SizedBox(width: 3),
@@ -1360,7 +1497,9 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
                                         style: TextStyle(
                                           fontSize: 9.5,
                                           fontWeight: FontWeight.w900,
-                                          color: isNavigatingToThis ? const Color(0xFF06B6D4) : color,
+                                          color: isNavigatingToThis
+                                              ? const Color(0xFF06B6D4)
+                                              : ((livePos?.isLiveNetwork ?? false) ? color : Colors.grey.shade600),
                                         ),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
@@ -1375,12 +1514,18 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
                                 width: 34,
                                 height: 34,
                                 decoration: BoxDecoration(
-                                  color: isNavigatingToThis ? const Color(0xFF06B6D4) : color,
+                                  color: isNavigatingToThis
+                                      ? const Color(0xFF06B6D4)
+                                      : ((livePos?.isLiveNetwork ?? false) ? color : color.withAlpha(160)),
                                   shape: BoxShape.circle,
                                   border: Border.all(
                                     color: isNavigatingToThis
                                         ? Colors.white
-                                        : (isSelected ? Colors.cyanAccent : Colors.white),
+                                        : (isSelected
+                                            ? Colors.cyanAccent
+                                            : ((livePos?.isLiveNetwork ?? false)
+                                                ? Colors.white
+                                                : Colors.grey.shade400)),
                                     width: isNavigatingToThis ? 3 : (isSelected ? 3 : 2),
                                   ),
                                   boxShadow: [
@@ -1464,10 +1609,12 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
                       onPressed: () => _fitAllStoppagesAndRoute(
                         stoppages,
                         liveBreadcrumbs,
-                        extraPoints: companionsWithLoc
-                            .where((c) => c.latitude != null && c.longitude != null)
-                            .map((c) => LatLng(c.latitude!, c.longitude!))
-                            .toList(),
+                        extraPoints: [
+                          if (userPos != null) userPos,
+                          ...companionsWithLoc
+                              .where((c) => c.latitude != null && c.longitude != null)
+                              .map((c) => LatLng(c.latitude!, c.longitude!)),
+                        ],
                       ),
                       backgroundColor: isDark ? AppTheme.surfaceDark : Colors.white,
                       foregroundColor: AppTheme.secondary,
@@ -1614,7 +1761,7 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
 
                         // Peek Header Bar
                         if (_isNavigatingToCompanion && _selectedCompanion != null)
-                          _buildNavigatingPeekHeader(isDark)
+                          _buildNavigatingPeekHeader(isDark, userOrCenterPos)
                         else if (_selectedMarkerStoppage != null)
                           _buildStoppagePeekHeader(isDark)
                         else if (_selectedCompanion != null)
@@ -1665,7 +1812,29 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildNavigatingPeekHeader(bool isDark) {
+  String _bearingToCardinal(double bearing) {
+    final b = (bearing + 360) % 360;
+    if (b >= 337.5 || b < 22.5) return 'N';
+    if (b >= 22.5 && b < 67.5) return 'NE';
+    if (b >= 67.5 && b < 112.5) return 'E';
+    if (b >= 112.5 && b < 157.5) return 'SE';
+    if (b >= 157.5 && b < 202.5) return 'S';
+    if (b >= 202.5 && b < 247.5) return 'SW';
+    if (b >= 247.5 && b < 292.5) return 'W';
+    return 'NW';
+  }
+
+  Widget _buildNavigatingPeekHeader(bool isDark, LatLng userPos) {
+    double? bearing;
+    if (_selectedCompanion?.latitude != null && _selectedCompanion?.longitude != null) {
+      bearing = Geolocator.bearingBetween(
+        userPos.latitude,
+        userPos.longitude,
+        _selectedCompanion!.latitude!,
+        _selectedCompanion!.longitude!,
+      );
+    }
+
     return Row(
       children: [
         Container(
@@ -1705,6 +1874,35 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
             ],
           ),
         ),
+        if (bearing != null) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFF06B6D4).withAlpha(isDark ? 40 : 25),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFF06B6D4).withAlpha(90), width: 0.9),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Transform.rotate(
+                  angle: bearing * (math.pi / 180.0),
+                  child: const Icon(Icons.navigation_rounded, size: 14, color: Color(0xFF06B6D4)),
+                ),
+                const SizedBox(width: 3.5),
+                Text(
+                  _bearingToCardinal(bearing),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF06B6D4),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
         IconButton(
           icon: const Icon(Icons.close_rounded, size: 20),
           tooltip: 'End Navigation',

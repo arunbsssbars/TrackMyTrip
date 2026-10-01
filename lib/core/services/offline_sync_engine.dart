@@ -2,12 +2,14 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/sync_mutation.dart';
 import '../../providers/trip_provider.dart';
 import '../../providers/auth_provider.dart';
 import 'local_storage_service.dart';
 import 'trip_share_service.dart';
 import 'cloud_trip_sync_service.dart';
+import 'tombstone_service.dart';
 
 class OfflineSyncEngine extends ChangeNotifier {
   final LocalStorageService _storage;
@@ -23,18 +25,43 @@ class OfflineSyncEngine extends ChangeNotifier {
   bool get isSyncing => _isSyncing;
   DateTime? get lastSyncedTime => _lastSyncedTime;
   String? get lastSyncError => _lastSyncError;
-  int get pendingCount => _storage.getPendingMutations().where((m) => m.status == SyncStatus.pending).length;
+  int get pendingCount => _storage.getPendingMutations().where((m) => m.status == SyncStatus.pending || m.status == SyncStatus.failed).length;
   List<SyncMutation> get pendingMutations => _storage.getPendingMutations();
 
   Timer? _autoSyncTimer;
 
   void _initAutoSync() {
+    // One-time pruning of duplicate/stale mutations on startup to prevent queue bloating (Point 14)
+    _cleanupPendingQueue();
+
     // Periodically check if there are pending offline mutations to flush
     _autoSyncTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (pendingCount > 0 && !_isSyncing) {
         syncPendingMutationsNow();
       }
     });
+  }
+
+  Future<void> _cleanupPendingQueue() async {
+    try {
+      final all = _storage.getPendingMutations();
+      final Map<String, SyncMutation> unique = {};
+      for (final m in all) {
+        if (m.status == SyncStatus.pending || m.status == SyncStatus.failed) {
+          final key = '${m.entityType}_${m.entityId}';
+          final existing = unique[key];
+          if (existing == null || m.createdAt.isAfter(existing.createdAt)) {
+            unique[key] = m;
+          }
+        } else {
+          unique[m.id] = m;
+        }
+      }
+      if (unique.length < all.length) {
+        await _storage.saveAllMutations(unique.values.toList());
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   @override
@@ -106,7 +133,7 @@ class OfflineSyncEngine extends ChangeNotifier {
       return false;
     }
 
-    final pending = _storage.getPendingMutations().where((m) => m.status == SyncStatus.pending).toList();
+    final pending = _storage.getPendingMutations().where((m) => m.status == SyncStatus.pending || m.status == SyncStatus.failed).toList();
     if (pending.isEmpty) {
       _lastSyncError = null;
       return true;
@@ -121,12 +148,27 @@ class OfflineSyncEngine extends ChangeNotifier {
 
     for (final tripId in tripIdsToSync) {
       try {
+        if (TombstoneService.isTombstoned(tripId)) {
+          // Trip was tombstoned: delete remote room and cloud documents, then drop mutations
+          try {
+            await CloudTripSyncService.deleteRoom(tripId);
+            await CloudTripSyncService.firestore.collection('trips').doc(tripId).delete();
+          } catch (_) {}
+          for (final m in pending.where((p) => p.tripId == tripId)) {
+            await _storage.removeMutation(m.id);
+          }
+          continue;
+        }
+
         final trips = await _storage.db.getTrips();
         final tripIndex = trips.indexWhere((t) => t.id == tripId);
         if (tripIndex != -1) {
           final trip = trips[tripIndex];
           if (trip.isDeleted) {
-            // Drop mutations for deleted trip
+            try {
+              await CloudTripSyncService.deleteRoom(tripId);
+              await CloudTripSyncService.firestore.collection('trips').doc(tripId).delete();
+            } catch (_) {}
             for (final m in pending.where((p) => p.tripId == tripId)) {
               await _storage.removeMutation(m.id);
             }
@@ -158,18 +200,40 @@ class OfflineSyncEngine extends ChangeNotifier {
           if (!success) {
             allSuccess = false;
           }
+        } else {
+          // Trip not found in active trips: check if it was deleted or purged
+          final tombstoneIds = await _storage.db.getTombstonedTripIds();
+          if (tombstoneIds.contains(tripId)) {
+            try {
+              await CloudTripSyncService.deleteRoom(tripId);
+              await CloudTripSyncService.firestore.collection('trips').doc(tripId).delete();
+            } catch (_) {}
+            for (final m in pending.where((p) => p.tripId == tripId)) {
+              await _storage.removeMutation(m.id);
+            }
+          }
         }
       } catch (e) {
         allSuccess = false;
         if (kDebugMode) {
-          print('Failed to sync trip $tripId: $e');
+          debugPrint('[OfflineSyncEngine] Failed to sync trip $tripId: $e');
         }
       }
     }
 
-    if (allSuccess) {
-      for (final mutation in pending) {
-        try {
+    // Process individual pending mutations with per-item resilience
+    for (final mutation in pending) {
+      try {
+        final isTripEntity = mutation.entityType.toLowerCase() == 'trip';
+        if (isTripEntity) {
+          final tripDocRef = CloudTripSyncService.firestore.collection('trips').doc(mutation.tripId);
+          if (mutation.action == MutationAction.deleteTrip) {
+            await tripDocRef.delete();
+            await CloudTripSyncService.deleteRoom(mutation.tripId);
+          } else {
+            await tripDocRef.set(mutation.payload, SetOptions(merge: true));
+          }
+        } else {
           final coll = _resolveCollection(mutation.entityType);
           final docRef = CloudTripSyncService.firestore
               .collection('trips')
@@ -183,15 +247,31 @@ class OfflineSyncEngine extends ChangeNotifier {
               mutation.action == MutationAction.deleteSettlement) {
             await docRef.delete();
           } else {
-            await docRef.set(mutation.payload);
+            await docRef.set(mutation.payload, SetOptions(merge: true));
           }
-        } catch (_) {}
+        }
+        // Mutation applied successfully to Firestore: remove from local outbox
         await _storage.removeMutation(mutation.id);
+      } catch (err) {
+        allSuccess = false;
+        if (kDebugMode) {
+          debugPrint('[OfflineSyncEngine] Mutation sync failed for ${mutation.id}: $err');
+        }
+        // Guard: Do NOT remove mutation on failure! Update status and increment retry count
+        final failedMutation = mutation.copyWith(
+          status: SyncStatus.failed,
+          retryCount: mutation.retryCount + 1,
+          errorMessage: err.toString(),
+        );
+        await _storage.enqueueMutation(failedMutation);
       }
+    }
+
+    if (allSuccess) {
       _lastSyncedTime = DateTime.now();
       _lastSyncError = null;
     } else {
-      _lastSyncError = 'Firebase unreachable. All records remain 100% saved on this device.';
+      _lastSyncError = 'Sync partial or offline. Unsynced changes remain safely queued on this device.';
     }
     
     _isSyncing = false;

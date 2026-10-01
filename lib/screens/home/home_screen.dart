@@ -87,23 +87,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _initGlobalSync() {
-    final trips = ref.read(tripListProvider);
-    for (final trip in trips) {
-      final code = CloudTripSyncService.getRoomCode(trip.id, trip: trip);
-      CloudTripSyncService.startLiveSync(
-        tripId: trip.id,
-        roomCode: code,
-        onRemoteUpdateReceived: (pkg) async {
-          await ref.read(tripListProvider.notifier).syncRemotePackage(pkg);
-          ref.read(allStoppagesProvider.notifier).reload();
-          ref.read(allExpensesProvider.notifier).reload();
-          ref.read(allMemoriesProvider.notifier).reload();
-          ref.read(allSettlementsProvider.notifier).reload();
-          ref.read(allAuditLogsProvider.notifier).reload();
-          if (mounted) setState(() {});
-        },
-      );
-    }
+    try {
+      final trips = ref.read(tripListProvider);
+      for (final trip in trips) {
+        final code = CloudTripSyncService.getRoomCode(trip.id, trip: trip);
+        CloudTripSyncService.startLiveSync(
+          tripId: trip.id,
+          roomCode: code,
+          onRemoteUpdateReceived: (pkg) async {
+            await ref.read(tripListProvider.notifier).syncRemotePackage(pkg);
+            ref.read(allStoppagesProvider.notifier).reload();
+            ref.read(allExpensesProvider.notifier).reload();
+            ref.read(allMemoriesProvider.notifier).reload();
+            ref.read(allSettlementsProvider.notifier).reload();
+            ref.read(allAuditLogsProvider.notifier).reload();
+            if (mounted) setState(() {});
+          },
+        );
+      }
+    } catch (_) {}
   }
 
   void _openCreateTripSheet(BuildContext context) {
@@ -258,13 +260,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       color: AppTheme.primary, size: 18),
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  'Track My Trip',
-                  style: TextStyle(
-                    color: isDark ? Colors.white : AppTheme.textMainLight,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.3,
+                Flexible(
+                  child: Text(
+                    'Track My Trip',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isDark ? Colors.white : AppTheme.textMainLight,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.3,
+                    ),
                   ),
                 ),
               ],
@@ -324,22 +330,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Row(
-                          children: [
-                            Icon(Icons.insights_rounded,
-                                color: Colors.white70, size: 14),
-                            SizedBox(width: 6),
-                            Text(
-                              'TRAVEL OVERVIEW',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.8,
+                        const Flexible(
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.insights_rounded,
+                                  color: Colors.white70, size: 14),
+                              SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  'TRAVEL OVERVIEW',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.8,
+                                  ),
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
+                        const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 7, vertical: 2),
@@ -548,12 +562,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                   children: [
                                     const Row(
                                       children: [
-                                        Text(
-                                          'Category Expense Breakdown',
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w800,
+                                        Expanded(
+                                          child: Text(
+                                            'Category Expense Breakdown',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w800,
+                                            ),
                                           ),
                                         ),
                                         SizedBox(width: 4),
@@ -860,22 +878,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      _searchQuery.isNotEmpty
-                          ? 'Search Results (${filteredTrips.length})'
-                          : _activeFilter == 'all'
-                              ? 'Recent Expeditions (${filteredTrips.length})'
-                              : '${_activeFilter[0].toUpperCase()}${_activeFilter.substring(1)} Journeys (${filteredTrips.length})',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
-                        letterSpacing: -0.3,
-                        color: isDark ? Colors.white : AppTheme.textMainLight,
+                    Expanded(
+                      child: Text(
+                        _searchQuery.isNotEmpty
+                            ? 'Search Results (${filteredTrips.length})'
+                            : _activeFilter == 'all'
+                                ? 'Recent Expeditions (${filteredTrips.length})'
+                                : '${_activeFilter[0].toUpperCase()}${_activeFilter.substring(1)} Journeys (${filteredTrips.length})',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                          letterSpacing: -0.3,
+                          color: isDark ? Colors.white : AppTheme.textMainLight,
+                        ),
                       ),
                     ),
-                    if (filteredTrips.isNotEmpty)
+                    if (filteredTrips.isNotEmpty) ...[
+                      const SizedBox(width: 8),
                       Text(
                         'Showing ${visibleTrips.length} of ${filteredTrips.length}',
+                        maxLines: 1,
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
@@ -884,6 +908,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                               : const Color(0xFF64748B),
                         ),
                       ),
+                    ],
                   ],
                 ),
               ),
@@ -1338,7 +1363,7 @@ class _TripCard extends StatelessWidget {
                                 // Live Active Badge (Strictly only if journey is NOT ended)
                                 if (!isEnded && isActiveCockpit)
                                   const PulsingLiveBeacon(
-                                    label: 'LIVE',
+                                    label: 'LIVE(GPS)',
                                     color: Color(0xFF0D9488),
                                     dotSize: 7,
                                     labelStyle: TextStyle(
@@ -1349,11 +1374,11 @@ class _TripCard extends StatelessWidget {
                                     ),
                                   )
                                 else if (!isEnded)
-                                  PulsingLiveBeacon(
-                                    label: isRunning ? 'LIVE TRIP' : 'ACTIVE',
-                                    color: const Color(0xFF10B981),
+                                  const PulsingLiveBeacon(
+                                    label: 'ACTIVE',
+                                    color: Color(0xFF10B981),
                                     dotSize: 6,
-                                    labelStyle: const TextStyle(
+                                    labelStyle: TextStyle(
                                       color: Color(0xFF10B981),
                                       fontSize: 9,
                                       fontWeight: FontWeight.w900,
@@ -1682,18 +1707,24 @@ class _TripCard extends StatelessWidget {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text(
-                                  'Budget: ${CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency)} / ${CurrencyFormatter.format(trip.budget!, currency: trip.defaultCurrency)}',
-                                  style: TextStyle(
-                                    fontSize: 9.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: isDark
-                                        ? Colors.grey[400]
-                                        : const Color(0xFF64748B),
+                                Expanded(
+                                  child: Text(
+                                    'Budget: ${CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency)} / ${CurrencyFormatter.format(trip.budget!, currency: trip.defaultCurrency)}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: isDark
+                                          ? Colors.grey[400]
+                                          : const Color(0xFF64748B),
+                                    ),
                                   ),
                                 ),
+                                const SizedBox(width: 6),
                                 Text(
                                   '${(totalSpent / trip.budget! * 100).clamp(0, 999).toStringAsFixed(0)}%',
+                                  maxLines: 1,
                                   style: TextStyle(
                                     fontSize: 9.5,
                                     fontWeight: FontWeight.w800,

@@ -26,6 +26,56 @@ class TileDownloadProgress {
 class MapTileCacheService {
   static Directory? _cacheDir;
 
+  /// 100 MB standard LRU disk storage budget
+  static const int maxCacheSizeBytes = 100 * 1024 * 1024;
+
+  /// Standard OSM User-Agent per OpenStreetMap Foundation usage policy
+  static const String osmUserAgent = 'TrackMyTrip/1.0 (https://trackmytrip.app; support@trackmytrip.app)';
+
+  /// Enforces LRU disk storage budget by pruning oldest accessed tiles when size exceeds budget
+  static Future<int> enforceCacheBudget({int budgetBytes = maxCacheSizeBytes}) async {
+    try {
+      final dir = await getCacheDirectory();
+      if (!await dir.exists()) return 0;
+
+      final tileEntries = <({File file, int size, DateTime modified})>[];
+      int totalBytes = 0;
+
+      await for (final entity in dir.list(recursive: true, followLinks: false)) {
+        if (entity is File && entity.path.endsWith('.png')) {
+          try {
+            final stat = await entity.stat();
+            tileEntries.add((file: entity, size: stat.size, modified: stat.modified));
+            totalBytes += stat.size;
+          } catch (_) {}
+        }
+      }
+
+      if (totalBytes <= budgetBytes) {
+        return 0; // Within budget
+      }
+
+      // Sort by modified ascending (oldest first - LRU)
+      tileEntries.sort((a, b) => a.modified.compareTo(b.modified));
+
+      final targetSize = (budgetBytes * 0.85).round(); // Target 85% of budget to provide headroom
+      int prunedCount = 0;
+
+      for (final entry in tileEntries) {
+        if (totalBytes <= targetSize) break;
+        try {
+          await entry.file.delete();
+          totalBytes -= entry.size;
+          prunedCount++;
+        } catch (_) {}
+      }
+
+      return prunedCount;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   /// Deletes legacy cache folders that contain 403 blocked, 404, or API-key watermarked tiles
   static Future<void> purgeLegacyCache() async {
     try {
@@ -70,49 +120,49 @@ class MapTileCacheService {
     return ((1.0 - (math.log(math.tan(latRad) + 1.0 / math.cos(latRad)) / math.pi)) / 2.0 * (1 << zoom)).floor();
   }
 
-  /// Calculates the set of tile coordinates for given points across specified zoom levels
+  /// Calculates the set of tile coordinates for given route points along a corridor
   static List<({int z, int x, int y})> calculateTileCoordinates({
     required List<LatLng> points,
     List<int> zoomLevels = const [11, 12, 13, 14, 15],
-    double margin = 0.03,
-    int maxTiles = 450,
+    double margin = 0.02,
+    int maxTiles = 350,
   }) {
     if (points.isEmpty) return [];
 
-    double minLat = points.first.latitude;
-    double maxLat = points.first.latitude;
-    double minLng = points.first.longitude;
-    double maxLng = points.first.longitude;
-
-    for (final p in points) {
-      if (p.latitude < minLat) minLat = p.latitude;
-      if (p.latitude > maxLat) maxLat = p.latitude;
-      if (p.longitude < minLng) minLng = p.longitude;
-      if (p.longitude > maxLng) maxLng = p.longitude;
-    }
-
-    minLat = math.max(-85.0, minLat - margin);
-    maxLat = math.min(85.0, maxLat + margin);
-    minLng = math.max(-180.0, minLng - margin);
-    maxLng = math.min(180.0, maxLng + margin);
-
+    final Set<String> visitedKeys = {};
     final List<({int z, int x, int y})> tiles = [];
 
+    // Sample points along route to avoid redundant tile math for dense polylines
+    final List<LatLng> sampledPoints = [];
+    if (points.length <= 50) {
+      sampledPoints.addAll(points);
+    } else {
+      final step = (points.length / 50).ceil();
+      for (int i = 0; i < points.length; i += step) {
+        sampledPoints.add(points[i]);
+      }
+      if (sampledPoints.last != points.last) {
+        sampledPoints.add(points.last);
+      }
+    }
+
     for (final z in zoomLevels) {
-      final x1 = lon2tile(minLng, z);
-      final x2 = lon2tile(maxLng, z);
-      final y1 = lat2tile(maxLat, z); // Note: tile Y is inverted
-      final y2 = lat2tile(minLat, z);
+      for (final p in sampledPoints) {
+        final cx = lon2tile(p.longitude, z);
+        final cy = lat2tile(p.latitude, z);
 
-      final minX = math.min(x1, x2);
-      final maxX = math.max(x1, x2);
-      final minY = math.min(y1, y2);
-      final maxY = math.max(y1, y2);
-
-      for (int x = minX; x <= maxX; x++) {
-        for (int y = minY; y <= maxY; y++) {
-          tiles.add((z: z, x: x, y: y));
-          if (tiles.length >= maxTiles) return tiles;
+        // Add center tile and immediate 1-ring neighbors for a corridor buffer
+        for (int dx = -1; dx <= 1; dx++) {
+          for (int dy = -1; dy <= 1; dy++) {
+            final x = cx + dx;
+            final y = cy + dy;
+            final key = '$z/$x/$y';
+            if (!visitedKeys.contains(key)) {
+              visitedKeys.add(key);
+              tiles.add((z: z, x: x, y: y));
+              if (tiles.length >= maxTiles) return tiles;
+            }
+          }
         }
       }
     }
@@ -120,7 +170,7 @@ class MapTileCacheService {
     return tiles;
   }
 
-  /// Pre-caches tiles for a list of route points, emitting progress
+  /// Pre-caches tiles for a list of route points, emitting progress with concurrent batching
   static Stream<TileDownloadProgress> downloadRouteTiles({
     required List<LatLng> points,
     List<int> zoomLevels = const [11, 12, 13, 14, 15],
@@ -132,59 +182,56 @@ class MapTileCacheService {
     }
 
     final cacheDir = await getCacheDirectory();
+    // Enforce 100 MB LRU budget before acquiring new tiles
+    await enforceCacheBudget();
     final client = http.Client();
     int downloaded = 0;
 
     yield TileDownloadProgress(downloaded: 0, total: tiles.length, percentage: 0.0);
 
-    for (final t in tiles) {
-      final tileFile = File('${cacheDir.path}/${t.z}/${t.x}/${t.y}.png');
-      if (await tileFile.exists()) {
-        final len = await tileFile.length();
-        if (len > 500) {
-          downloaded++;
-          yield TileDownloadProgress(
-            downloaded: downloaded,
-            total: tiles.length,
-            percentage: downloaded / tiles.length,
-          );
-          continue;
-        } else {
-          // Corrupt or 403 error page from previous block, remove it
-          try {
-            await tileFile.delete();
-          } catch (_) {}
+    // Concurrently download in batches of 4 workers (strictly complies with OSM tile server usage policy)
+    const batchSize = 4;
+    for (int i = 0; i < tiles.length; i += batchSize) {
+      final end = math.min(i + batchSize, tiles.length);
+      final batch = tiles.sublist(i, end);
+
+      await Future.wait(batch.map((t) async {
+        final tileFile = File('${cacheDir.path}/${t.z}/${t.x}/${t.y}.png');
+        if (await tileFile.exists()) {
+          final len = await tileFile.length();
+          if (len > 500) {
+            return;
+          } else {
+            try {
+              await tileFile.delete();
+            } catch (_) {}
+          }
         }
-      }
 
-      try {
-        final url = Uri.parse('https://tile.openstreetmap.de/${t.z}/${t.x}/${t.y}.png');
-        final response = await client.get(url, headers: const {
-          'User-Agent': 'TripTrackerApp/1.0 (https://triptracker.app; travel@triptracker.app)',
-        }).timeout(const Duration(seconds: 8));
+        try {
+          final url = Uri.parse('https://tile.openstreetmap.de/${t.z}/${t.x}/${t.y}.png');
+          final response = await client.get(url, headers: const {
+            'User-Agent': osmUserAgent,
+          }).timeout(const Duration(seconds: 6));
 
-        if (response.statusCode == 200 && response.bodyBytes.length > 500) {
-          await tileFile.parent.create(recursive: true);
-          await tileFile.writeAsBytes(response.bodyBytes);
-        }
-      } catch (_) {
-        // Continue downloading other tiles even if one fails
-      }
+          if (response.statusCode == 200 && response.bodyBytes.length > 500) {
+            await tileFile.parent.create(recursive: true);
+            await tileFile.writeAsBytes(response.bodyBytes);
+          }
+        } catch (_) {}
+      }));
 
-      downloaded++;
+      downloaded = end;
       yield TileDownloadProgress(
         downloaded: downloaded,
         total: tiles.length,
         percentage: downloaded / tiles.length,
       );
-
-      // Brief delay to be polite to OpenStreetMap tile servers
-      await Future.delayed(const Duration(milliseconds: 30));
     }
 
     client.close();
     yield TileDownloadProgress(
-      downloaded: downloaded,
+      downloaded: tiles.length,
       total: tiles.length,
       percentage: 1.0,
       isCompleted: true,
@@ -239,6 +286,8 @@ class OfflineCachedTileProvider extends TileProvider {
     if (localCachePath != null) {
       final file = File('$localCachePath/${coordinates.z}/${coordinates.x}/${coordinates.y}.png');
       if (file.existsSync() && file.lengthSync() > 500) {
+        // Touch file modification time asynchronously for LRU tracking
+        file.setLastModified(DateTime.now()).catchError((_) {});
         return FileImage(file);
       }
     }
@@ -247,7 +296,7 @@ class OfflineCachedTileProvider extends TileProvider {
     return NetworkImage(
       url,
       headers: const {
-        'User-Agent': 'TripTrackerApp/1.0 (https://triptracker.app; travel@triptracker.app)',
+        'User-Agent': MapTileCacheService.osmUserAgent,
       },
     );
   }

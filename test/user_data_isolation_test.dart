@@ -2,15 +2,15 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:trip_tracker_app/core/database/app_database.dart';
-import 'package:trip_tracker_app/core/services/local_storage_service.dart';
-import 'package:trip_tracker_app/core/services/user_service.dart';
-import 'package:trip_tracker_app/models/trip.dart';
-import 'package:trip_tracker_app/models/trip_member.dart';
-import 'package:trip_tracker_app/models/expense.dart';
-import 'package:trip_tracker_app/models/trip_invitation.dart';
-import 'package:trip_tracker_app/models/user_profile.dart';
-import 'package:trip_tracker_app/core/services/trip_share_service.dart';
+import 'package:trackmytrip/core/database/app_database.dart';
+import 'package:trackmytrip/core/services/local_storage_service.dart';
+import 'package:trackmytrip/core/services/user_service.dart';
+import 'package:trackmytrip/models/trip.dart';
+import 'package:trackmytrip/models/trip_member.dart';
+import 'package:trackmytrip/models/expense.dart';
+import 'package:trackmytrip/models/trip_invitation.dart';
+import 'package:trackmytrip/models/user_profile.dart';
+import 'package:trackmytrip/core/services/trip_share_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

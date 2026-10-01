@@ -29,7 +29,15 @@ class LocationDetails {
 
 class LocationService {
   static String currentDetectedCurrency = _initialLocaleCurrency();
-  static final ValueNotifier<String> currencyNotifier = ValueNotifier<String>(_initialLocaleCurrency());
+  static ValueNotifier<String> _currencyNotifier = ValueNotifier<String>(_initialLocaleCurrency());
+  static ValueNotifier<String> get currencyNotifier {
+    try {
+      final _ = _currencyNotifier.value;
+    } catch (_) {
+      _currencyNotifier = ValueNotifier<String>(currentDetectedCurrency);
+    }
+    return _currencyNotifier;
+  }
 
   static String _initialLocaleCurrency() {
     return 'INR';
@@ -240,7 +248,7 @@ class LocationService {
 
       final response = await http.get(
         url,
-        headers: {'User-Agent': 'TripTrackerApp/1.0 (travel@triptracker.app)'},
+        headers: {'User-Agent': 'TrackMyTrip/1.0 (travel@trackmytrip.app)'},
       ).timeout(const Duration(seconds: 4));
 
       if (response.statusCode == 200) {
@@ -383,7 +391,7 @@ out center tags 12;
       final response = await http.get(
         url,
         headers: {
-          'User-Agent': 'TripTrackerApp/1.0 (travel@triptracker.app)',
+          'User-Agent': 'TrackMyTrip/1.0 (travel@trackmytrip.app)',
           'Accept': 'application/json',
         },
       ).timeout(const Duration(seconds: 4));
