@@ -19,6 +19,11 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Ensure Stable CocoaPods Environment
+        run: |
+          sudo gem install cocoapods -v "~> 1.15.2" --no-document
+          pod --version
+
       - name: Install Dependencies
         run: flutter pub get
 
@@ -32,9 +37,6 @@ jobs:
 
       - name: Build iOS App with Unsigned Signing Allowed
         run: |
-          cd ios
-          pod repo update trunk || true
-          cd ..
           flutter build ios --release --no-codesign --config-only
           cd ios
           xcodebuild -workspace Runner.xcworkspace \
