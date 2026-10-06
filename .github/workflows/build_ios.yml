@@ -1,0 +1,60 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build-ios:
+    name: Build iOS IPA (Unsigned)
+    runs-on: macos-14
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Create fallback .env file for asset bundling
+        run: |
+          if [ -n "${{ secrets.ENV_FILE }}" ]; then
+            echo "${{ secrets.ENV_FILE }}" > .env
+          else
+            touch .env
+          fi
+
+      - name: Build iOS App with Unsigned Signing Allowed
+        run: |
+          flutter build ios --release --no-codesign --config-only
+          cd ios
+          xcodebuild -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath ../build/ios_derived \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Bundle Payload into Unsigned IPA
+        run: |
+          mkdir -p build/Payload
+          cp -r build/ios_derived/Build/Products/Release-iphoneos/Runner.app build/Payload/
+          cd build
+          zip -r -q app-release-unsigned.ipa Payload
+          rm -rf Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-ios-ipa
+          path: build/app-release-unsigned.ipa
+          retention-days: 7
