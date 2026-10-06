@@ -8,10 +8,16 @@ on:
 jobs:
   build-ios:
     name: Build iOS IPA (Unsigned)
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: false
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -19,13 +25,23 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Ensure Stable CocoaPods Environment
+      - name: Setup CocoaPods
         run: |
+          # Clear any corrupted Xcode derived data
+          sudo rm -rf ~/Library/Developer/Xcode/DerivedData
+          # Reinstall CocoaPods cleanly via gem
+          sudo gem uninstall -aIx cocoapods 2>/dev/null || true
           sudo gem install cocoapods --no-document
+          pod repo update
           pod --version
 
-      - name: Install Dependencies
+      - name: Install Flutter Dependencies
         run: flutter pub get
+
+      - name: Run pod install
+        run: |
+          cd ios
+          pod install --repo-update
 
       - name: Create fallback .env file for asset bundling
         run: |
@@ -35,7 +51,7 @@ jobs:
             touch .env
           fi
 
-      - name: Build iOS App with Unsigned Signing Allowed
+      - name: Build iOS App (Unsigned)
         run: |
           flutter build ios --release --no-codesign --config-only
           cd ios
