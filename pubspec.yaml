@@ -49,7 +49,7 @@ dependencies:
   share_plus: 10.1.4
   image_picker: ^1.1.2
   qr_flutter: ^4.1.0
-  mobile_scanner: ^5.2.3
+  mobile_scanner: ^7.4.2
   archive: ^4.0.9
   http: ^1.2.2
   geolocator: ^14.0.2
