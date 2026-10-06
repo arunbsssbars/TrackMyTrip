@@ -37,6 +37,7 @@ jobs:
 
       - name: Build iOS App with Unsigned Signing Allowed
         run: |
+          rm -rf build/ios_derived
           flutter build ios --release --no-codesign --config-only
           cd ios
           xcodebuild -workspace Runner.xcworkspace \

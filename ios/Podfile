@@ -39,6 +39,20 @@ post_install do |installer|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.5'
+      # Prevent duplicate framework linking for GoogleDataTransport
+      if target.name == 'Pods-Runner'
+        current_ldflags = config.build_settings['OTHER_LDFLAGS'] || '$(inherited)'
+        config.build_settings['OTHER_LDFLAGS'] = current_ldflags.gsub(/-framework\s+["']?GoogleDataTransport["']?/, '').gsub(/ +/, ' ').strip
+      end
+    end
+  end
+
+  # Strip duplicate -framework GoogleDataTransport across all generated xcconfig files
+  Dir.glob("#{installer.sandbox.target_support_files_dir}/**/*.xcconfig").each do |xcconfig_file|
+    content = File.read(xcconfig_file)
+    if content.include?('GoogleDataTransport')
+      content = content.gsub(/-framework\s+["']?GoogleDataTransport["']?/, '')
+      File.write(xcconfig_file, content)
     end
   end
 end
