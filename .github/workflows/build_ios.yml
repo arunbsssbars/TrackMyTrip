@@ -21,7 +21,7 @@ jobs:
 
       - name: Ensure Stable CocoaPods Environment
         run: |
-          sudo gem install cocoapods -v "~> 1.15.2" --no-document
+          sudo gem install cocoapods --no-document
           pod --version
 
       - name: Install Dependencies
