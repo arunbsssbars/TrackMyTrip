@@ -32,9 +32,6 @@ jobs:
 
       - name: Build iOS App with Unsigned Signing Allowed
         run: |
-          cd ios
-          pod repo update trunk || true
-          cd ..
           flutter build ios --release --no-codesign --config-only
           cd ios
           xcodebuild -workspace Runner.xcworkspace \
