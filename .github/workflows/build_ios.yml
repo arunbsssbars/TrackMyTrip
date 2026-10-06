@@ -8,7 +8,7 @@ on:
 jobs:
   build-ios:
     name: Build iOS IPA (Unsigned)
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -64,3 +64,4 @@ jobs:
           name: flutter-ios-ipa
           path: build/app-release-unsigned.ipa
           retention-days: 7
+
