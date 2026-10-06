@@ -37,23 +37,12 @@ jobs:
 
       - name: Build iOS App with Unsigned Signing Allowed
         run: |
-          rm -rf build/ios_derived
-          flutter build ios --release --no-codesign --config-only
-          cd ios
-          xcodebuild -workspace Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath ../build/ios_derived \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build
+          flutter build ios --release --no-codesign
 
       - name: Bundle Payload into Unsigned IPA
         run: |
           mkdir -p build/Payload
-          cp -r build/ios_derived/Build/Products/Release-iphoneos/Runner.app build/Payload/
+          cp -r build/ios/iphoneos/Runner.app build/Payload/ 2>/dev/null || cp -r build/ios_derived/Build/Products/Release-iphoneos/Runner.app build/Payload/
           cd build
           zip -r -q app-release-unsigned.ipa Payload
           rm -rf Payload
