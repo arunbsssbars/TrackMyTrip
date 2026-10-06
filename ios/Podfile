@@ -48,7 +48,7 @@ post_install do |installer|
   end
 
   # Strip duplicate -framework GoogleDataTransport across all generated xcconfig files
-  Dir.glob("#{installer.sandbox.target_support_files_dir}/**/*.xcconfig").each do |xcconfig_file|
+  Dir.glob(File.join(installer.sandbox.target_support_files_root, '**', '*.xcconfig')).each do |xcconfig_file|
     content = File.read(xcconfig_file)
     if content.include?('GoogleDataTransport')
       content = content.gsub(/-framework\s+["']?GoogleDataTransport["']?/, '')
