@@ -69,10 +69,10 @@ class TripAuditLog {
     final rawAmt = json['amount'];
     final double? parsedAmt = rawAmt is num ? rawAmt.toDouble() : null;
     return TripAuditLog(
-      id: json['id'] as String,
-      tripId: json['tripId'] as String,
-      actionType: json['actionType'] as String,
-      itemTitle: json['itemTitle'] as String,
+      id: json['id'] as String? ?? '',
+      tripId: json['tripId'] as String? ?? '',
+      actionType: json['actionType'] as String? ?? 'action',
+      itemTitle: json['itemTitle'] as String? ?? 'Item',
       performedByMemberId: json['performedByMemberId'] as String? ?? 'User',
       performedByName: json['performedByName'] as String? ?? 'Companion',
       timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ?? DateTime.now(),

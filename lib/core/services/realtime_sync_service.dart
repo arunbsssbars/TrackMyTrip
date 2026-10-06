@@ -16,6 +16,7 @@ import '../../models/proximity_alert.dart';
 import 'live_companion_tracker_service.dart';
 import 'proximity_alert_service.dart';
 import 'user_service.dart';
+import 'tombstone_service.dart';
 
 class RealtimeSyncService {
   final Ref ref;
@@ -27,6 +28,7 @@ class RealtimeSyncService {
   StreamSubscription<DatabaseEvent>? _wakeQueueSubscription;
   StreamSubscription<DatabaseEvent>? _connectionStatusSubscription;
   StreamSubscription<DatabaseEvent>? _nudgeSubscription;
+  StreamSubscription<DatabaseEvent>? _memoryActivitySubscription;
   bool _isDisposed = false;
   
   FirebaseDatabase? _databaseInstance;
@@ -206,6 +208,35 @@ class RealtimeSyncService {
         }
       });
     }
+
+    // 5. RTDB Live Memory Activity: Informs companions when someone is uploading/sharing a photo
+    _memoryActivitySubscription = db.ref('trips/$tripId/memory_activity').onValue.listen((event) {
+      final currentUserId = UserService.getCurrentUser().id;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (event.snapshot.value != null && event.snapshot.value is Map) {
+        final data = Map<String, dynamic>.from(event.snapshot.value as Map);
+        final List<String> uploaders = [];
+        data.forEach((memId, val) {
+          if (memId != currentUserId && val is Map) {
+            // Guard with 45-second TTL so stale activities never show forever
+            final timestamp = val['timestamp'];
+            if (timestamp is int && (now - timestamp) > 45000) {
+              try {
+                db.ref('trips/$tripId/memory_activity/$memId').remove();
+              } catch (_) {}
+              return;
+            }
+            final name = val['name']?.toString() ?? val['memberName']?.toString();
+            if (name != null && name.isNotEmpty && !uploaders.contains(name)) {
+              uploaders.add(name);
+            }
+          }
+        });
+        ref.read(activeMemoryUploadersProvider(tripId).notifier).state = uploaders;
+      } else {
+        ref.read(activeMemoryUploadersProvider(tripId).notifier).state = [];
+      }
+    });
   }
 
   void _processLocationUpdate(
@@ -310,7 +341,24 @@ class RealtimeSyncService {
           break;
         case 'MEMORY_ADDED':
           final memory = Memory.fromJson(payload);
-          ref.read(allMemoriesProvider.notifier).addMemory(memory, broadcast: false);
+          if (!TombstoneService.isMemoryTombstoned(memory.id)) {
+            ref.read(allMemoriesProvider.notifier).addMemory(memory, broadcast: false);
+          }
+          break;
+        case 'MEMORY_DELETED':
+          final memoryId = payload['memoryId'] as String?;
+          if (memoryId != null) {
+            TombstoneService.markMemoryTombstoned(memoryId);
+            ref.read(allMemoriesProvider.notifier).deleteMemory(memoryId, broadcast: false);
+          }
+          break;
+        case 'MEMORY_LIKED':
+          final memoryId = payload['memoryId'] as String?;
+          final memberId = payload['memberId'] as String?;
+          final isLiked = payload['isLiked'] as bool?;
+          if (memoryId != null && memberId != null && isLiked != null) {
+            ref.read(allMemoriesProvider.notifier).receiveRemoteLike(memoryId, memberId, isLiked);
+          }
           break;
         case 'AUDIT_LOG_ADDED':
           final auditLog = TripAuditLog.fromJson(payload);
@@ -781,6 +829,46 @@ class RealtimeSyncService {
     });
   }
 
+  void broadcastDeleteMemory(String memoryId, String tripId) {
+    _sendMessage({
+      'type': 'MEMORY_DELETED',
+      'payload': {
+        'tripId': tripId,
+        'memoryId': memoryId,
+      },
+    });
+  }
+
+  void broadcastMemoryLike(String memoryId, String memberId, bool isLiked, String tripId) {
+    _sendMessage({
+      'type': 'MEMORY_LIKED',
+      'payload': {
+        'tripId': tripId,
+        'memoryId': memoryId,
+        'memberId': memberId,
+        'isLiked': isLiked,
+      },
+    });
+  }
+
+  /// Broadcasts companion memory capture/upload activity in real-time
+  void broadcastMemoryActivity(String tripId, String memberId, String memberName, bool isUploading) {
+    final db = _database;
+    if (db == null || tripId.isEmpty || memberId.isEmpty) return;
+    try {
+      final activityRef = db.ref('trips/$tripId/memory_activity/$memberId');
+      if (isUploading) {
+        activityRef.set({
+          'name': memberName,
+          'timestamp': ServerValue.timestamp,
+        });
+        activityRef.onDisconnect().remove();
+      } else {
+        activityRef.remove();
+      }
+    } catch (_) {}
+  }
+
   void _sendMessage(Map<String, dynamic> message) {
     final db = _database;
     if (db == null) return;
@@ -811,6 +899,8 @@ class RealtimeSyncService {
     _sosSubscription = null;
     _nudgeSubscription?.cancel();
     _nudgeSubscription = null;
+    _memoryActivitySubscription?.cancel();
+    _memoryActivitySubscription = null;
     cancelWakeQueue();
     _connectedTripId = null;
   }
@@ -822,6 +912,8 @@ class RealtimeSyncService {
     disconnect();
   }
 }
+
+final activeMemoryUploadersProvider = StateProvider.family<List<String>, String>((ref, tripId) => []);
 
 final realtimeSyncServiceProvider = Provider<RealtimeSyncService>((ref) {
   final service = RealtimeSyncService(ref);

@@ -222,4 +222,193 @@ ${senderName != null ? 'Shared by: $senderName\n' : ''}
     final roomCode = CloudTripSyncService.getRoomCode(package.trip.id, trip: package.trip);
     await Clipboard.setData(ClipboardData(text: roomCode));
   }
+
+  /// Generates a comprehensive plain-text itinerary & expense report suitable for sharing or saving
+  static String generateFullTripSummaryReport(TripPackage package) {
+    final trip = package.trip;
+    final totalSpent = package.expenses.fold<double>(0, (s, e) => s + e.totalAmount);
+    final dates = DateFormatter.formatTripDateRange(trip.startDate, trip.endDate);
+    final buf = StringBuffer();
+
+    buf.writeln('========================================');
+    buf.writeln('🌍 TRIP SUMMARY: ${trip.title.toUpperCase()}');
+    buf.writeln('========================================');
+    buf.writeln('📅 Dates: $dates');
+    if (trip.description != null && trip.description!.isNotEmpty) {
+      buf.writeln('📝 Overview: ${trip.description}');
+    }
+    buf.writeln('👥 Travelers (${trip.members.length}): ${trip.members.map((m) => m.name).join(', ')}');
+    buf.writeln('💰 Total Expenditure: ${CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency)}');
+    if (trip.budget != null) {
+      buf.writeln('🎯 Budget: ${CurrencyFormatter.format(trip.budget!, currency: trip.defaultCurrency)} (${totalSpent <= trip.budget! ? "Within Budget" : "Over Budget"})');
+    }
+    buf.writeln('');
+
+    // Itinerary & Stoppages
+    buf.writeln('📍 ITINERARY & STOPPAGES (${package.stoppages.length})');
+    buf.writeln('----------------------------------------');
+    if (package.stoppages.isEmpty) {
+      buf.writeln('No waypoints logged.');
+    } else {
+      for (int i = 0; i < package.stoppages.length; i++) {
+        final s = package.stoppages[i];
+        final timeStr = DateFormatter.formatDateTime(s.arrivedAt);
+        buf.writeln('${i + 1}. ${s.name} [${s.category}]');
+        buf.writeln('   🕒 Arrived: $timeStr');
+        if (s.departedAt != null) {
+          buf.writeln('   ⏱️ Duration: ${DateFormatter.formatDuration(s.duration ?? Duration.zero)}');
+        }
+        if (s.address != null && s.address!.isNotEmpty) {
+          buf.writeln('   📌 Location: ${s.address}');
+        }
+        if (s.notes != null && s.notes!.isNotEmpty) {
+          buf.writeln('   💡 Note: ${s.notes}');
+        }
+        buf.writeln('');
+      }
+    }
+
+    // Expense Breakdown
+    buf.writeln('💳 EXPENSES & BILLS (${package.expenses.length})');
+    buf.writeln('----------------------------------------');
+    if (package.expenses.isEmpty) {
+      buf.writeln('No expenses recorded.');
+    } else {
+      final Map<String, double> catTotals = {};
+      for (final e in package.expenses) {
+        catTotals[e.category] = (catTotals[e.category] ?? 0.0) + e.totalAmount;
+      }
+      buf.writeln('Category Totals:');
+      catTotals.forEach((cat, amt) {
+        buf.writeln(' • $cat: ${CurrencyFormatter.format(amt, currency: trip.defaultCurrency)}');
+      });
+      buf.writeln('');
+      buf.writeln('Recent Bills:');
+      for (final e in package.expenses.take(15)) {
+        final payer = trip.getMemberName(e.paidByMemberId);
+        buf.writeln(' • ${e.title}: ${CurrencyFormatter.format(e.totalAmount, currency: e.currency)} (Paid by $payer)');
+      }
+      if (package.expenses.length > 15) {
+        buf.writeln(' ... and ${package.expenses.length - 15} more bills');
+      }
+    }
+    buf.writeln('');
+    buf.writeln('----------------------------------------');
+    buf.writeln('Generated via TrackMyTrip');
+    return buf.toString();
+  }
+
+  static Future<void> shareFullTripSummary(TripPackage package) async {
+    final text = generateFullTripSummaryReport(package);
+    await Share.share(
+      text,
+      subject: 'Trip Summary: ${package.trip.title}',
+    );
+  }
+
+  /// Copies the complete plain-text itinerary & expense report to the system clipboard.
+  static Future<void> copyFullTripSummaryToClipboard(TripPackage package) async {
+    final text = generateFullTripSummaryReport(package);
+    await Clipboard.setData(ClipboardData(text: text));
+  }
+
+  /// Exports all trip expenses to standard RFC 4180 compliant CSV format
+  static String generateExpensesCsv(Trip trip, List<Expense> expenses) {
+    final buf = StringBuffer();
+    buf.writeln('Date,Time,Title,Category,Amount,Currency,Paid By,Split Mode,Attendees,Notes');
+    for (final e in expenses) {
+      final dateStr = '${e.createdAt.year}-${e.createdAt.month.toString().padLeft(2, '0')}-${e.createdAt.day.toString().padLeft(2, '0')}';
+      final timeStr = '${e.createdAt.hour.toString().padLeft(2, '0')}:${e.createdAt.minute.toString().padLeft(2, '0')}';
+      final title = '"${e.title.replaceAll('"', '""')}"';
+      final category = '"${e.category.replaceAll('"', '""')}"';
+      final amount = e.totalAmount.toStringAsFixed(2);
+      final currency = e.currency;
+      final payerName = trip.getMemberName(e.paidByMemberId);
+      final paidBy = '"${payerName.replaceAll('"', '""')}"';
+      final splitMode = e.splitType.name;
+      final attendeeNames = e.splits.map((s) => trip.getMemberName(s.memberId)).join('; ');
+      final attendees = '"${attendeeNames.replaceAll('"', '""')}"';
+      final notes = '"${(e.notes ?? '').replaceAll('"', '""')}"';
+      buf.writeln('$dateStr,$timeStr,$title,$category,$amount,$currency,$paidBy,$splitMode,$attendees,$notes');
+    }
+    return buf.toString();
+  }
+
+  /// Shares the generated expenses CSV
+  static Future<void> shareExpensesCsv(Trip trip, List<Expense> expenses) async {
+    final csv = generateExpensesCsv(trip, expenses);
+    await Share.share(
+      csv,
+      subject: 'Expenses CSV - ${trip.title}',
+    );
+  }
+
+  // Loop 119: Markdown formatted travel itinerary & log exporter
+  static String generateMarkdownItinerary(TripPackage package) {
+    final trip = package.trip;
+    final totalSpent = package.expenses.fold<double>(0.0, (s, e) => s + e.totalAmount);
+    final dates = DateFormatter.formatTripDateRange(trip.startDate, trip.endDate);
+    final buf = StringBuffer();
+
+    buf.writeln('# 🗺️ ${trip.title}');
+    buf.writeln('**Dates:** $dates  ');
+    buf.writeln('**Total Spending:** ${CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency)}  ');
+    if (trip.budget != null) {
+      buf.writeln('**Trip Budget:** ${CurrencyFormatter.format(trip.budget!, currency: trip.defaultCurrency)}  ');
+    }
+    buf.writeln('**Travelers:** ${trip.members.map((m) => m.name).join(", ")}  \n');
+
+    buf.writeln('## 📍 Stoppages & Itinerary');
+    if (package.stoppages.isEmpty) {
+      buf.writeln('*No waypoints logged.*\n');
+    } else {
+      for (int i = 0; i < package.stoppages.length; i++) {
+        final s = package.stoppages[i];
+        final timeStr = DateFormatter.formatDateTime(s.arrivedAt);
+        buf.writeln('### ${i + 1}. ${s.name} (${s.category})');
+        buf.writeln('- **Arrived:** $timeStr');
+        if (s.departedAt != null) {
+          buf.writeln('- **Stay Duration:** ${DateFormatter.formatDuration(s.duration ?? Duration.zero)}');
+        }
+        if (s.address != null && s.address!.isNotEmpty) {
+          buf.writeln('- **Location:** ${s.address}');
+        }
+        if (s.notes != null && s.notes!.isNotEmpty) {
+          buf.writeln('- **Notes:** ${s.notes}');
+        }
+        buf.writeln('');
+      }
+    }
+
+    buf.writeln('## 💰 Financial Breakdown');
+    if (package.expenses.isEmpty) {
+      buf.writeln('*No expenses recorded.*\n');
+    } else {
+      buf.writeln('| Date | Title | Category | Paid By | Amount |');
+      buf.writeln('| :--- | :--- | :--- | :--- | :--- |');
+      for (final e in package.expenses) {
+        final dStr = DateFormatter.formatShortDate(e.createdAt);
+        final payer = trip.getMemberName(e.paidByMemberId);
+        final amt = CurrencyFormatter.format(e.totalAmount, currency: e.currency);
+        buf.writeln('| $dStr | ${e.title} | ${e.category} | $payer | $amt |');
+      }
+      buf.writeln('');
+    }
+
+    buf.writeln('---\n*Generated by TrackMyTrip*');
+    return buf.toString();
+  }
+
+  static Future<void> shareMarkdownItinerary(TripPackage package) async {
+    final md = generateMarkdownItinerary(package);
+    await Share.share(
+      md,
+      subject: '${package.trip.title} - Travel Itinerary.md',
+    );
+  }
+
+  /// Shares arbitrary text with an optional subject
+  static Future<void> shareText(String text, {String? subject}) async {
+    await Share.share(text, subject: subject);
+  }
 }

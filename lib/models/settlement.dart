@@ -66,13 +66,15 @@ class Settlement {
 
   factory Settlement.fromJson(Map<String, dynamic> json) {
     return Settlement(
-      id: json['id'] as String,
-      tripId: json['tripId'] as String,
-      payerMemberId: json['payerMemberId'] as String,
-      receiverMemberId: json['receiverMemberId'] as String,
-      amount: (json['amount'] as num).toDouble(),
-      currency: json['currency'] as String,
-      settledAt: DateTime.parse(json['settledAt'] as String),
+      id: json['id'] as String? ?? '',
+      tripId: json['tripId'] as String? ?? '',
+      payerMemberId: json['payerMemberId'] as String? ?? '',
+      receiverMemberId: json['receiverMemberId'] as String? ?? '',
+      amount: (json['amount'] as num?)?.toDouble() ?? 0.0,
+      currency: json['currency'] as String? ?? 'INR',
+      settledAt: json['settledAt'] != null
+          ? (DateTime.tryParse(json['settledAt'] as String) ?? DateTime.now())
+          : DateTime.now(),
       notes: json['notes'] as String?,
       paymentMethod: json['paymentMethod'] as String? ?? 'Cash',
       isAdvance: json['isAdvance'] as bool? ?? false,

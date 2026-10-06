@@ -21,7 +21,9 @@ class AuthService {
   final LocalStorageService _storage;
   final PushNotificationService _pushService;
   final SecurityService _securityService;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    serverClientId: '731719697818-ljfrslc4gbqucih5n6qfnt01v5ct3nsj.apps.googleusercontent.com',
+  );
 
   AuthService(
     this._storage,
@@ -362,9 +364,14 @@ class AuthService {
         _syncToUserProfile(googleAuthUser);
         return googleAuthUser;
       } on FirebaseAuthException catch (e) {
-        throw Exception(e.message ?? e.toString());
+        if (kDebugMode) debugPrint('[AuthService] Firebase Auth error: ${e.code} - ${e.message}');
+        throw Exception(e.message ?? 'Authentication failed (${e.code})');
       } catch (e) {
-        throw Exception(e.toString());
+        if (kDebugMode) debugPrint('[AuthService] Google Sign-In error: $e');
+        if (e.toString().contains('Google Sign-In aborted')) {
+          rethrow;
+        }
+        throw Exception(e.toString().replaceAll('Exception: ', ''));
       }
     } else {
       // Local fallback for unit testing

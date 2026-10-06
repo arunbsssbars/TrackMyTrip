@@ -36,6 +36,22 @@ class Stoppage {
     return departedAt!.difference(arrivedAt);
   }
 
+  String get formattedDuration {
+    if (departedAt == null) {
+      final diff = DateTime.now().difference(arrivedAt);
+      if (diff.isNegative) return 'Just arrived';
+      if (diff.inHours >= 1) {
+        return 'Ongoing: ${diff.inHours}h ${diff.inMinutes % 60}m';
+      }
+      return 'Ongoing: ${diff.inMinutes}m';
+    }
+    final d = departedAt!.difference(arrivedAt);
+    if (d.inHours >= 1) {
+      return '${d.inHours}h ${d.inMinutes % 60}m';
+    }
+    return '${d.inMinutes}m';
+  }
+
   Stoppage copyWith({
     String? id,
     String? tripId,
@@ -89,17 +105,21 @@ class Stoppage {
 
   factory Stoppage.fromJson(Map<String, dynamic> json) {
     return Stoppage(
-      id: json['id'] as String,
-      tripId: json['tripId'] as String,
-      name: json['name'] as String,
-      latitude: (json['latitude'] as num).toDouble(),
-      longitude: (json['longitude'] as num).toDouble(),
+      id: json['id'] as String? ?? '',
+      tripId: json['tripId'] as String? ?? '',
+      name: json['name'] as String? ?? 'Waypoint',
+      latitude: (json['latitude'] as num?)?.toDouble() ?? 0.0,
+      longitude: (json['longitude'] as num?)?.toDouble() ?? 0.0,
       address: json['address'] as String?,
-      category: json['category'] as String,
-      arrivedAt: DateTime.parse(json['arrivedAt'] as String),
-      departedAt: json['departedAt'] != null ? DateTime.parse(json['departedAt'] as String) : null,
+      category: json['category'] as String? ?? 'Other',
+      arrivedAt: json['arrivedAt'] != null
+          ? (DateTime.tryParse(json['arrivedAt'] as String) ?? DateTime.now())
+          : DateTime.now(),
+      departedAt: json['departedAt'] != null
+          ? DateTime.tryParse(json['departedAt'] as String)
+          : null,
       notes: json['notes'] as String?,
-      createdBy: json['createdBy'] as String,
+      createdBy: json['createdBy'] as String? ?? '',
       createdByName: json['createdByName'] as String?,
       orderIndex: json['orderIndex'] as int? ?? 0,
     );

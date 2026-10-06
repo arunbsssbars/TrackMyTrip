@@ -145,11 +145,8 @@ void main() {
 
   void applyDeviceSurface(WidgetTester tester, dynamic deviceOrSize) {
     if (deviceOrSize is DevicePreset) {
-      tester.view.physicalSize = Size(
-        deviceOrSize.logicalSize.width * deviceOrSize.pixelRatio,
-        deviceOrSize.logicalSize.height * deviceOrSize.pixelRatio,
-      );
-      tester.view.devicePixelRatio = deviceOrSize.pixelRatio;
+      tester.view.physicalSize = deviceOrSize.logicalSize;
+      tester.view.devicePixelRatio = 1.0;
     } else if (deviceOrSize is Size) {
       tester.view.physicalSize = deviceOrSize;
       tester.view.devicePixelRatio = 1.0;

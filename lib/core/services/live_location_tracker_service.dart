@@ -57,6 +57,9 @@ class LiveTrackingState {
     return diff;
   }
 
+  bool get isStationary => currentSpeedKmh < 3.0;
+  double get speedKmh => currentSpeedKmh;
+
   LiveTrackingState copyWith({
     bool? isTracking,
     bool? isSimulated,
@@ -108,6 +111,18 @@ class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
   set lastFirestoreBroadcastPositionForTesting(Position? pos) => _lastFirestoreBroadcastPosition = pos;
 
   LiveLocationTrackerNotifier(this._ref) : super(const LiveTrackingState());
+
+  /// Computes the optimal distance filter in meters dynamically based on user speed:
+  /// - Stationary (< 3 km/h): 25 meters (prevents GPS jitter while resting/dining)
+  /// - Walking/Running (3 - 15 km/h): 10 meters (high fidelity for trail walks)
+  /// - City Driving (15 - 50 km/h): 25 meters
+  /// - Highway Driving (> 50 km/h): 50 meters (saves massive battery on long highways)
+  static int getAdaptiveDistanceFilter(double speedKmh) {
+    if (speedKmh < 3.0) return 25;
+    if (speedKmh <= 15.0) return 10;
+    if (speedKmh <= 50.0) return 25;
+    return 50;
+  }
 
   /// Adaptive broadcast throttling to guarantee $0 Cloud Firestore usage.
   /// Drops unnecessary writes by 85-90% to protect the 20,000 writes/day free Spark tier quota.

@@ -242,32 +242,37 @@ class Trip {
     }
 
     return Trip(
-      id: json['id'] as String,
-      title: json['title'] as String,
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? 'Untitled Trip',
       description: json['description'] as String?,
       coverImageUrl: json['coverImageUrl'] as String?,
-      startDate: DateTime.parse(json['startDate'] as String),
-      endDate: DateTime.parse(json['endDate'] as String),
+      startDate: json['startDate'] != null
+          ? (DateTime.tryParse(json['startDate'] as String) ?? DateTime.now())
+          : DateTime.now(),
+      endDate: json['endDate'] != null
+          ? (DateTime.tryParse(json['endDate'] as String) ?? DateTime.now())
+          : DateTime.now(),
       defaultCurrency: json['defaultCurrency'] as String? ?? 'USD',
       budget: (json['budget'] as num?)?.toDouble(),
       shareCode: json['shareCode'] as String?,
       tripType: json['tripType'] as String? ?? 'group',
       members: deduplicateMembers((json['members'] as List<dynamic>?)
-              ?.map((e) => TripMember.fromJson(e as Map<String, dynamic>))
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => TripMember.fromJson(e))
               .toList() ??
           []),
       createdByMemberId: (json['createdByMemberId'] as String?) ??
           (json['creatorId'] as String?) ??
           '',
       createdAt: json['createdAt'] != null
-          ? DateTime.parse(json['createdAt'] as String)
+          ? (DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now())
           : DateTime.now(),
       isCompleted: isCompletedVal,
       status: (json['status'] as String?) ?? (isCompletedVal ? 'completed' : 'active'),
       rating: (json['rating'] as num?)?.toDouble(),
       experienceReview: json['experienceReview'] as String?,
       completedAt: json['completedAt'] != null
-          ? DateTime.parse(json['completedAt'] as String)
+          ? DateTime.tryParse(json['completedAt'] as String)
           : null,
       memberRatings: parsedMemberRatings,
       memberReviews: parsedMemberReviews,

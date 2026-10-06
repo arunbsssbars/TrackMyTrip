@@ -47,6 +47,9 @@ class ProximityAlert {
   final String? itemType;
   final double? amount;
   final String? currency;
+  final String? resolutionStatus;
+  final String? resolutionReason;
+  final DateTime? resolvedAt;
 
   const ProximityAlert({
     required this.id,
@@ -68,7 +71,12 @@ class ProximityAlert {
     this.itemType,
     this.amount,
     this.currency,
+    this.resolutionStatus,
+    this.resolutionReason,
+    this.resolvedAt,
   });
+
+  bool get isResolved => resolutionStatus == 'resolved';
 
   ProximityAlert copyWith({
     String? id,
@@ -90,6 +98,9 @@ class ProximityAlert {
     String? itemType,
     double? amount,
     String? currency,
+    String? resolutionStatus,
+    String? resolutionReason,
+    DateTime? resolvedAt,
   }) {
     return ProximityAlert(
       id: id ?? this.id,
@@ -111,6 +122,9 @@ class ProximityAlert {
       itemType: itemType ?? this.itemType,
       amount: amount ?? this.amount,
       currency: currency ?? this.currency,
+      resolutionStatus: resolutionStatus ?? this.resolutionStatus,
+      resolutionReason: resolutionReason ?? this.resolutionReason,
+      resolvedAt: resolvedAt ?? this.resolvedAt,
     );
   }
 
@@ -135,6 +149,9 @@ class ProximityAlert {
       if (itemType != null) 'itemType': itemType,
       if (amount != null) 'amount': amount,
       if (currency != null) 'currency': currency,
+      if (resolutionStatus != null) 'resolutionStatus': resolutionStatus,
+      if (resolutionReason != null) 'resolutionReason': resolutionReason,
+      if (resolvedAt != null) 'resolvedAt': resolvedAt!.toIso8601String(),
     };
   }
 
@@ -165,6 +182,11 @@ class ProximityAlert {
       itemType: json['itemType'] as String?,
       amount: (json['amount'] as num?)?.toDouble(),
       currency: json['currency'] as String?,
+      resolutionStatus: json['resolutionStatus'] as String?,
+      resolutionReason: json['resolutionReason'] as String?,
+      resolvedAt: json['resolvedAt'] != null
+          ? DateTime.tryParse(json['resolvedAt'] as String)
+          : null,
     );
   }
 }

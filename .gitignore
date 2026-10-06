@@ -50,3 +50,6 @@ app.*.map.json
 .env*
 google-services.json.secret
 GoogleService-Info.plist.secret
+
+build/ios_derived
+

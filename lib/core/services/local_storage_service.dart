@@ -301,8 +301,11 @@ class LocalStorageService {
     // Merge Memories
     final allMems = List<Memory>.from(_cachedMemories);
     allMems.removeWhere((m) => m.tripId == tripId);
-    allMems.addAll(package.memories);
-    await saveAllMemories(allMems);
+    final validMemories = package.memories.where((m) => !TombstoneService.isMemoryTombstoned(m.id)).toList();
+    allMems.addAll(validMemories);
+    await _db.deleteMemoriesForTrip(tripId);
+    await _db.saveAllMemories(allMems);
+    _cachedMemories = allMems;
 
     // Merge Settlements
     final allSettlements = List<Settlement>.from(_cachedSettlements);
@@ -433,7 +436,8 @@ class LocalStorageService {
 
   Future<void> deleteMemory(String memoryId) async {
     _cachedMemories.removeWhere((m) => m.id == memoryId);
-      await _db.deleteMemory(memoryId);
+    await _db.deleteMemory(memoryId);
+    await TombstoneService.markMemoryTombstoned(memoryId);
   }
 
   List<Memory> getAllMemories() => List.from(_cachedMemories);
@@ -646,6 +650,25 @@ class LocalStorageService {
     await _prefs.setBool('in_app_banners_enabled', enabled);
   }
 
+  // --- GEOFENCE & PROXIMITY PREFERENCES ---
+  double getStrayThresholdMeters() => _prefs.getDouble('stray_threshold_meters') ?? 1500.0;
+
+  Future<void> setStrayThresholdMeters(double meters) async {
+    await _prefs.setDouble('stray_threshold_meters', meters);
+  }
+
+  bool getStrayAlertsEnabled() => _prefs.getBool('stray_alerts_enabled') ?? true;
+
+  Future<void> setStrayAlertsEnabled(bool enabled) async {
+    await _prefs.setBool('stray_alerts_enabled', enabled);
+  }
+
+  bool getStoppageAlertsEnabled() => _prefs.getBool('stoppage_alerts_enabled') ?? true;
+
+  Future<void> setStoppageAlertsEnabled(bool enabled) async {
+    await _prefs.setBool('stoppage_alerts_enabled', enabled);
+  }
+
   // --- AUTH SESSION & REGISTERED ACCOUNTS ---
   AuthUser? getAuthSession() => _cachedAuthUser;
 
@@ -782,6 +805,37 @@ class LocalStorageService {
     await _db.deleteInvitation(invitationId);
   }
 
+
+  /// Loop 126: Telemetry stats for offline SQLite database & cached entities
+  Map<String, int> getStorageTelemetry() {
+    return {
+      'trips': _cachedTrips.length,
+      'stoppages': _cachedStoppages.length,
+      'expenses': _cachedExpenses.length,
+      'memories': _cachedMemories.length,
+      'settlements': _cachedSettlements.length,
+      'auditLogs': _cachedAuditLogs.length,
+      'mutations': _cachedMutations.length,
+      'alerts': _cachedAlerts.length,
+    };
+  }
+
+  /// Loop 126: Purge obsolete or completed mutations from the offline sync queue
+  Future<int> purgeObsoleteMutations() async {
+    final initialCount = _cachedMutations.length;
+    final now = DateTime.now();
+    // Remove mutations already synced OR failed mutations older than 7 days
+    _cachedMutations.removeWhere((m) {
+      if (m.status == SyncStatus.synced) return true;
+      if (m.status == SyncStatus.failed && now.difference(m.createdAt).inDays > 7) return true;
+      return false;
+    });
+    final purged = initialCount - _cachedMutations.length;
+    if (purged > 0) {
+      await saveAllMutations(_cachedMutations);
+    }
+    return purged;
+  }
 
   Future<void> _purgeDummyData() async {
     final dummyTrips = _cachedTrips.where((t) =>

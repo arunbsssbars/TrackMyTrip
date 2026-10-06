@@ -10,10 +10,12 @@ class CurrencyFormatter {
 
   /// Format an amount into a currency string gracefully.
   /// Never defaults to '$' unless currency is explicitly USD.
+  /// Non-finite amounts render as zero; negatives render as `-₹50.00`.
   static String format(double amount, {String? currency}) {
     final cur = (currency != null && currency.trim().isNotEmpty) ? currency.trim() : fallbackCurrency;
     final symbol = getCurrencySymbol(cur);
-    
+    final safe = _sanitize(amount);
+
     // Use Indian Lakh/Crore grouping for INR, standard international for others
     final NumberFormat formatter;
     if (cur.toUpperCase() == 'INR' || symbol == '₹') {
@@ -21,12 +23,21 @@ class CurrencyFormatter {
     } else {
       formatter = NumberFormat('#,##0.00');
     }
-    
-    return '$symbol${formatter.format(amount)}';
+
+    final sign = safe < 0 ? '-' : '';
+    return '$sign$symbol${formatter.format(safe.abs())}';
+  }
+
+  /// Converts NaN/Infinity to 0 and collapses negative-zero rounding artefacts.
+  static double _sanitize(double amount) {
+    if (amount.isNaN || amount.isInfinite) return 0.0;
+    final rounded = roundTo2Decimals(amount);
+    return rounded == 0 ? 0.0 : rounded;
   }
 
   /// Reliably rounds any double to 2 decimal places without IEEE-754 binary floating drift.
   static double roundTo2Decimals(double value) {
+    if (value.isNaN || value.isInfinite) return 0.0;
     return ((value * 100).round()) / 100.0;
   }
 
@@ -34,8 +45,10 @@ class CurrencyFormatter {
   static String formatCompact(double amount, {String? currency}) {
     final cur = (currency != null && currency.trim().isNotEmpty) ? currency.trim() : fallbackCurrency;
     final symbol = getCurrencySymbol(cur);
+    final safe = _sanitize(amount);
     final formatter = NumberFormat.compact();
-    return '$symbol${formatter.format(amount)}';
+    final sign = safe < 0 ? '-' : '';
+    return '$sign$symbol${formatter.format(safe.abs())}';
   }
 
   /// Format an amount with secondary foreign currency conversion tag
@@ -130,7 +143,37 @@ class CurrencyFormatter {
       case 'BDT':
         return '৳';
       default:
-        return '$trimmed ';
+        // Only echo plausible ISO-4217 codes; junk ("null", long strings) falls back.
+        final upper = trimmed.toUpperCase();
+        if (RegExp(r'^[A-Z]{3}$').hasMatch(upper)) return '$upper ';
+        return '₹';
     }
+  }
+
+  /// Estimated baseline exchange rate against INR for multi-currency previews
+  static double getEstimatedRateToInr(String currency) {
+    switch (currency.toUpperCase()) {
+      case 'INR': return 1.0;
+      case 'USD': return 86.50;
+      case 'EUR': return 93.80;
+      case 'GBP': return 110.20;
+      case 'AED': return 23.55;
+      case 'SGD': return 64.20;
+      case 'THB': return 2.50;
+      case 'JPY': return 0.58;
+      case 'CAD': return 63.40;
+      case 'AUD': return 56.10;
+      default: return 86.50;
+    }
+  }
+
+  /// Converts an amount between currencies using estimated benchmark rates
+  static double convertEstimated(double amount, String fromCurrency, String toCurrency) {
+    if (fromCurrency.toUpperCase() == toCurrency.toUpperCase()) return amount;
+    final inrRateFrom = getEstimatedRateToInr(fromCurrency);
+    final inrRateTo = getEstimatedRateToInr(toCurrency);
+    if (inrRateTo <= 0) return amount;
+    final inrAmount = amount * inrRateFrom;
+    return inrAmount / inrRateTo;
   }
 }

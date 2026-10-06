@@ -125,25 +125,28 @@ class Expense {
 
   factory Expense.fromJson(Map<String, dynamic> json) {
     return Expense(
-      id: json['id'] as String,
-      tripId: json['tripId'] as String,
+      id: json['id'] as String? ?? '',
+      tripId: json['tripId'] as String? ?? '',
       stoppageId: json['stoppageId'] as String?,
-      title: json['title'] as String,
-      totalAmount: (json['totalAmount'] as num).toDouble(),
-      currency: json['currency'] as String,
-      category: json['category'] as String,
-      paidByMemberId: json['paidByMemberId'] as String,
+      title: json['title'] as String? ?? 'Untitled Expense',
+      totalAmount: (json['totalAmount'] as num?)?.toDouble() ?? 0.0,
+      currency: json['currency'] as String? ?? 'INR',
+      category: json['category'] as String? ?? 'Other',
+      paidByMemberId: json['paidByMemberId'] as String? ?? '',
       splitType: SplitType.values.firstWhere(
         (e) => e.name == json['splitType'],
         orElse: () => SplitType.equal,
       ),
       splits: (json['splits'] as List<dynamic>?)
-              ?.map((e) => ExpenseSplit.fromJson(e as Map<String, dynamic>))
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => ExpenseSplit.fromJson(e))
               .toList() ??
           [],
       receiptImagePath: json['receiptImagePath'] as String?,
       notes: json['notes'] as String?,
-      createdAt: DateTime.parse(json['createdAt'] as String),
+      createdAt: json['createdAt'] != null
+          ? (DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now())
+          : DateTime.now(),
       originalCurrency: json['originalCurrency'] as String?,
       originalAmount: (json['originalAmount'] as num?)?.toDouble(),
       exchangeRate: (json['exchangeRate'] as num?)?.toDouble(),

@@ -74,6 +74,12 @@ class NotificationFormatter {
       }
     }
 
+    // Clean SOS phrasing: "SOS added" -> "SOS sent"
+    msg = msg.replaceAll(RegExp(r'SOS added', caseSensitive: false), 'SOS sent');
+    msg = msg.replaceAll(RegExp(r'added SOS', caseSensitive: false), 'sent SOS');
+    msg = msg.replaceAll(RegExp(r'added stop "🚨 Emergency SOS[^"]*"', caseSensitive: false), 'sent SOS broadcast');
+    msg = msg.replaceAll(RegExp(r'added stop "Emergency SOS[^"]*"', caseSensitive: false), 'sent SOS broadcast');
+
     return msg;
   }
 
@@ -97,11 +103,6 @@ class NotificationFormatter {
     ProximityAlert alert, {
     required String currentUserId,
   }) {
-    final isSender = alert.senderMemberId == currentUserId || alert.isOutgoing;
-    if (alert.type == AlertType.sosEmergency && isSender) {
-      return '🚨 SOS Distress Active';
-    }
-
     String title = alert.title.trim();
     // Strip redundant leading "New " / "new "
     if (title.startsWith(RegExp(r'^New\s+', caseSensitive: false))) {
@@ -109,6 +110,17 @@ class NotificationFormatter {
     }
 
     final lower = title.toLowerCase();
+    if (lower == 'sos added' ||
+        lower == 'emergency sos added' ||
+        lower == 'sos sent' ||
+        lower.contains('sos added')) {
+      return 'SOS Sent';
+    }
+
+    final isSender = alert.senderMemberId == currentUserId || alert.isOutgoing;
+    if (alert.type == AlertType.sosEmergency && isSender) {
+      return '🚨 SOS Distress Active';
+    }
     if (lower == 'waypoint added' ||
         lower == 'stoppage added' ||
         lower == 'stoppages added' ||

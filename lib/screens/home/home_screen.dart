@@ -30,6 +30,7 @@ import '../../providers/audit_log_provider.dart';
 import '../common/user_avatar.dart';
 import '../stats/trip_analytics_screen.dart';
 import '../../widgets/app_floating_button.dart';
+import '../../core/design_system/design_system.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -234,10 +235,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ..sort((a, b) => b.value.compareTo(a.value));
 
     return Scaffold(
-      body: CustomScrollView(
-        controller: _scrollController,
-        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-        slivers: [
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1200),
+          child: CustomScrollView(
+            controller: _scrollController,
+            physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+            slivers: [
           // Fixed & Crisp App Bar
           SliverAppBar(
             pinned: true,
@@ -283,6 +287,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               IconButton(
                 visualDensity: VisualDensity.compact,
                 padding: const EdgeInsets.symmetric(horizontal: 4),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                 iconSize: 22,
                 icon: const Icon(Icons.add_location_alt_rounded,
                     color: AppTheme.primary),
@@ -292,7 +297,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: SosBadgeIcon(
-                  size: 30,
+                  size: 32,
                   tooltip: 'Emergency SOS & Safety Alerts',
                   onTap: () => NotificationCenterSheet.show(context),
                 ),
@@ -1007,43 +1012,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           else if (filteredTrips.isEmpty)
             SliverFillRemaining(
               hasScrollBody: false,
-              child: Container(
-                alignment: const Alignment(0, -0.28),
-                padding: const EdgeInsets.fromLTRB(32, 16, 32, 40),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(18),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withAlpha(20),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.search_off_rounded,
-                          size: 48, color: AppTheme.primary),
-                    ),
-                    const SizedBox(height: 14),
-                    Text(
-                      _searchQuery.isNotEmpty
-                          ? 'No Journeys Found for "$_searchQuery"'
-                          : 'No ${_activeFilter.toUpperCase()} Trips Found',
-                      style: const TextStyle(
-                          fontSize: 17, fontWeight: FontWeight.bold),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _searchQuery.isNotEmpty
-                          ? 'Try searching by a different name, destination, or member.'
-                          : 'Switch categories above to see trips in other categories.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                          fontSize: 13,
-                          color: isDark
-                              ? Colors.grey[400]
-                              : AppTheme.textMutedLight),
-                    ),
-                  ],
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.xl,
+                    vertical: AppSpacing.lg,
+                  ),
+                  child: AppEmptyState(
+                    icon: Icons.search_off_rounded,
+                    title: _searchQuery.isNotEmpty
+                        ? 'No Journeys Found for "$_searchQuery"'
+                        : 'No ${_activeFilter.toUpperCase()} Trips Found',
+                    message: _searchQuery.isNotEmpty
+                        ? 'Try searching by a different name, destination, or member.'
+                        : 'Switch categories above to see trips in other categories.',
+                  ),
                 ),
               ),
             )
@@ -1132,6 +1115,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ],
       ),
+    ),
+  ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       floatingActionButton: MediaQuery.of(context).viewInsets.bottom > 0
           ? null
@@ -1311,8 +1296,14 @@ class _TripCard extends StatelessWidget {
       elevation = 0;
     }
 
+    final hMargin = context.isCompact
+        ? AppSpacing.md - 2.0 // ~14
+        : (MediaQuery.sizeOf(context).width > 900
+            ? (MediaQuery.sizeOf(context).width - 760) / 2
+            : AppSpacing.xl);
+
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      margin: EdgeInsets.symmetric(horizontal: hMargin, vertical: AppSpacing.xs),
       child: Material(
         color: cardBackground,
         elevation: elevation,
@@ -1325,18 +1316,18 @@ class _TripCard extends StatelessWidget {
                 : (isRunning
                     ? const Color(0xFF10B981).withAlpha(isDark ? 35 : 25)
                     : Colors.black.withAlpha(isDark ? 45 : 18))),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         clipBehavior: Clip.antiAlias,
         child: Container(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppRadius.lg),
             border: Border.all(
               color: borderColor,
               width: borderWidth,
             ),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md - 4.0, vertical: AppSpacing.sm + 2.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1470,7 +1461,7 @@ class _TripCard extends StatelessWidget {
                                             ? AppTheme.borderDark
                                             : const Color(0xFFCBD5E1)),
                                   ),
-                                  child: Text(
+                                  child: AppResilientText.badge(
                                     roomCode,
                                     style: TextStyle(
                                       color: isDark
@@ -1479,8 +1470,6 @@ class _TripCard extends StatelessWidget {
                                       fontSize: 9.5,
                                       fontWeight: FontWeight.w800,
                                     ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
                               ],

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/services/firestore_sync_service.dart';
 import '../core/services/local_storage_service.dart';
@@ -261,3 +262,59 @@ final simplifiedTransfersProvider = Provider<List<DebtTransfer>>((ref) {
   final balances = ref.watch(tripNetBalancesProvider);
   return DebtSimplifier.simplifyDebts(balances);
 });
+
+/// Summary of all upfront advance contributions pooled for the trip
+class TripAdvancePoolSummary {
+  final double totalAdvanceCollected;
+  final Map<String, double> memberContributions;
+  final int contributorCount;
+  final double remainingPoolBalance;
+  final Map<String, double> proRataRefunds;
+
+  const TripAdvancePoolSummary({
+    required this.totalAdvanceCollected,
+    required this.memberContributions,
+    required this.contributorCount,
+    this.remainingPoolBalance = 0.0,
+    this.proRataRefunds = const {},
+  });
+}
+
+/// Provides total pooled advance contributions and member breakdown
+final tripAdvancePoolProvider = Provider<TripAdvancePoolSummary>((ref) {
+  final settlements = ref.watch(currentTripSettlementsProvider);
+  final advances = settlements.where((s) => s.isAdvance).toList();
+  final expenses = ref.watch(currentTripExpensesProvider).where((e) => !e.isPersonal).toList();
+
+  double totalCollected = 0.0;
+  final Map<String, double> byMember = {};
+
+  for (final s in advances) {
+    totalCollected += s.amount;
+    byMember[s.payerMemberId] = (byMember[s.payerMemberId] ?? 0.0) + s.amount;
+  }
+
+  totalCollected = CurrencyFormatter.roundTo2Decimals(totalCollected);
+
+  // Calculate remaining kitty funds after total trip group expenses
+  final totalExpenses = expenses.fold<double>(0.0, (acc, e) => acc + e.totalAmount);
+  final remaining = CurrencyFormatter.roundTo2Decimals(math.max(0.0, totalCollected - totalExpenses));
+
+  // Compute pro-rata refund for each contributor if pool has remaining balance
+  final Map<String, double> refunds = {};
+  if (remaining > 0.01 && totalCollected > 0.01) {
+    byMember.forEach((memberId, amount) {
+      final refundShare = (amount / totalCollected) * remaining;
+      refunds[memberId] = CurrencyFormatter.roundTo2Decimals(refundShare);
+    });
+  }
+
+  return TripAdvancePoolSummary(
+    totalAdvanceCollected: totalCollected,
+    memberContributions: byMember,
+    contributorCount: byMember.keys.length,
+    remainingPoolBalance: remaining,
+    proRataRefunds: refunds,
+  );
+});
+

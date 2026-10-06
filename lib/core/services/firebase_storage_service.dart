@@ -47,7 +47,7 @@ class FirebaseStorageService {
         });
       }
 
-      final snapshot = await uploadTask.timeout(const Duration(seconds: 45));
+      final snapshot = await uploadTask.timeout(const Duration(seconds: 15));
       final downloadUrl = await snapshot.ref.getDownloadURL();
       if (kDebugMode) {
         debugPrint('[FirebaseStorageService] Uploaded memory $memoryId to Cloud Storage: $downloadUrl');

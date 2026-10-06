@@ -15,6 +15,7 @@ import '../../core/services/location_service.dart';
 import '../../core/services/image_compression_service.dart';
 import '../../core/services/ocr_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/design_system/design_system.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../common/user_avatar.dart';
 import '../../models/expense.dart';
@@ -96,6 +97,56 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> with Widget
   String _foreignCurrency = 'USD';
   final _foreignAmountController = TextEditingController();
   final _exchangeRateController = TextEditingController();
+
+  void _applySplitPreset(String presetKey, Trip trip) {
+    HapticFeedback.selectionClick();
+    final members = trip.members;
+    if (members.isEmpty) return;
+
+    setState(() {
+      if (presetKey == 'equal_all') {
+        _splitType = SplitType.equal;
+        for (final m in members) {
+          _equalIncluded[m.id] = true;
+          _sharesControllers[m.id]?.text = '1';
+          _percentControllers[m.id]?.text = (100.0 / members.length).toStringAsFixed(1);
+        }
+      } else if (presetKey == '50_50') {
+        _splitType = SplitType.percentage;
+        final payerId = _paidByMemberId ?? members.first.id;
+        final otherMembers = members.where((m) => m.id != payerId).toList();
+        if (otherMembers.isNotEmpty) {
+          final other = otherMembers.first;
+          _percentControllers[payerId]?.text = '50';
+          _percentControllers[other.id]?.text = '50';
+          for (final m in members) {
+            if (m.id != payerId && m.id != other.id) {
+              _percentControllers[m.id]?.text = '0';
+            }
+          }
+        }
+      } else if (presetKey == '60_40') {
+        _splitType = SplitType.percentage;
+        final payerId = _paidByMemberId ?? members.first.id;
+        final otherMembers = members.where((m) => m.id != payerId).toList();
+        if (otherMembers.isNotEmpty) {
+          final other = otherMembers.first;
+          _percentControllers[payerId]?.text = '60';
+          _percentControllers[other.id]?.text = '40';
+          for (final m in members) {
+            if (m.id != payerId && m.id != other.id) {
+              _percentControllers[m.id]?.text = '0';
+            }
+          }
+        }
+      } else if (presetKey == 'by_shares') {
+        _splitType = SplitType.shares;
+        for (final m in members) {
+          _sharesControllers[m.id]?.text = '1';
+        }
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -1185,6 +1236,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> with Widget
         actions: [
           IconButton(
             icon: const Icon(Icons.document_scanner_rounded),
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
             tooltip: 'Scan Receipt with OCR',
             onPressed: _isScanningOcr ? null : _showOcrSourceDialog,
           ),
@@ -1203,7 +1255,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> with Widget
       body: Form(
         key: _formKey,
         child: ListView(
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.symmetric(horizontal: MediaQuery.sizeOf(context).width > 800 ? (MediaQuery.sizeOf(context).width - 680) / 2 : AppSpacing.lg, vertical: AppSpacing.lg),
           children: [
             if (_isLockedByOther)
               Container(
@@ -1745,6 +1797,57 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> with Widget
                               onSelectionChanged: (val) {
                                 setState(() => _splitType = val.first);
                               },
+                            ),
+                            const SizedBox(height: 10),
+
+                            // Loop 106: Quick Preset Split Ratios
+                            Row(
+                              children: [
+                                const Icon(Icons.bolt_rounded, size: 14, color: AppTheme.primary),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'PRESET RATIOS',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.5,
+                                    color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                ActionChip(
+                                  label: const Text('All Equal', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                                  onPressed: () => _applySplitPreset('equal_all', trip),
+                                  visualDensity: VisualDensity.compact,
+                                  backgroundColor: isDark ? AppTheme.surfaceDark : const Color(0xFFF1F5F9),
+                                ),
+                                if (trip.members.length >= 2) ...[
+                                  ActionChip(
+                                    label: const Text('50 / 50', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                                    onPressed: () => _applySplitPreset('50_50', trip),
+                                    visualDensity: VisualDensity.compact,
+                                    backgroundColor: isDark ? AppTheme.surfaceDark : const Color(0xFFF1F5F9),
+                                  ),
+                                  ActionChip(
+                                    label: const Text('60 / 40', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                                    onPressed: () => _applySplitPreset('60_40', trip),
+                                    visualDensity: VisualDensity.compact,
+                                    backgroundColor: isDark ? AppTheme.surfaceDark : const Color(0xFFF1F5F9),
+                                  ),
+                                ],
+                                ActionChip(
+                                  label: const Text('1 Share Each', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                                  onPressed: () => _applySplitPreset('by_shares', trip),
+                                  visualDensity: VisualDensity.compact,
+                                  backgroundColor: isDark ? AppTheme.surfaceDark : const Color(0xFFF1F5F9),
+                                ),
+                              ],
                             ),
                             const SizedBox(height: 14),
 

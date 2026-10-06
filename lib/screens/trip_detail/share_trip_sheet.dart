@@ -385,6 +385,105 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           ),
         ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: () {
+            final inviteText = 'Join our trip "${trip.title}" on TrackMyTrip!\nRoom Code: $roomCode\nOpen TrackMyTrip, tap "Join Trip", and enter code $roomCode to sync live routes and split bills.';
+            Clipboard.setData(ClipboardData(text: inviteText));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Trip invite message copied to clipboard!'),
+                behavior: SnackBarBehavior.floating,
+                backgroundColor: AppTheme.secondary,
+              ),
+            );
+          },
+          icon: const Icon(Icons.content_copy_rounded, size: 18),
+          label: const Text(
+            'Copy Invite Message',
+            style: TextStyle(fontWeight: FontWeight.bold),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            foregroundColor: AppTheme.primary,
+            side: const BorderSide(color: AppTheme.primary, width: 1.5),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: () {
+            final package = _buildTripPackage();
+            TripShareService.shareFullTripSummary(package);
+          },
+          icon: const Icon(Icons.summarize_rounded, size: 18),
+          label: const Text(
+            'Export Full Trip Summary & Itinerary',
+            style: TextStyle(fontWeight: FontWeight.bold),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            foregroundColor: const Color(0xFF0D9488),
+            side: const BorderSide(color: Color(0xFF0D9488), width: 1.4),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: () {
+            HapticFeedback.selectionClick();
+            final package = _buildTripPackage();
+            TripShareService.shareMarkdownItinerary(package);
+          },
+          icon: const Icon(Icons.description_outlined, size: 18),
+          label: const Text(
+            'Export Markdown Travel Itinerary (.md)',
+            style: TextStyle(fontWeight: FontWeight.bold),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            foregroundColor: const Color(0xFF6366F1),
+            side: const BorderSide(color: Color(0xFF6366F1), width: 1.4),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: () async {
+            HapticFeedback.lightImpact();
+            final package = _buildTripPackage();
+            await TripShareService.copyFullTripSummaryToClipboard(package);
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('✓ Full trip itinerary & summary copied to clipboard!'),
+                  behavior: SnackBarBehavior.floating,
+                  backgroundColor: Color(0xFF0D9488),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            }
+          },
+          icon: const Icon(Icons.copy_all_rounded, size: 18),
+          label: const Text(
+            'Copy Full Trip Summary',
+            style: TextStyle(fontWeight: FontWeight.bold),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            foregroundColor: const Color(0xFF0D9488),
+            side: const BorderSide(color: Color(0xFF0D9488), width: 1.4),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+        ),
         const SizedBox(height: 16),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,

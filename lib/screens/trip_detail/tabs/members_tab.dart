@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../../core/design_system/design_system.dart';
 import '../../../core/services/cloud_trip_sync_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/app_snackbar.dart';
@@ -29,6 +31,36 @@ class MembersTab extends ConsumerStatefulWidget {
 }
 
 class _MembersTabState extends ConsumerState<MembersTab> {
+  String _memberSearchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _callMember(String rawPhone, String memberName) async {
+    final cleanPhone = rawPhone.replaceAll(RegExp(r'[^\d+]'), '');
+    if (cleanPhone.isEmpty) {
+      AppSnackBar.showError(context, 'No valid phone number for $memberName');
+      return;
+    }
+    final uri = Uri.parse('tel:$cleanPhone');
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      } else {
+        if (mounted) {
+          AppSnackBar.showError(context, 'Could not open phone dialer for $cleanPhone');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        AppSnackBar.showError(context, 'Unable to dial phone: $e');
+      }
+    }
+  }
   void _openCompanionSearch() async {
     final canProceed = await TripGuardHelper.ensureTripOpenForEdit(
       context,
@@ -116,7 +148,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
             SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Add Custom Member',
+                'Add Member',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -291,6 +323,80 @@ class _MembersTabState extends ConsumerState<MembersTab> {
     );
   }
 
+  // Loop 43: Role permissions guide dialog
+  void _showRoleGuideDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.admin_panel_settings_rounded, color: AppTheme.primary, size: 22),
+            SizedBox(width: 8),
+            Text('Role Permissions Guide', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildRoleRow(
+              icon: Icons.workspace_premium_rounded,
+              color: const Color(0xFFF59E0B),
+              label: 'Creator',
+              permissions: 'Full control: add/remove members, edit all expenses, manage trip settings, and delete trip.',
+            ),
+            const SizedBox(height: 12),
+            _buildRoleRow(
+              icon: Icons.person_rounded,
+              color: AppTheme.primary,
+              label: 'Member',
+              permissions: 'Can add expenses, log stops, upload memories, and view all shared trip data.',
+            ),
+            const SizedBox(height: 12),
+            _buildRoleRow(
+              icon: Icons.visibility_rounded,
+              color: const Color(0xFF64748B),
+              label: 'Offline/Custom',
+              permissions: 'Read-only placeholder. Cannot authenticate or sync. Managed by Creator.',
+            ),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRoleRow({required IconData icon, required Color color, required String label, required String permissions}) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(color: color.withAlpha(25), shape: BoxShape.circle),
+          child: Icon(icon, size: 14, color: color),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: color)),
+              const SizedBox(height: 2),
+              Text(permissions, style: const TextStyle(fontSize: 11.5, height: 1.4)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -331,73 +437,153 @@ class _MembersTabState extends ConsumerState<MembersTab> {
         label: 'Share Trip',
         onPressed: () => _shareTripCode(shareCode, currentTrip.title),
       ),
-      body: ListView(
-        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-        padding: const EdgeInsets.fromLTRB(14, 14, 14, 88),
-        children: [
-          // 1. Members Header & Add Actions (Invite & Custom)
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Row(
-                children: [
-                  const Icon(Icons.groups_rounded, size: 20, color: AppTheme.primary),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Travelers (${currentTrip.members.length})',
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Row(
-              mainAxisSize: MainAxisSize.min,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final screenWidth = constraints.maxWidth;
+          final hPad = AppBreakpoints.isMedium(screenWidth) || AppBreakpoints.isExpanded(screenWidth) || AppBreakpoints.isLarge(screenWidth)
+              ? ((screenWidth - 760) / 2).clamp(AppSpacing.md, 380.0)
+              : (screenWidth < 360 ? 10.0 : AppSpacing.md);
+          return ListView(
+            physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+            padding: EdgeInsets.fromLTRB(hPad, AppSpacing.md, hPad, 88),
+            children: [
+          // 1. Members Header & Add Actions (Unified Add Member & Invite User)
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isCompact = constraints.maxWidth < 360;
+            return Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                OutlinedButton.icon(
-                  onPressed: _showAddOfflineMemberDialog,
-                  icon: const Icon(Icons.person_add_alt_1_rounded, size: 14),
-                  label: const Text('Custom', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.groups_rounded, size: 20, color: AppTheme.primary),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        'Travelers (${currentTrip.members.length})',
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    // Loop 43: Role guide tooltip
+                    GestureDetector(
+                      onTap: () => _showRoleGuideDialog(context),
+                      child: const Icon(Icons.help_outline_rounded, size: 16, color: AppTheme.primary),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 6),
-                FilledButton.icon(
-                  onPressed: _openCompanionSearch,
-                  icon: const Icon(Icons.person_search_rounded, size: 14),
-                  label: const Text('Invite', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _showAddOfflineMemberDialog,
+                      icon: const Icon(Icons.person_add_alt_1_rounded, size: 14),
+                      label: Text(
+                        isCompact ? 'Add' : 'Add Member',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        visualDensity: VisualDensity.compact,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        minimumSize: const Size(0, 34),
+                      ),
+                    ),
+                    FilledButton.icon(
+                      onPressed: _openCompanionSearch,
+                      icon: const Icon(Icons.person_search_rounded, size: 14),
+                      label: Text(
+                        isCompact ? 'Invite' : 'Invite User',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5),
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                        visualDensity: VisualDensity.compact,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        minimumSize: const Size(0, 34),
+                      ),
+                    ),
+                  ],
                 ),
               ],
-            ),
-          ],
+            );
+          },
         ),
 
+
+        if (currentTrip.members.length >= 4) ...[
+          const SizedBox(height: 10),
+          TextField(
+            controller: _searchController,
+            onChanged: (val) => setState(() => _memberSearchQuery = val.trim().toLowerCase()),
+            decoration: InputDecoration(
+              hintText: 'Search companions by name, email, or phone...',
+              hintStyle: const TextStyle(fontSize: 12),
+              prefixIcon: const Icon(Icons.search_rounded, size: 18),
+              suffixIcon: _memberSearchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear_rounded, size: 18),
+                      constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                      tooltip: 'Clear Member Search',
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() => _memberSearchQuery = '');
+                      },
+                    )
+                  : null,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              isDense: true,
+            ),
+          ),
+        ],
 
         const SizedBox(height: 10),
 
         // 3. Members List — Individual Container Cards
         () {
-          final hasExplicitCreator = currentTrip.members.any((m) => currentTrip.isMemberCreator(m));
+          final filteredMembers = _memberSearchQuery.isEmpty
+              ? currentTrip.members
+              : currentTrip.members.where((m) {
+                  final nameMatch = m.name.toLowerCase().contains(_memberSearchQuery);
+                  final emailMatch = m.email?.toLowerCase().contains(_memberSearchQuery) ?? false;
+                  final phoneMatch = m.phoneNumber?.contains(_memberSearchQuery) ?? false;
+                  return nameMatch || emailMatch || phoneMatch;
+                }).toList();
+          final hasExplicitCreator = filteredMembers.any((m) => currentTrip.isMemberCreator(m));
+
+          if (filteredMembers.isEmpty) {
+            return Container(
+              padding: const EdgeInsets.all(24),
+              alignment: Alignment.center,
+              child: Column(
+                children: [
+                  Icon(Icons.search_off_rounded, size: 40, color: Colors.grey.withAlpha(120)),
+                  const SizedBox(height: 8),
+                  Text(
+                    'No companions match "$_memberSearchQuery"',
+                    style: const TextStyle(fontSize: 13, color: Colors.grey),
+                  ),
+                ],
+              ),
+            );
+          }
 
           return Column(
             children: [
-              for (int index = 0; index < currentTrip.members.length; index++) ...[
+              for (int index = 0; index < filteredMembers.length; index++) ...[
                 if (index > 0) const SizedBox(height: 8),
                 Builder(
                   builder: (context) {
-                    final member = currentTrip.members[index];
+                    final member = filteredMembers[index];
               final isMe = (currentUid != null && member.id == currentUid) ||
                   (authUser?.email != null && member.email != null && authUser!.email.toLowerCase() == member.email!.toLowerCase());
 
@@ -416,8 +602,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                   icon: const Icon(Icons.person_remove_rounded, size: 20, color: Colors.redAccent),
                   onPressed: () => _confirmRemoveMember(member),
                   tooltip: 'Remove member',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                  constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                 );
               } else if (isMe && !isMemberCreator) {
                 actionWidget = TextButton.icon(
@@ -506,22 +691,22 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
+                              Wrap(
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                spacing: 5,
+                                runSpacing: 3,
                                 children: [
-                                  Flexible(
-                                    child: Text(
-                                      member.name,
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 14.5,
-                                        color: isMemberCreator && !isDark ? const Color(0xFF78350F) : null,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
+                                  Text(
+                                    member.name,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 14.5,
+                                      color: isMemberCreator && !isDark ? const Color(0xFF78350F) : null,
                                     ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                  if (isMemberCreator) ...[
-                                    const SizedBox(width: 6),
+                                  if (isMemberCreator)
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                       decoration: BoxDecoration(
@@ -554,9 +739,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                                         ],
                                       ),
                                     ),
-                                  ],
-                                  if (isMe) ...[
-                                    const SizedBox(width: 5),
+                                  if (isMe)
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                       decoration: BoxDecoration(
@@ -573,7 +756,6 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                                         ),
                                       ),
                                     ),
-                                  ],
                                 ],
                               ),
                               if (member.email != null) ...[
@@ -589,7 +771,20 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                           ),
                         ),
                         // Action button
-                        if (actionWidget != null) actionWidget,
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (!isMe && member.phoneNumber != null && member.phoneNumber!.trim().isNotEmpty)
+                              IconButton(
+                                icon: const Icon(Icons.phone_rounded, size: 18, color: Color(0xFF10B981)),
+                                tooltip: 'Call ${member.name}',
+                                onPressed: () => _callMember(member.phoneNumber!, member.name),
+                                padding: const EdgeInsets.all(6),
+                                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                              ),
+                            if (actionWidget != null) actionWidget,
+                          ],
+                        ),
                       ],
                     ),
                     const SizedBox(height: 10),
@@ -695,6 +890,65 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                             },
                           ),
                         ],
+                        // Loop 42: Companion last-seen timestamp + live speed pill
+                        if (companionPositions.containsKey(member.id))
+                          Builder(
+                            builder: (context) {
+                              final pos = companionPositions[member.id]!;
+                              final diffMins = DateTime.now().difference(pos.lastUpdated).inMinutes;
+                              final timeLabel = diffMins < 1
+                                  ? 'Just now'
+                                  : diffMins < 60
+                                      ? '${diffMins}m ago'
+                                      : '${(diffMins / 60).round()}h ago';
+                              final isStale = diffMins > 10;
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+                                decoration: BoxDecoration(
+                                  color: isStale
+                                      ? (isDark ? Colors.white.withAlpha(12) : Colors.grey.withAlpha(22))
+                                      : (isDark ? const Color(0xFF10B981).withAlpha(25) : const Color(0xFFECFDF5)),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: isStale ? Colors.transparent : const Color(0xFF10B981).withAlpha(80),
+                                    width: 0.8,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      isStale ? Icons.location_off_rounded : Icons.location_on_rounded,
+                                      size: 11,
+                                      color: isStale ? Colors.grey : const Color(0xFF059669),
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      timeLabel,
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: isStale
+                                            ? (isDark ? Colors.grey[400] : Colors.grey[600])
+                                            : const Color(0xFF059669),
+                                      ),
+                                    ),
+                                    if (pos.speedKmh > 2.0) ...[
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '• ${pos.speedKmh.toStringAsFixed(0)} km/h',
+                                        style: TextStyle(
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
                         if (!isMe && !member.id.startsWith('offline_')) ...[
                           InkWell(
                             borderRadius: BorderRadius.circular(6),
@@ -802,7 +1056,10 @@ class _MembersTabState extends ConsumerState<MembersTab> {
           const SizedBox(height: 16),
         ],
       ],
-    ),
-  );
+    );
+  },
+),
+);
 }
 }
+

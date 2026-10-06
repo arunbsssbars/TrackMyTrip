@@ -14,13 +14,11 @@ import '../../core/services/user_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../core/utils/date_formatter.dart';
-import '../../models/trip_audit_log.dart';
 import '../../models/expense.dart';
 import '../../models/expense_split.dart';
 import '../../models/memory.dart';
 import '../../models/nearby_poi.dart';
 import '../../models/stoppage.dart';
-import '../../providers/audit_log_provider.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/stoppage_provider.dart';
@@ -119,6 +117,7 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
   String? _receiptImagePath;
   bool _isLoadingReceipt = false;
   bool _hasInitializedMembers = false;
+  bool _isSubmitting = false;
 
   String _selectedCategory = AppConstants.stoppageCategories.first;
   DateTime _arrivedAt = DateTime.now();
@@ -541,6 +540,9 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
   }
 
   void _submit() {
+    if (_isSubmitting) return;
+    setState(() => _isSubmitting = true);
+
     final lat = double.tryParse(_latController.text) ?? 28.4990;
     final lng = double.tryParse(_lngController.text) ?? 77.5330;
 
@@ -551,6 +553,7 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
     }
 
     if (!_formKey.currentState!.validate()) {
+      setState(() => _isSubmitting = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter a place name for this stoppage.'),
@@ -566,6 +569,7 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
       final amtText = _billAmountController.text.trim();
       billAmount = double.tryParse(amtText);
       if (billAmount == null || billAmount <= 0) {
+        setState(() => _isSubmitting = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Please enter a valid bill amount or turn off "Attach Bill".'),
@@ -597,7 +601,8 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
         createdByName: myMemberName,
       );
 
-      ref.read(allStoppagesProvider.notifier).addStoppage(newStoppage);
+      // If attaching a bill, suppress stoppage activity broadcast so only the single canonical bill activity is notified (User point 1 & 4)
+      ref.read(allStoppagesProvider.notifier).addStoppage(newStoppage, broadcastActivity: !_attachBill);
 
       // Save attached photo memories
       for (final photoPath in _attachedPhotos) {
@@ -613,7 +618,7 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
         ref.read(allMemoriesProvider.notifier).addMemory(memory);
       }
 
-      // Save attached bill if enabled
+      // Save attached bill if enabled (idempotently linked to newStoppage.id)
       if (_attachBill && billAmount != null && currentTrip != null) {
         final payerId = _paidByMemberId ?? myMemberId;
         final expenseCategory = _selectedExpenseCategory ?? mapStoppageToExpenseCategory(_selectedCategory);
@@ -656,7 +661,7 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
         }
 
         final newExpense = Expense(
-          id: const Uuid().v4(),
+          id: 'exp_stop_${newStoppage.id}',
           tripId: widget.tripId,
           stoppageId: newStoppage.id,
           title: title,
@@ -671,22 +676,8 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
           createdAt: _arrivedAt,
         );
 
+        // allExpensesProvider.addExpense automatically records the single canonical audit log
         ref.read(allExpensesProvider.notifier).addExpense(newExpense);
-
-        // Audit Log for the expense
-        final currentMember = currentTrip.currentUserMember;
-        ref.read(allAuditLogsProvider.notifier).logAction(
-          TripAuditLog(
-            id: const Uuid().v4(),
-            tripId: widget.tripId,
-            actionType: 'create_expense',
-            itemTitle: newExpense.title,
-            performedByMemberId: currentMember?.id ?? myMemberId,
-            performedByName: currentMember?.name ?? 'Traveler',
-            timestamp: DateTime.now(),
-            changeDetails: 'Added bill of ${CurrencyFormatter.format(newExpense.totalAmount, currency: currentTrip.defaultCurrency)} for stoppage "${newStoppage.name}"',
-          ),
-        );
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -702,7 +693,9 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
           ),
         );
       }
-    } catch (_) {}
+    } catch (_) {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
 
     HapticFeedback.mediumImpact();
     if (mounted) {
@@ -872,9 +865,16 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
                               child: OutlinedButton.icon(
                                 onPressed: _isDetectingLocation ? null : _detectCurrentLocation,
                                 icon: const Icon(Icons.my_location_rounded, size: 16),
-                                label: const Text('Detect GPS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                label: const Flexible(
+                                  child: Text(
+                                    'Detect GPS',
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
+                                  ),
+                                ),
                                 style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 9),
+                                  padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
                                   side: const BorderSide(color: AppTheme.primary, width: 1.2),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                 ),
@@ -885,11 +885,18 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
                               child: FilledButton.icon(
                                 onPressed: _openMapPicker,
                                 icon: const Icon(Icons.map_rounded, size: 16),
-                                label: const Text('Choose on Map', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                label: const Flexible(
+                                  child: Text(
+                                    'Choose on Map',
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
+                                  ),
+                                ),
                                 style: FilledButton.styleFrom(
                                   backgroundColor: AppTheme.secondary,
                                   foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 9),
+                                  padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                 ),
                               ),
@@ -1607,9 +1614,10 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
                           builder: (context, nameVal, _) {
                             final hasCoordinates = double.tryParse(_latController.text) != null && double.tryParse(_lngController.text) != null;
                             final isPendingLookup = _isDetectingLocation || (!hasCoordinates && widget.autoDetectGps) || nameVal.text.trim() == 'Looking up address...';
+                            final isBusy = isPendingLookup || _isSubmitting;
                             return FilledButton.icon(
-                              onPressed: isPendingLookup ? null : _submit,
-                              icon: isPendingLookup
+                              onPressed: isBusy ? null : _submit,
+                              icon: isBusy
                                   ? const SizedBox(
                                       width: 14,
                                       height: 14,
@@ -1617,10 +1625,14 @@ class _AddStoppageDialogState extends ConsumerState<AddStoppageDialog> {
                                     )
                                   : const Icon(Icons.check_rounded, size: 18),
                               label: Text(
-                                isPendingLookup
-                                    ? (_isDetectingLocation ? 'Locating GPS... Please wait' : 'Acquiring GPS coordinates...')
-                                    : 'Save Stoppage',
+                                _isSubmitting
+                                    ? 'Saving Stoppage...'
+                                    : (isPendingLookup
+                                        ? (_isDetectingLocation ? 'Locating GPS... Please wait' : 'Acquiring GPS coordinates...')
+                                        : 'Save Stoppage'),
                                 style: const TextStyle(fontWeight: FontWeight.bold),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
                               ),
                               style: FilledButton.styleFrom(
                                 backgroundColor: AppTheme.primary,

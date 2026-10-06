@@ -2,11 +2,12 @@ import 'dart:convert';
 import 'dart:io' show File;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show HapticFeedback;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData, HapticFeedback;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/design_system/design_system.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../models/stoppage.dart';
@@ -17,6 +18,7 @@ import '../../providers/memory_provider.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
 import '../../core/services/image_compression_service.dart';
+import '../../core/services/location_service.dart';
 import '../expenses/add_expense_screen.dart';
 import '../memories/add_memory_dialog.dart';
 
@@ -421,8 +423,10 @@ class StoppageDetailScreen extends ConsumerWidget {
       appBar: AppBar(
         elevation: 0,
         scrolledUnderElevation: 1,
+        titleSpacing: NavigationToolbar.kMiddleSpacing,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               stoppage.name,
@@ -445,11 +449,15 @@ class StoppageDetailScreen extends ConsumerWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.edit_note_rounded, color: AppTheme.primary, size: 24),
+            padding: const EdgeInsets.all(8),
+            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
             tooltip: 'Edit Stoppage Details',
             onPressed: () => _showEditStoppageDialog(context, stoppage, ref),
           ),
           IconButton(
             icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 22),
+            padding: const EdgeInsets.all(8),
+            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
             tooltip: 'Delete Stoppage',
             onPressed: () => _confirmDeleteStoppage(context, stoppage, ref),
           ),
@@ -516,13 +524,17 @@ class StoppageDetailScreen extends ConsumerWidget {
                                     ),
                                   ),
                                   const SizedBox(width: 5),
-                                  Text(
-                                    stoppage.isOngoing ? 'CURRENTLY STOPPED' : 'COMPLETED STOPPAGE',
-                                    style: TextStyle(
-                                      fontSize: 10.5,
-                                      fontWeight: FontWeight.w900,
-                                      letterSpacing: 0.3,
-                                      color: stoppage.isOngoing ? const Color(0xFF10B981) : Colors.grey,
+                                  Expanded(
+                                    child: Text(
+                                      stoppage.isOngoing ? 'CURRENTLY STOPPED' : 'COMPLETED STOPPAGE',
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 0.3,
+                                        color: stoppage.isOngoing ? const Color(0xFF10B981) : Colors.grey,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
                                 ],
@@ -625,6 +637,37 @@ class StoppageDetailScreen extends ConsumerWidget {
                       ],
                     ),
 
+                    // Loop 112: Stoppage Cost-per-Hour & Efficiency KPI Badge
+                    if (totalSpent > 0 && stoppage.duration != null && stoppage.duration!.inMinutes > 0) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withAlpha(isDark ? 28 : 14),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: AppTheme.primary.withAlpha(isDark ? 60 : 35), width: 0.8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.speed_rounded, size: 14, color: AppTheme.primary),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Burn Rate: ${CurrencyFormatter.format(totalSpent / (stoppage.duration!.inMinutes / 60.0), currency: trip?.defaultCurrency)}/hr • ${DateFormatter.formatDuration(stoppage.duration!)} stay',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.primary,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
                     // Depart Action Button (If Ongoing)
                     if (stoppage.isOngoing) ...[
                       const SizedBox(height: 14),
@@ -720,10 +763,185 @@ class StoppageDetailScreen extends ConsumerWidget {
                         ),
                       ),
                     ],
+
+                    // Location & Turn-by-Turn Navigation Section
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.location_on_rounded, size: 16, color: AppTheme.primary),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  stoppage.address?.isNotEmpty == true
+                                      ? stoppage.address!
+                                      : 'GPS Coordinates: ${stoppage.latitude.toStringAsFixed(4)}, ${stoppage.longitude.toStringAsFixed(4)}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark ? Colors.grey[300] : const Color(0xFF334155),
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.copy_rounded, size: 16, color: AppTheme.primary),
+                                tooltip: 'Copy GPS Coordinates',
+                                visualDensity: VisualDensity.compact,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                onPressed: () {
+                                  HapticFeedback.selectionClick();
+                                  Clipboard.setData(ClipboardData(
+                                    text: '${stoppage.latitude}, ${stoppage.longitude}',
+                                  ));
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Copied coordinates: ${stoppage.latitude.toStringAsFixed(5)}, ${stoppage.longitude.toStringAsFixed(5)}'),
+                                      duration: const Duration(seconds: 2),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: () async {
+                                final success = await LocationService.openExternalNavigation(
+                                  stoppage.latitude,
+                                  stoppage.longitude,
+                                  label: stoppage.name,
+                                );
+                                if (!success && context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Could not open external navigation maps.')),
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.navigation_rounded, size: 16),
+                              label: const Text(
+                                'Navigate (Turn-by-Turn GPS)',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                              ),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF10B981),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
             ),
+
+            // Loop 114: Stoppage Companion Attendance Checklist
+            if (trip != null && trip.members.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppTheme.surfaceDark : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(5),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primary.withAlpha(20),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(Icons.group_rounded, size: 14, color: AppTheme.primary),
+                                ),
+                                const SizedBox(width: 8),
+                                const Expanded(
+                                  child: Text(
+                                    'Companion Attendance',
+                                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981).withAlpha(20),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              '${trip.members.length} Present',
+                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF047857)),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: trip.members.map((member) {
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: isDark ? Colors.white.withAlpha(10) : const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.check_circle_rounded, size: 13, color: Color(0xFF10B981)),
+                                const SizedBox(width: 5),
+                                Text(
+                                  member.name,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark ? Colors.grey[200] : const Color(0xFF1E293B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
 
             // Quick Add Actions
             Padding(
@@ -784,19 +1002,12 @@ class StoppageDetailScreen extends ConsumerWidget {
               ),
             ),
             if (expenses.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: isDark ? AppTheme.surfaceDark : const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0)),
-                  ),
-                  child: Center(
-                    child: Text('No bills logged at this stoppage yet.', style: TextStyle(color: Colors.grey[500], fontSize: 12.5)),
-                  ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.md),
+                child: AppEmptyState(
+                  icon: Icons.receipt_long_outlined,
+                  title: 'No bills logged at this stoppage yet.',
+                  message: 'Add expenses incurred while stopping here.',
                 ),
               )
             else
@@ -996,25 +1207,49 @@ class StoppageDetailScreen extends ConsumerWidget {
             // Captured Memories Section
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-              child: Text(
-                'Captured Memories (${memories.length})',
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, letterSpacing: -0.3),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Captured Memories (${memories.length})',
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, letterSpacing: -0.3),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  InkWell(
+                    onTap: () => _openAddMemoryDialog(context, stoppage),
+                    borderRadius: BorderRadius.circular(8),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.add_a_photo_rounded, size: 14, color: AppTheme.secondary),
+                          SizedBox(width: 4),
+                          Text(
+                            'Add Photo',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.secondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
             if (memories.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: isDark ? AppTheme.surfaceDark : const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0)),
-                  ),
-                  child: Center(
-                    child: Text('No memories captured at this stop yet.', style: TextStyle(color: Colors.grey[500], fontSize: 12.5)),
-                  ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.md),
+                child: AppEmptyState(
+                  icon: Icons.photo_library_outlined,
+                  title: 'No memories captured at this stop yet.',
+                  message: 'Snap photos or upload memories from this stoppage.',
                 ),
               )
             else

@@ -4,6 +4,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import '../../../core/constants/app_constants.dart';
+import '../../../core/design_system/design_system.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/utils/date_formatter.dart';
@@ -15,11 +16,18 @@ import '../../../providers/stoppage_provider.dart';
 import '../../stoppage/add_stoppage_dialog.dart';
 import '../../stoppage/stoppage_detail_screen.dart';
 import '../../../core/utils/trip_guard_helper.dart';
+import '../../../core/services/location_service.dart';
+import '../../../core/services/live_location_tracker_service.dart';
 
 class TimelineTab extends ConsumerStatefulWidget {
   final Trip trip;
+  final void Function(Stoppage stoppage)? onNavigateToMap;
 
-  const TimelineTab({super.key, required this.trip});
+  const TimelineTab({
+    super.key,
+    required this.trip,
+    this.onNavigateToMap,
+  });
 
   @override
   ConsumerState<TimelineTab> createState() => _TimelineTabState();
@@ -30,6 +38,15 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   String? _selectedDateFilterKey;
   String? _selectedCategory;
   bool _hasInitializedExpandedDates = false;
+  bool _isCompactDensity = false;
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   void _openAddStoppageDialog(BuildContext context, {bool autoDetectGps = true}) async {
     final canProceed = await TripGuardHelper.ensureTripOpenForEdit(
@@ -50,154 +67,287 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   void _viewStoppageOnMap(BuildContext context, Stoppage stop) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final stopPos = LatLng(stop.latitude, stop.longitude);
+    final userPos = ref.read(liveLocationTrackerProvider).currentPosition;
+    double? distKm;
+    if (userPos != null) {
+      distKm = LocationService.calculatePolylineDistanceKm([
+        LatLng(userPos.latitude, userPos.longitude),
+        stopPos,
+      ]);
+    }
 
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => Dialog(
-        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(24),
-          child: SizedBox(
-            width: MediaQuery.of(context).size.width,
-            height: MediaQuery.of(context).size.height * 0.7,
-            child: Stack(
-              children: [
-                FlutterMap(
-                  options: MapOptions(
-                    initialCenter: stopPos,
-                    initialZoom: 15.0,
-                  ),
-                  children: [
-                    TileLayer(
-                      urlTemplate: AppConstants.getMapTileUrl(isDark: isDark),
-                      userAgentPackageName: 'com.trackmytrip.app',
-                    ),
-                    MarkerLayer(
-                      markers: [
-                        Marker(
-                          point: stopPos,
-                          width: 50,
-                          height: 50,
-                          alignment: Alignment.topCenter,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: AppTheme.primary,
-                              shape: BoxShape.circle,
-                              boxShadow: const [
-                                BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 3)),
-                              ],
-                              border: Border.all(color: Colors.white, width: 2),
-                            ),
-                            child: Icon(
-                              AppConstants.getStoppageIcon(stop.category),
-                              color: Colors.white,
-                              size: 24,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        height: MediaQuery.of(context).size.height * 0.75,
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF0F172A) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          boxShadow: const [
+            BoxShadow(color: Colors.black38, blurRadius: 16, offset: Offset(0, -4)),
+          ],
+        ),
+        child: Column(
+          children: [
+            // Handle bar
+            const SizedBox(height: 10),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.withAlpha(isDark ? 80 : 100),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 8),
 
-                // Top Header
-                Positioned(
-                  top: 12,
-                  left: 12,
-                  right: 12,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            // Top Header: Title, Category Icon, Close Button
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF0F172A).withAlpha(230) : Colors.white.withAlpha(240),
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: const [
-                        BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 4)),
-                      ],
+                      color: AppTheme.primary.withAlpha(25),
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.place_rounded, color: AppTheme.primary, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            stop.name,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close, size: 20),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          onPressed: () => Navigator.of(ctx).pop(),
-                        ),
-                      ],
+                    child: Icon(
+                      AppConstants.getStoppageIcon(stop.category),
+                      color: AppTheme.primary,
+                      size: 20,
                     ),
                   ),
-                ),
-
-                // Bottom Info Card
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF0F172A) : Colors.white,
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-                      boxShadow: const [
-                        BoxShadow(color: Colors.black26, blurRadius: 12, offset: Offset(0, -4)),
-                      ],
-                    ),
+                  const SizedBox(width: 10),
+                  Expanded(
                     child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           stop.name,
                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        if (stop.address != null && stop.address!.isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            stop.address!,
-                            style: TextStyle(fontSize: 12, color: isDark ? Colors.grey[400] : Colors.grey[600]),
-                          ),
-                        ],
-                        const SizedBox(height: 4),
                         Text(
-                          'Coordinates: ${stop.latitude.toStringAsFixed(4)}, ${stop.longitude.toStringAsFixed(4)}',
-                          style: const TextStyle(fontSize: 11, color: Colors.grey, fontFamily: 'monospace'),
-                        ),
-                        const SizedBox(height: 12),
-                        FilledButton(
-                          onPressed: () {
-                            Navigator.of(ctx).pop();
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (context) => StoppageDetailScreen(
-                                  stoppageId: stop.id,
-                                  tripId: widget.trip.id,
-                                ),
-                              ),
-                            );
-                          },
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppTheme.primary,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          '${stop.category.toUpperCase()}${distKm != null ? " • ${distKm.toStringAsFixed(1)} km away" : ""}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                           ),
-                          child: const Text('Open Stoppage Details'),
                         ),
                       ],
                     ),
                   ),
-                ),
-              ],
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 22),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ],
+              ),
             ),
-          ),
+
+            const Divider(height: 1),
+
+            // Embedded Interactive Mini Map
+            Expanded(
+              child: Stack(
+                children: [
+                  FlutterMap(
+                    options: MapOptions(
+                      initialCenter: stopPos,
+                      initialZoom: 15.0,
+                    ),
+                    children: [
+                      TileLayer(
+                        urlTemplate: AppConstants.getMapTileUrl(isDark: isDark),
+                        userAgentPackageName: 'com.trackmytrip.app',
+                      ),
+                      MarkerLayer(
+                        markers: [
+                          Marker(
+                            point: stopPos,
+                            width: 48,
+                            height: 48,
+                            alignment: Alignment.topCenter,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: AppTheme.primary,
+                                shape: BoxShape.circle,
+                                boxShadow: const [
+                                  BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 3)),
+                                ],
+                                border: Border.all(color: Colors.white, width: 2.5),
+                              ),
+                              child: Icon(
+                                AppConstants.getStoppageIcon(stop.category),
+                                color: Colors.white,
+                                size: 22,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+
+                  // Floating quick shortcut to full map
+                  Positioned(
+                    top: 12,
+                    right: 12,
+                    child: Material(
+                      color: isDark ? const Color(0xFF0F172A).withAlpha(220) : Colors.white.withAlpha(230),
+                      borderRadius: BorderRadius.circular(20),
+                      elevation: 3,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: () {
+                          Navigator.of(ctx).pop();
+                          ref.read(focusedStoppageProvider.notifier).state = stop;
+                          widget.onNavigateToMap?.call(stop);
+                        },
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.fullscreen_rounded, size: 16, color: AppTheme.primary),
+                              SizedBox(width: 4),
+                              Text('Expand Map', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primary)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Bottom Action Controls Container
+            Container(
+              padding: EdgeInsets.fromLTRB(16, 12, 16, MediaQuery.of(context).padding.bottom + 12),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                boxShadow: const [
+                  BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, -2)),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (stop.address != null && stop.address!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.location_on_outlined, size: 14, color: Colors.grey),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              stop.address!,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDark ? Colors.grey[300] : const Color(0xFF334155),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // Action Buttons Row: View on Full Map & Turn-by-Turn Navigation
+                  Row(
+                    children: [
+                      // View on Full Map (In-App Route Map)
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.of(ctx).pop();
+                            ref.read(focusedStoppageProvider.notifier).state = stop;
+                            widget.onNavigateToMap?.call(stop);
+                          },
+                          icon: const Icon(Icons.map_rounded, size: 18),
+                          label: const Text(
+                            'View on Route Map',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.primary,
+                            side: const BorderSide(color: AppTheme.primary, width: 1.4),
+                            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+
+                      // Start External Turn-by-Turn Navigation
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () async {
+                            final success = await LocationService.openExternalNavigation(
+                              stop.latitude,
+                              stop.longitude,
+                              label: stop.name,
+                            );
+                            if (!success && context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Could not open external navigation maps.')),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.navigation_rounded, size: 18),
+                          label: const Text(
+                            'Navigate (GPS)',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF10B981),
+                            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+
+                  // Stoppage Details Screen
+                  TextButton.icon(
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => StoppageDetailScreen(
+                            stoppageId: stop.id,
+                            tripId: widget.trip.id,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.info_outline_rounded, size: 15),
+                    label: const Text(
+                      'Open Stoppage Details & Bills',
+                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                    ),
+                    style: TextButton.styleFrom(
+                      foregroundColor: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -417,17 +567,112 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     );
   }
 
+  Widget _buildCompactStoppageTile(
+    BuildContext context,
+    Stoppage stop,
+    double stopTotalSpent,
+    bool isDark,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? AppTheme.borderDark : AppTheme.borderLight,
+          width: 1.1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        stop.name,
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                    ),
+                    if (stop.isOngoing) ...[
+                      const SizedBox(width: 5),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withAlpha(25),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text('Live', style: TextStyle(color: Colors.green, fontSize: 8.5, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 2.5),
+                Text(
+                  '${stop.category} • ${DateFormatter.formatDateTime(stop.arrivedAt)} • ${stop.formattedDuration}',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (stopTotalSpent > 0.01)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              margin: const EdgeInsets.only(right: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF10B981).withAlpha(isDark ? 35 : 20),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                CurrencyFormatter.format(stopTotalSpent, currency: widget.trip.defaultCurrency),
+                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+              ),
+            ),
+          Icon(
+            Icons.chevron_right_rounded,
+            size: 19,
+            color: isDark ? Colors.grey[400] : const Color(0xFF94A3B8),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final stoppages = ref.watch(currentTripStoppagesProvider);
     final expenses = ref.watch(currentTripExpensesProvider);
     final memories = ref.watch(currentTripMemoriesProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final chronologicalStoppages = [...stoppages]..sort((a, b) => a.arrivedAt.compareTo(b.arrivedAt));
+    final activeStoppage = chronologicalStoppages.where((s) => s.isOngoing).lastOrNull;
 
     final availableCategories = stoppages.map((s) => s.category).toSet().toList()..sort();
-    final effectiveStoppages = _selectedCategory == null
+    List<Stoppage> effectiveStoppages = _selectedCategory == null
         ? stoppages
         : stoppages.where((s) => s.category.toLowerCase() == _selectedCategory!.toLowerCase()).toList();
+
+    if (_searchQuery.trim().isNotEmpty) {
+      final q = _searchQuery.trim().toLowerCase();
+      effectiveStoppages = effectiveStoppages.where((s) {
+        return s.name.toLowerCase().contains(q) ||
+            (s.address?.toLowerCase().contains(q) ?? false) ||
+            (s.notes?.toLowerCase().contains(q) ?? false) ||
+            s.category.toLowerCase().contains(q);
+      }).toList();
+    }
 
     int totalStoppedMinutes = 0;
     for (final stop in stoppages) {
@@ -478,10 +723,13 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
         ? [_selectedDateFilterKey!]
         : sortedDateKeys;
 
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final hPad = screenWidth >= 800 ? ((screenWidth - 760) / 2).clamp(16.0, 380.0) : 16.0;
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
+        padding: EdgeInsets.fromLTRB(hPad, 14, hPad, 96),
         children: [
           // Timeline Overview Header Card
           Container(
@@ -528,20 +776,85 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withAlpha(20),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        _selectedCategory == null
-                            ? '${stoppages.length} Stoppages'
-                            : '${effectiveStoppages.length}/${stoppages.length} Filtered',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primary),
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withAlpha(20),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            _selectedCategory == null
+                                ? '${stoppages.length} Stoppages'
+                                : '${effectiveStoppages.length}/${stoppages.length} Filtered',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        // Loop 113: Batch Expand / Collapse All Days Action
+                        if (sortedDateKeys.length > 1)
+                          Semantics(
+                            button: true,
+                            label: _expandedDateKeys.length == sortedDateKeys.length
+                                ? 'Collapse all days'
+                                : 'Expand all days',
+                            child: InkWell(
+                              onTap: () {
+                                HapticFeedback.selectionClick();
+                                setState(() {
+                                  if (_expandedDateKeys.length == sortedDateKeys.length) {
+                                    _expandedDateKeys.clear();
+                                  } else {
+                                    _expandedDateKeys.addAll(sortedDateKeys);
+                                  }
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              child: Tooltip(
+                                message: _expandedDateKeys.length == sortedDateKeys.length
+                                    ? 'Collapse All Days'
+                                    : 'Expand All Days',
+                                child: Padding(
+                                  padding: const EdgeInsets.all(4),
+                                  child: Icon(
+                                    _expandedDateKeys.length == sortedDateKeys.length
+                                        ? Icons.unfold_less_rounded
+                                        : Icons.unfold_more_rounded,
+                                    size: 19,
+                                    color: AppTheme.primary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        const SizedBox(width: 4),
+                        Semantics(
+                          button: true,
+                          label: _isCompactDensity ? 'Switch to detailed timeline' : 'Switch to compact timeline',
+                          child: InkWell(
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              setState(() => _isCompactDensity = !_isCompactDensity);
+                            },
+                            borderRadius: BorderRadius.circular(8),
+                            child: Tooltip(
+                              message: _isCompactDensity ? 'Detailed View' : 'Compact View',
+                              child: Padding(
+                                padding: const EdgeInsets.all(4),
+                                child: Icon(
+                                  _isCompactDensity ? Icons.view_agenda_rounded : Icons.view_headline_rounded,
+                                  size: 19,
+                                  color: AppTheme.primary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -606,6 +919,123 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
             ),
           ),
           const SizedBox(height: 12),
+
+          // Active Stoppage Banner (Loop 61)
+          if (activeStoppage != null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isDark
+                      ? [const Color(0xFF064E3B), const Color(0xFF0F172A)]
+                      : [const Color(0xFFD1FAE5), const Color(0xFFF0FDF4)],
+                ),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: const Color(0xFF10B981).withAlpha(isDark ? 100 : 80),
+                  width: 1.2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF10B981).withAlpha(isDark ? 30 : 20),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF10B981),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.location_on_rounded, size: 16, color: Colors.white),
+                ),
+                title: Text(
+                  'CURRENTLY AT • ${activeStoppage.formattedDuration}',
+                  style: TextStyle(
+                    fontSize: 10,
+                    letterSpacing: 0.6,
+                    fontWeight: FontWeight.w900,
+                    color: isDark ? const Color(0xFF34D399) : const Color(0xFF047857),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  activeStoppage.name,
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: IconButton(
+                  icon: Icon(
+                    Icons.chevron_right_rounded,
+                    size: 22,
+                    color: isDark ? Colors.white70 : const Color(0xFF065F46),
+                  ),
+                  tooltip: 'Inspect',
+                  onPressed: () {
+                    HapticFeedback.lightImpact();
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => StoppageDetailScreen(
+                          stoppageId: activeStoppage.id,
+                          tripId: widget.trip.id,
+                        ),
+                      ),
+                    );
+                  },
+                  padding: const EdgeInsets.all(4),
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          // Search Input Bar
+          if (stoppages.isNotEmpty) ...[
+            Container(
+              height: 40,
+              decoration: BoxDecoration(
+                color: isDark ? AppTheme.surfaceDark : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isDark ? AppTheme.borderDark : AppTheme.borderLight,
+                  width: 1,
+                ),
+              ),
+              child: TextField(
+                controller: _searchController,
+                onChanged: (val) => setState(() => _searchQuery = val),
+                style: const TextStyle(fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: 'Search stops by name, address or note...',
+                  hintStyle: TextStyle(
+                    fontSize: 12.5,
+                    color: isDark ? Colors.grey[500] : const Color(0xFF94A3B8),
+                  ),
+                  prefixIcon: const Icon(Icons.search_rounded, size: 18, color: AppTheme.primary),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear_rounded, size: 16),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _searchQuery = '');
+                          },
+                        )
+                      : null,
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
 
           // Horizontal Category Quick Filter Bar
           if (stoppages.isNotEmpty && availableCategories.length > 1) ...[
@@ -745,54 +1175,20 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
           ],
 
         if (stoppages.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 16),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.add_location_alt_outlined, size: 56, color: Colors.grey[400]),
-                const SizedBox(height: 14),
-                const Text('No Stoppages Tagged Yet', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 6),
-                const Text(
-                  'Tag viewpoints, cafes, stays, and gas stations along your route to organize your itinerary and bills.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey, fontSize: 13),
-                ),
-              ],
-            ),
+          AppEmptyState(
+            icon: Icons.add_location_alt_outlined,
+            title: 'No Stoppages Tagged Yet',
+            message: 'Tag viewpoints, cafes, stays, and gas stations along your route to organize your itinerary and bills.',
+            actionLabel: 'Add First Stop',
+            onAction: () => _openAddStoppageDialog(context),
           )
         else if (effectiveStoppages.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 16),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  AppConstants.getStoppageIcon(_selectedCategory ?? 'Other'),
-                  size: 48,
-                  color: Colors.grey[400],
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  'No "$_selectedCategory" Stoppages Found',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Try selecting a different category or clear the active filter to view all itinerary stops.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey, fontSize: 13),
-                ),
-                const SizedBox(height: 16),
-                FilledButton.tonalIcon(
-                  onPressed: () => setState(() => _selectedCategory = null),
-                  icon: const Icon(Icons.clear_all_rounded, size: 16),
-                  label: const Text('Show All Stoppages'),
-                ),
-              ],
-            ),
+          AppEmptyState(
+            icon: AppConstants.getStoppageIcon(_selectedCategory ?? 'Other'),
+            title: 'No "$_selectedCategory" Stoppages Found',
+            message: 'Try selecting a different category or clear the active filter to view all itinerary stops.',
+            actionLabel: 'Show All Stoppages',
+            onAction: () => setState(() => _selectedCategory = null),
           )
         else
           ...displayedDateKeys.map((dateKey) {
@@ -801,6 +1197,26 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
             final firstDate = dayStoppages.first.arrivedAt;
             final isExpanded = _expandedDateKeys.contains(dateKey);
             final isToday = dateKey == todayKey;
+
+            // Loop 53: Rollup stay duration for day header
+            int dayStayMinutes = 0;
+            for (final s in dayStoppages) {
+              if (s.duration != null) {
+                dayStayMinutes += s.duration!.inMinutes;
+              }
+            }
+            String dayDurationLabel = '';
+            if (dayStayMinutes > 0) {
+              final h = dayStayMinutes ~/ 60;
+              final m = dayStayMinutes % 60;
+              if (h > 0 && m > 0) {
+                dayDurationLabel = '${h}h ${m}m';
+              } else if (h > 0) {
+                dayDurationLabel = '${h}h';
+              } else {
+                dayDurationLabel = '${m}m';
+              }
+            }
 
             return Container(
               margin: const EdgeInsets.only(bottom: 12),
@@ -877,18 +1293,24 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                               ],
                             ),
                           ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: isToday ? AppTheme.primary.withAlpha(25) : (isDark ? Colors.grey[800] : Colors.grey[200]),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              '${dayStoppages.length} stops',
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.bold,
-                                color: isToday ? AppTheme.primary : (isDark ? Colors.grey[300] : Colors.grey[700]),
+                          Flexible(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: isToday ? AppTheme.primary.withAlpha(25) : (isDark ? Colors.grey[800] : Colors.grey[200]),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                dayDurationLabel.isNotEmpty
+                                    ? '${dayStoppages.length} stops • $dayDurationLabel'
+                                    : '${dayStoppages.length} stops',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: isToday ? AppTheme.primary : (isDark ? Colors.grey[300] : Colors.grey[700]),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                           ),
@@ -990,7 +1412,9 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                                         borderRadius: BorderRadius.circular(16),
                                         splashColor: AppTheme.primary.withAlpha(22),
                                         highlightColor: AppTheme.primary.withAlpha(12),
-                                        child: Container(
+                                        child: _isCompactDensity
+                                            ? _buildCompactStoppageTile(context, stop, stopTotalSpent, isDark)
+                                            : Container(
                                           padding: const EdgeInsets.all(12.5),
                                           decoration: BoxDecoration(
                                             borderRadius: BorderRadius.circular(16),
@@ -1005,6 +1429,29 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                                               Row(
                                                 crossAxisAlignment: CrossAxisAlignment.center,
                                                 children: [
+                                                  Builder(
+                                                    builder: (context) {
+                                                      final stopNumber = chronologicalStoppages.indexWhere((s) => s.id == stop.id) + 1;
+                                                      if (stopNumber <= 0) return const SizedBox.shrink();
+                                                      return Container(
+                                                        margin: const EdgeInsets.only(right: 6),
+                                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                                        decoration: BoxDecoration(
+                                                          color: AppTheme.primary.withAlpha(20),
+                                                          borderRadius: BorderRadius.circular(6),
+                                                          border: Border.all(color: AppTheme.primary.withAlpha(50), width: 0.8),
+                                                        ),
+                                                        child: Text(
+                                                          '#$stopNumber',
+                                                          style: const TextStyle(
+                                                            fontSize: 10,
+                                                            fontWeight: FontWeight.w900,
+                                                            color: AppTheme.primary,
+                                                          ),
+                                                        ),
+                                                      );
+                                                    },
+                                                  ),
                                                   Expanded(
                                                     child: Text(
                                                       stop.name,
@@ -1012,31 +1459,63 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                                                       overflow: TextOverflow.ellipsis,
                                                     ),
                                                   ),
+                                                  if (stopTotalSpent > 0 || stopMemories.isNotEmpty) ...[
+                                                    const SizedBox(width: 4),
+                                                    Tooltip(
+                                                      message: 'Milestone: ${stopTotalSpent > 0 ? "Has bills" : ""} ${stopMemories.isNotEmpty ? "Has memories" : ""}',
+                                                      child: Container(
+                                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                                        decoration: BoxDecoration(
+                                                          color: Colors.amber.withAlpha(isDark ? 40 : 25),
+                                                          borderRadius: BorderRadius.circular(6),
+                                                          border: Border.all(color: Colors.amber.withAlpha(80), width: 0.8),
+                                                        ),
+                                                        child: Row(
+                                                          mainAxisSize: MainAxisSize.min,
+                                                          children: [
+                                                            Icon(Icons.star_rounded, size: 11, color: isDark ? Colors.amber[300] : Colors.amber[800]),
+                                                            if (stopMemories.isNotEmpty) ...[
+                                                              const SizedBox(width: 2),
+                                                              Icon(Icons.camera_alt_rounded, size: 10, color: isDark ? Colors.amber[300] : Colors.amber[800]),
+                                                            ],
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
                                                   const SizedBox(width: 6),
                                                   if (stop.isOngoing)
-                                                    Container(
-                                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.green.withAlpha(25),
-                                                        borderRadius: BorderRadius.circular(10),
-                                                        border: Border.all(color: Colors.green.withAlpha(60), width: 0.8),
-                                                      ),
-                                                      child: const Row(
-                                                        mainAxisSize: MainAxisSize.min,
-                                                        children: [
-                                                          Icon(Icons.circle, color: Colors.green, size: 5),
-                                                          SizedBox(width: 3),
-                                                          Text(
-                                                            'Active',
-                                                            style: TextStyle(color: Colors.green, fontSize: 9.5, fontWeight: FontWeight.bold),
-                                                          ),
-                                                        ],
+                                                    Flexible(
+                                                      child: Container(
+                                                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                                        decoration: BoxDecoration(
+                                                          color: Colors.green.withAlpha(25),
+                                                          borderRadius: BorderRadius.circular(10),
+                                                          border: Border.all(color: Colors.green.withAlpha(60), width: 0.8),
+                                                        ),
+                                                        child: Row(
+                                                          mainAxisSize: MainAxisSize.min,
+                                                          children: [
+                                                            const Icon(Icons.circle, color: Colors.green, size: 5),
+                                                            const SizedBox(width: 3.5),
+                                                            Flexible(
+                                                              child: AppResilientText.badge(
+                                                                stop.formattedDuration,
+                                                                style: const TextStyle(color: Colors.green, fontSize: 9.5, fontWeight: FontWeight.bold),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
                                                       ),
                                                     )
-                                                  else if (stop.duration != null)
-                                                    Text(
-                                                      DateFormatter.formatDuration(stop.duration!),
-                                                      style: TextStyle(fontSize: 10.5, color: isDark ? Colors.grey[400] : Colors.grey[600], fontWeight: FontWeight.w600),
+                                                  else
+                                                    Flexible(
+                                                      child: Text(
+                                                        stop.formattedDuration,
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow.ellipsis,
+                                                        style: TextStyle(fontSize: 10.5, color: isDark ? Colors.grey[400] : Colors.grey[600], fontWeight: FontWeight.w600),
+                                                      ),
                                                     ),
                                                   const SizedBox(width: 3),
                                                   Icon(

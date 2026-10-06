@@ -288,6 +288,8 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                       prefixIcon: const Icon(Icons.lock_outline_rounded),
                       suffixIcon: IconButton(
                         icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
+                        constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                        tooltip: _obscurePassword ? 'Show password' : 'Hide password',
                         onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                       ),
                     ),
@@ -308,6 +310,8 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                       prefixIcon: const Icon(Icons.lock_clock_outlined),
                       suffixIcon: IconButton(
                         icon: Icon(_obscureConfirmPassword ? Icons.visibility_off : Icons.visibility),
+                        constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                        tooltip: _obscureConfirmPassword ? 'Show password' : 'Hide password',
                         onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
                       ),
                     ),

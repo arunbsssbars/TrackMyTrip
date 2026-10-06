@@ -1,5 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackmytrip/core/utils/debt_simplifier.dart';
+import 'package:trackmytrip/models/settlement.dart';
+import 'package:trackmytrip/providers/settlement_provider.dart';
 
 void main() {
   group('DebtSimplifier Resilience & Precision Tests', () {
@@ -42,6 +44,64 @@ void main() {
 
       final transfers = DebtSimplifier.simplifyDebts(netBalances);
       expect(transfers.isEmpty, isTrue);
+    });
+  });
+
+  group('Advance Contributions & Trip Kitty Pool Tests', () {
+    test('Calculates total advance pooled and member breakdowns correctly', () {
+      final s1 = Settlement(
+        id: 's1',
+        tripId: 'trip_1',
+        payerMemberId: 'm1',
+        receiverMemberId: 'admin',
+        amount: 500.0,
+        currency: 'INR',
+        settledAt: DateTime.now(),
+        paymentMethod: 'UPI',
+        isAdvance: true,
+      );
+      final s2 = Settlement(
+        id: 's2',
+        tripId: 'trip_1',
+        payerMemberId: 'm2',
+        receiverMemberId: 'admin',
+        amount: 750.0,
+        currency: 'INR',
+        settledAt: DateTime.now(),
+        paymentMethod: 'Cash',
+        isAdvance: true,
+      );
+      final s3 = Settlement(
+        id: 's3',
+        tripId: 'trip_1',
+        payerMemberId: 'm1',
+        receiverMemberId: 'm2',
+        amount: 200.0,
+        currency: 'INR',
+        settledAt: DateTime.now(),
+        paymentMethod: 'Cash',
+        isAdvance: false, // regular debt settlement
+      );
+
+      final settlements = [s1, s2, s3];
+      final advances = settlements.where((s) => s.isAdvance).toList();
+      double total = 0.0;
+      final Map<String, double> byMember = {};
+      for (final s in advances) {
+        total += s.amount;
+        byMember[s.payerMemberId] = (byMember[s.payerMemberId] ?? 0.0) + s.amount;
+      }
+
+      final summary = TripAdvancePoolSummary(
+        totalAdvanceCollected: total,
+        memberContributions: byMember,
+        contributorCount: byMember.keys.length,
+      );
+
+      expect(summary.totalAdvanceCollected, equals(1250.0));
+      expect(summary.contributorCount, equals(2));
+      expect(summary.memberContributions['m1'], equals(500.0));
+      expect(summary.memberContributions['m2'], equals(750.0));
     });
   });
 }

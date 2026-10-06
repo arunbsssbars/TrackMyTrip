@@ -61,6 +61,9 @@ class ProximityAlertService extends ChangeNotifier {
       return true;
     }).toList();
     _inAppBannersEnabled = _storage.getInAppBannersEnabled();
+    _strayThresholdMeters = _storage.getStrayThresholdMeters();
+    _strayAlertsEnabled = _storage.getStrayAlertsEnabled();
+    _stoppageAlertsEnabled = _storage.getStoppageAlertsEnabled();
     _syncAlertsFromTrips();
     notifyListeners();
   }
@@ -214,16 +217,19 @@ class ProximityAlertService extends ChangeNotifier {
 
   void setStrayThreshold(double meters) {
     _strayThresholdMeters = meters;
+    _storage.setStrayThresholdMeters(meters);
     notifyListeners();
   }
 
   void toggleStrayAlerts(bool enabled) {
     _strayAlertsEnabled = enabled;
+    _storage.setStrayAlertsEnabled(enabled);
     notifyListeners();
   }
 
   void toggleStoppageAlerts(bool enabled) {
     _stoppageAlertsEnabled = enabled;
+    _storage.setStoppageAlertsEnabled(enabled);
     notifyListeners();
   }
 
@@ -602,6 +608,11 @@ class ProximityAlertService extends ChangeNotifier {
   }) async {
     final alertId = id ?? 'act_${const Uuid().v4().substring(0, 8)}';
     if (_alerts.any((a) => a.id == alertId)) return;
+    if (itemId != null && itemId.isNotEmpty) {
+      if (_alerts.any((a) => a.tripId == tripId && a.type == type && (a.itemId == itemId || a.id.contains(itemId)))) {
+        return;
+      }
+    }
 
     final currentUser = UserService.getCurrentUser();
     final alert = ProximityAlert(
@@ -682,6 +693,39 @@ class ProximityAlertService extends ChangeNotifier {
     }
   }
 
+  /// Resolves an emergency SOS alert with a documented reason and resolution status
+  Future<void> resolveSosAlert(
+    String alertId, {
+    required String resolutionReason,
+    String? tripId,
+  }) async {
+    final idx = _alerts.indexWhere((a) => a.id == alertId);
+    if (idx != -1) {
+      final existing = _alerts[idx];
+      final resolved = existing.copyWith(
+        resolutionStatus: 'resolved',
+        resolutionReason: resolutionReason,
+        resolvedAt: DateTime.now(),
+        isRead: true,
+      );
+      _alerts[idx] = resolved;
+      await _storage.saveAllAlerts(_alerts);
+
+      final effectiveTripId = tripId ?? existing.tripId;
+      if (effectiveTripId.isNotEmpty) {
+        try {
+          _ref.read(firestoreSyncServiceProvider).pushProximityAlert(resolved);
+        } catch (_) {}
+        if (existing.senderMemberId.isNotEmpty) {
+          try {
+            _ref.read(realtimeSyncServiceProvider).resolveActiveSos(effectiveTripId, existing.senderMemberId);
+          } catch (_) {}
+        }
+      }
+      notifyListeners();
+    }
+  }
+
   Future<void> deleteAlert(String alertId, {String? tripId}) async {
     final alert = _alerts.where((a) => a.id == alertId).firstOrNull;
     final effectiveTripId = tripId ?? alert?.tripId;
@@ -713,6 +757,23 @@ class ProximityAlertService extends ChangeNotifier {
     _alerts = _alerts.map((a) => a.copyWith(isRead: true)).toList();
     await _storage.markAllAlertsAsRead();
     notifyListeners();
+  }
+
+  Future<void> markAlertsAsReadForDate(DateTime date) async {
+    final targetDay = DateTime(date.year, date.month, date.day);
+    bool changed = false;
+    for (int i = 0; i < _alerts.length; i++) {
+      final a = _alerts[i];
+      final alertDay = DateTime(a.timestamp.year, a.timestamp.month, a.timestamp.day);
+      if (alertDay == targetDay && !a.isRead) {
+        _alerts[i] = a.copyWith(isRead: true);
+        await _storage.markAlertAsRead(a.id);
+        changed = true;
+      }
+    }
+    if (changed) {
+      notifyListeners();
+    }
   }
 
   Future<void> clearAlertsForTrip(String tripId) async {

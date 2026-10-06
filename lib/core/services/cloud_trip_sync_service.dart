@@ -68,15 +68,26 @@ class CloudTripSyncService {
         generateRoomCode(package.trip.id);
     registerRoomCode(package.trip.id, code);
 
+    final safeMemories = package.memories.where((m) => !TombstoneService.isMemoryTombstoned(m.id)).toList();
+    final safePackage = TripPackage(
+      trip: package.trip,
+      stoppages: package.stoppages,
+      expenses: package.expenses,
+      memories: safeMemories,
+      settlements: package.settlements,
+      auditLogs: package.auditLogs,
+      exportedAt: package.exportedAt,
+    );
+
     try {
       await _firestore.collection('rooms').doc(code).set({
         'code': code,
         'updatedAt': FieldValue.serverTimestamp(),
-        'package': package.toJson(),
+        'package': safePackage.toJson(),
       });
-      _lastSyncedTimes[package.trip.id] = package.exportedAt;
+      _lastSyncedTimes[package.trip.id] = safePackage.exportedAt;
       if (kDebugMode) {
-        debugPrint('[CloudTripSyncService] Successfully published live trip room $code to Firestore (Expenses: ${package.expenses.length})');
+        debugPrint('[CloudTripSyncService] Successfully published live trip room $code to Firestore (Memories: ${safeMemories.length})');
       }
       return true;
     } catch (e) {
@@ -136,13 +147,23 @@ class CloudTripSyncService {
         if (data.containsKey('package')) {
           final pkgMap = data['package'] as Map<String, dynamic>;
           final remotePkg = TripPackage.fromJson(pkgMap);
+          final safeMemories = remotePkg.memories.where((m) => !TombstoneService.isMemoryTombstoned(m.id)).toList();
+          final filteredPkg = TripPackage(
+            trip: remotePkg.trip,
+            stoppages: remotePkg.stoppages,
+            expenses: remotePkg.expenses,
+            memories: safeMemories,
+            settlements: remotePkg.settlements,
+            auditLogs: remotePkg.auditLogs,
+            exportedAt: remotePkg.exportedAt,
+          );
           
           final lastLocalSync = _lastSyncedTimes[tripId];
           final isNewer = lastLocalSync == null || remotePkg.exportedAt.isAfter(lastLocalSync);
           
           if (isNewer) {
             _lastSyncedTimes[tripId] = remotePkg.exportedAt;
-            onRemoteUpdateReceived(remotePkg);
+            onRemoteUpdateReceived(filteredPkg);
           }
         }
       }

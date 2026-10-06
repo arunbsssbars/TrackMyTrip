@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/offline_sync_engine.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/design_system/design_system.dart';
 
 class SyncStatusBadge extends ConsumerWidget {
   const SyncStatusBadge({super.key});
@@ -35,40 +36,47 @@ class SyncStatusBadge extends ConsumerWidget {
       label = 'Synced';
     }
 
-    return GestureDetector(
-      onTap: () => _showSyncDetailsSheet(context, ref, engine),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: badgeColor,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: textColor.withAlpha(50), width: 1),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (isSyncing)
-              SizedBox(
-                width: 12,
-                height: 12,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(textColor),
-                ),
-              )
-            else
-              Icon(icon, size: 13, color: textColor),
-            const SizedBox(width: 5),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                color: textColor,
-              ),
+    return Tooltip(
+      message: 'Cloud Sync: $label. Tap for details',
+      child: Semantics(
+        button: true,
+        label: 'Sync Status: $label',
+        child: GestureDetector(
+          onTap: () => _showSyncDetailsSheet(context, ref, engine),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: badgeColor,
+              borderRadius: BorderRadius.circular(AppRadius.pill),
+              border: Border.all(color: textColor.withAlpha(50), width: 1),
             ),
-          ],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isSyncing)
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(textColor),
+                    ),
+                  )
+                else
+                  Icon(icon, size: 13, color: textColor),
+                const SizedBox(width: 5),
+                AppResilientText.badge(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: textColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

@@ -137,6 +137,14 @@ class AppDatabase {
       )
     ''');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_tombstone_tripId ON tombstoned_trips(tripId)');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS tombstoned_memories (
+        memoryId TEXT PRIMARY KEY,
+        tripId TEXT,
+        deletedAt INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_tombstone_memoryId ON tombstoned_memories(memoryId)');
     try {
       await db.execute('CREATE INDEX IF NOT EXISTS idx_expenses_trip_created ON expenses(tripId, createdAt)');
     } catch (_) {}
@@ -563,6 +571,33 @@ class AppDatabase {
   Future<List<Memory>> getAllMemories() async {
     final rows = await _db.query('memories', orderBy: 'createdAt DESC');
     return rows.map((row) => _memoryFromRow(row)).toList();
+  }
+
+  Future<void> deleteMemoriesForTrip(String tripId) async {
+    await _db.delete('memories', where: 'tripId = ?', whereArgs: [tripId]);
+  }
+
+  Future<Set<String>> getTombstonedMemoryIds() async {
+    try {
+      final rows = await _db.query('tombstoned_memories', columns: ['memoryId']);
+      return rows.map((r) => r['memoryId'] as String).toSet();
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> addTombstonedMemory(String memoryId, {String? tripId}) async {
+    try {
+      await _db.insert(
+        'tombstoned_memories',
+        {
+          'memoryId': memoryId,
+          'tripId': tripId,
+          'deletedAt': DateTime.now().millisecondsSinceEpoch,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    } catch (_) {}
   }
 
   Future<void> saveMemory(Memory memory) async {

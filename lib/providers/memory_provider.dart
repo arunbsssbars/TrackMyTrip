@@ -13,6 +13,8 @@ import '../models/proximity_alert.dart';
 import '../core/services/offline_sync_engine.dart';
 import '../core/services/realtime_sync_service.dart';
 import '../core/services/proximity_alert_service.dart';
+import '../core/services/firestore_sync_service.dart';
+import '../core/services/tombstone_service.dart';
 import 'audit_log_provider.dart';
 
 class MemoryNotifier extends StateNotifier<List<Memory>> {
@@ -26,7 +28,13 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
   void _loadAllMemories() {
     final trips = _storage.getTrips();
     final userTripIds = trips.map((t) => t.id).toSet();
-    state = _storage.getAllMemories().where((m) => userTripIds.contains(m.tripId)).toList();
+    final loaded = _storage.getAllMemories().where((m) => userTripIds.contains(m.tripId) && !TombstoneService.isMemoryTombstoned(m.id)).map((m) {
+      if (m.uploadStatus == MediaUploadStatus.uploading) {
+        return m.copyWith(uploadStatus: MediaUploadStatus.local);
+      }
+      return m;
+    }).toList();
+    state = loaded;
   }
 
   void reload() {
@@ -38,9 +46,13 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
   }
 
   Future<void> addMemory(Memory memory, {bool broadcast = true}) async {
+    if (TombstoneService.isMemoryTombstoned(memory.id)) return;
     state = [memory, ...state.where((m) => m.id != memory.id)];
     await _storage.saveAllMemories(state);
     _syncToCloud(memory.tripId);
+    try {
+      _ref.read(firestoreSyncServiceProvider).pushMemory(memory);
+    } catch (_) {}
 
     if (broadcast) {
       try {
@@ -107,6 +119,9 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
     ];
     await _storage.saveAllMemories(state);
     _syncToCloud(updated.tripId);
+    try {
+      _ref.read(firestoreSyncServiceProvider).pushMemory(updated);
+    } catch (_) {}
   }
 
   Future<void> updateMemoryUploadStatus(String memoryId, MediaUploadStatus status) async {
@@ -120,13 +135,14 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
     await _storage.saveAllMemories(state);
   }
 
-  Future<void> toggleLike(String memoryId, String memberId) async {
+  Future<void> toggleLike(String memoryId, String memberId, {bool broadcast = true}) async {
     final index = state.indexWhere((m) => m.id == memoryId);
     if (index == -1) return;
 
     final memory = state[index];
     final likedList = List<String>.from(memory.likedByMemberIds);
-    if (likedList.contains(memberId)) {
+    final wasLiked = likedList.contains(memberId);
+    if (wasLiked) {
       likedList.remove(memberId);
     } else {
       likedList.add(memberId);
@@ -139,16 +155,115 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
     ];
     await _storage.saveAllMemories(state);
     _syncToCloud(updated.tripId);
+
+    if (broadcast) {
+      try {
+        _ref.read(realtimeSyncServiceProvider).broadcastMemoryLike(
+          memoryId,
+          memberId,
+          !wasLiked,
+          updated.tripId,
+        );
+      } catch (_) {}
+    }
   }
 
-  Future<void> deleteMemory(String memoryId) async {
+  void receiveRemoteLike(String memoryId, String memberId, bool isLiked) {
+    final index = state.indexWhere((m) => m.id == memoryId);
+    if (index == -1) return;
+
+    final memory = state[index];
+    final likedList = List<String>.from(memory.likedByMemberIds);
+    if (isLiked && !likedList.contains(memberId)) {
+      likedList.add(memberId);
+    } else if (!isLiked && likedList.contains(memberId)) {
+      likedList.remove(memberId);
+    } else {
+      return; // No change
+    }
+
+    final updated = memory.copyWith(likedByMemberIds: likedList);
+    state = [
+      for (final m in state)
+        if (m.id == memoryId) updated else m
+    ];
+    _storage.saveAllMemories(state);
+  }
+
+  Future<void> updateCaption(String memoryId, String newCaption, {bool broadcast = true}) async {
+    final index = state.indexWhere((m) => m.id == memoryId);
+    if (index == -1) return;
+
+    final trimmed = newCaption.trim();
+    final updated = state[index].copyWith(caption: trimmed.isNotEmpty ? trimmed : null);
+    state = [
+      for (final m in state)
+        if (m.id == memoryId) updated else m
+    ];
+    await _storage.saveAllMemories(state);
+    _syncToCloud(updated.tripId);
+
+    try {
+      _ref.read(firestoreSyncServiceProvider).pushMemory(updated);
+    } catch (_) {}
+
+    if (broadcast) {
+      try {
+        _ref.read(realtimeSyncServiceProvider).broadcastNewMemory(updated);
+      } catch (_) {}
+    }
+
+    try {
+      _ref.read(allAuditLogsProvider.notifier).logAction(
+        TripAuditLog(
+          id: const Uuid().v4(),
+          tripId: updated.tripId,
+          actionType: 'update_memory',
+          itemTitle: updated.caption ?? 'Photo Memory',
+          performedByMemberId: 'me',
+          performedByName: 'Companion',
+          timestamp: DateTime.now(),
+          changeDetails: 'Updated caption to: "${updated.caption ?? ""}"',
+        ),
+      );
+    } catch (_) {}
+
+    try {
+      _ref.read(offlineSyncEngineProvider).enqueueMutation(
+        action: MutationAction.updateMemory,
+        entityType: 'memory',
+        entityId: memoryId,
+        tripId: updated.tripId,
+        payload: updated.toJson(),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> deleteMemory(String memoryId, {bool broadcast = true}) async {
     final existing = state.where((m) => m.id == memoryId).firstOrNull;
     if (existing == null) return;
 
+    await TombstoneService.markMemoryTombstoned(memoryId, tripId: existing.tripId);
     state = state.where((m) => m.id != memoryId).toList();
+    await _storage.deleteMemory(memoryId);
     await _storage.saveAllMemories(state);
     _syncToCloud(existing.tripId);
-    MediaCacheService.deleteMediaFile(existing.mediaPath);
+    await MediaCacheService.deleteMediaFile(existing.mediaPath);
+    if (existing.localPath != null && existing.localPath != existing.mediaPath) {
+      await MediaCacheService.deleteMediaFile(existing.localPath);
+    }
+    try {
+      _ref.read(mediaCacheServiceProvider).deleteForEntity(memoryId);
+    } catch (_) {}
+    try {
+      _ref.read(firestoreSyncServiceProvider).deleteMemory(existing.tripId, memoryId);
+    } catch (_) {}
+
+    if (broadcast) {
+      try {
+        _ref.read(realtimeSyncServiceProvider).broadcastDeleteMemory(memoryId, existing.tripId);
+      } catch (_) {}
+    }
 
     try {
       _ref.read(allAuditLogsProvider.notifier).logAction(
@@ -203,6 +318,13 @@ final currentTripMemoriesProvider = Provider<List<Memory>>((ref) {
 
   final allMemories = ref.watch(allMemoriesProvider);
   final memories = allMemories.where((m) => m.tripId == currentTrip.id).toList();
+  memories.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  return memories;
+});
+
+final tripMemoriesProvider = Provider.family<List<Memory>, String>((ref, tripId) {
+  final allMemories = ref.watch(allMemoriesProvider);
+  final memories = allMemories.where((m) => m.tripId == tripId).toList();
   memories.sort((a, b) => b.createdAt.compareTo(a.createdAt));
   return memories;
 });

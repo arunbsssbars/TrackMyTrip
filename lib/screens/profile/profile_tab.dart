@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/services/user_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/design_system/design_system.dart';
 import '../../models/user_profile.dart';
 import '../../models/auth_user.dart';
 import '../../providers/auth_provider.dart';
@@ -26,6 +27,8 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
   late TextEditingController _phoneController;
   late TextEditingController _bioController;
   late TextEditingController _emailController;
+  late TextEditingController _emergencyContactController;
+  late TextEditingController _dietaryPrefsController;
   bool _isSaving = false;
   bool _isSigningOut = false;
   bool _isDeletingAccount = false;
@@ -40,6 +43,8 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
     _phoneController = TextEditingController(text: user.phone ?? '');
     _bioController = TextEditingController(text: user.bio ?? '');
     _emailController = TextEditingController(text: user.email ?? '');
+    _emergencyContactController = TextEditingController();
+    _dietaryPrefsController = TextEditingController();
 
     // Fetch latest cloud profile in background to populate any remote phone/bio
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -129,6 +134,8 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
     _phoneController.dispose();
     _bioController.dispose();
     _emailController.dispose();
+    _emergencyContactController.dispose();
+    _dietaryPrefsController.dispose();
     super.dispose();
   }
 
@@ -296,7 +303,7 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
       ),
       body: SingleChildScrollView(
         physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        padding: EdgeInsets.symmetric(horizontal: MediaQuery.sizeOf(context).width > 800 ? (MediaQuery.sizeOf(context).width - 640) / 2 : AppSpacing.md, vertical: AppSpacing.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -638,6 +645,141 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                 ],
               ),
             ),
+            const SizedBox(height: 14),
+
+            // Section 3 (Loop 125): Travel Preferences & Emergency Contact
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.contact_emergency_rounded, size: 18, color: Color(0xFFEF4444)),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Emergency & Travel Preferences',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _emergencyContactController,
+                    decoration: const InputDecoration(
+                      labelText: 'Emergency Contact Person / Phone',
+                      hintText: 'e.g. Sarah Smith (+1 555-0144)',
+                      prefixIcon: Icon(Icons.emergency_rounded, size: 20, color: Color(0xFFEF4444)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _dietaryPrefsController,
+                    decoration: const InputDecoration(
+                      labelText: 'Dietary & Accessibility Needs',
+                      hintText: 'e.g. Vegetarian, Peanut allergy, Wheelchair access',
+                      prefixIcon: Icon(Icons.restaurant_rounded, size: 20, color: Color(0xFF10B981)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            // Section 4 (Loop 126): Local SQLite Cache & Offline Sync Telemetry
+            Builder(
+              builder: (ctx) {
+                Map<String, int> telemetry = const {};
+                try {
+                  telemetry = ref.read(localStorageServiceProvider).getStorageTelemetry();
+                } catch (_) {}
+
+                return Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Expanded(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.storage_rounded, size: 18, color: Color(0xFF3B82F6)),
+                                SizedBox(width: 8),
+                                Flexible(
+                                  child: Text(
+                                    'Offline Storage & Queue',
+                                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                              minimumSize: const Size(40, 30),
+                            ),
+                            icon: const Icon(Icons.cleaning_services_rounded, size: 14, color: Color(0xFF3B82F6)),
+                            label: const Text('Purge Obsolete', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                            onPressed: () async {
+                              try {
+                                final count = await ref.read(localStorageServiceProvider).purgeObsoleteMutations();
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('✓ Cleaned up $count obsolete sync mutations.'),
+                                      backgroundColor: const Color(0xFF10B981),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                  setState(() {});
+                                }
+                              } catch (_) {}
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          _buildTelemetryChip('Trips', '${telemetry['trips'] ?? userTrips.length}', Icons.flight_takeoff_rounded, isDark),
+                          _buildTelemetryChip('Stops', '${telemetry['stoppages'] ?? 0}', Icons.place_rounded, isDark),
+                          _buildTelemetryChip('Bills', '${telemetry['expenses'] ?? userExpenses.length}', Icons.receipt_rounded, isDark),
+                          _buildTelemetryChip('Memories', '${telemetry['memories'] ?? 0}', Icons.photo_camera_rounded, isDark),
+                          _buildTelemetryChip('Audit Logs', '${telemetry['auditLogs'] ?? 0}', Icons.security_rounded, isDark),
+                          _buildTelemetryChip('Queue', '${telemetry['mutations'] ?? 0}', Icons.sync_rounded, isDark),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
             const SizedBox(height: 20),
 
             // Action: Save Profile & Sync
@@ -656,8 +798,9 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
               ),
               style: FilledButton.styleFrom(
                 backgroundColor: AppTheme.primary,
+                minimumSize: const Size.fromHeight(48),
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
               ),
             ),
             const SizedBox(height: 12),
@@ -689,8 +832,9 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
               ),
               style: OutlinedButton.styleFrom(
                 side: BorderSide(color: Colors.red.withAlpha(80)),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                minimumSize: const Size.fromHeight(48),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
               ),
             ),
             const SizedBox(height: 12),
@@ -789,6 +933,40 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
               fontSize: 11,
               color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
               fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTelemetryChip(String label, String count, IconData icon, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: AppTheme.primary),
+          const SizedBox(width: 5),
+          Text(
+            '$label: ',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+            ),
+          ),
+          Text(
+            count,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              color: AppTheme.primary,
             ),
           ),
         ],

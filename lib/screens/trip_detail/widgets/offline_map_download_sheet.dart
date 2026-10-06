@@ -129,10 +129,12 @@ class _OfflineMapDownloadSheetState extends State<OfflineMapDownloadSheet> {
         color: isDark ? AppTheme.surfaceDark : Colors.white,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+      child: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
           Center(
             child: Container(
               width: 40,
@@ -243,10 +245,14 @@ class _OfflineMapDownloadSheetState extends State<OfflineMapDownloadSheet> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'Downloading tiles: ${_progress!.downloaded} / ${_progress!.total}',
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    Expanded(
+                      child: Text(
+                        'Downloading tiles: ${_progress!.downloaded} / ${_progress!.total}',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
+                    const SizedBox(width: 8),
                     Text(
                       '${(_progress!.percentage * 100).toStringAsFixed(0)}%',
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.primary),
@@ -329,6 +335,7 @@ class _OfflineMapDownloadSheetState extends State<OfflineMapDownloadSheet> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }

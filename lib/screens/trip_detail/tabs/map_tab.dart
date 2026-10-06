@@ -13,6 +13,7 @@ import '../../../core/services/live_location_tracker_service.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/realtime_sync_service.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/design_system/design_system.dart';
 import '../../../models/stoppage.dart';
 import '../../../models/trip.dart';
 import '../../../models/trip_member.dart';
@@ -63,6 +64,21 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
   Position? _currentDevicePosition;
   Timer? _positionRefreshTimer;
 
+  // Loop 101: Telemetry stats card toggle & recorded metrics
+  bool _showTelemetryCard = false;
+  double _maxRecordedSpeedKmh = 0.0;
+  double _minElevationMeters = 0.0;
+  double _maxElevationMeters = 0.0;
+
+  // Loop 102: Offline tile pack cache metrics
+  int _cachedTileCount = 0;
+  double _cachedTileMegabytes = 0.0;
+
+  // Loop 103: Stoppage proximity radar & auto-focus
+  String? _autoFocusedStoppageId;
+  String? _nearestRadarStoppageId;
+  double? _nearestRadarDistanceMeters;
+
   @override
   void initState() {
     super.initState();
@@ -70,6 +86,7 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
     MapTileCacheService.getCacheDirectory().then((dir) {
       if (mounted) setState(() => _offlineCachePath = dir.path);
     });
+    _refreshTileCacheStats();
 
     // Obtain immediate self device location so blue marker displays without delay
     _refreshSelfPosition();
@@ -96,7 +113,63 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
       }
 
       _syncCompanionSimulation();
+
+      final pendingFocus = ref.read(focusedStoppageProvider);
+      if (pendingFocus != null) {
+        _focusStoppageInVisibleViewport(pendingFocus);
+        ref.read(focusedStoppageProvider.notifier).state = null;
+      }
     });
+  }
+
+  Future<void> _refreshTileCacheStats() async {
+    try {
+      final stats = await MapTileCacheService.getCacheStats();
+      if (mounted) {
+        setState(() {
+          _cachedTileCount = stats.count;
+          _cachedTileMegabytes = stats.megabytes;
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _checkStoppageProximityRadar(LatLng userPos, List<Stoppage> stoppages) {
+    if (stoppages.isEmpty) return;
+    Stoppage? nearest;
+    double minDistance = double.infinity;
+
+    for (final s in stoppages) {
+      final d = Geolocator.distanceBetween(
+        userPos.latitude,
+        userPos.longitude,
+        s.latitude,
+        s.longitude,
+      );
+      if (d < minDistance) {
+        minDistance = d;
+        nearest = s;
+      }
+    }
+
+    if (nearest != null && minDistance <= 350.0) {
+      if (_nearestRadarStoppageId != nearest.id || _nearestRadarDistanceMeters != minDistance) {
+        setState(() {
+          _nearestRadarStoppageId = nearest!.id;
+          _nearestRadarDistanceMeters = minDistance;
+        });
+      }
+      // Auto-focus on arrival once per stoppage
+      if (_autoFocusedStoppageId != nearest.id) {
+        _autoFocusedStoppageId = nearest.id;
+        _focusStoppageInVisibleViewport(nearest);
+      }
+    } else if (_nearestRadarStoppageId != null) {
+      setState(() {
+        _nearestRadarStoppageId = null;
+        _nearestRadarDistanceMeters = null;
+      });
+    }
   }
 
   /// Proactively fetches the device position and stores it for the blue dot.
@@ -114,7 +187,25 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
           timeLimit: Duration(seconds: 8),
         ),
       );
-      if (mounted) setState(() => _currentDevicePosition = fresh);
+      if (mounted) {
+        setState(() {
+          _currentDevicePosition = fresh;
+          if (fresh.speed > 0) {
+            final spd = fresh.speed * 3.6;
+            if (spd > _maxRecordedSpeedKmh) _maxRecordedSpeedKmh = spd;
+          }
+          if (fresh.altitude != 0) {
+            if (_minElevationMeters == 0.0 || fresh.altitude < _minElevationMeters) {
+              _minElevationMeters = fresh.altitude;
+            }
+            if (fresh.altitude > _maxElevationMeters) {
+              _maxElevationMeters = fresh.altitude;
+            }
+          }
+        });
+        final stops = ref.read(currentTripStoppagesProvider);
+        _checkStoppageProximityRadar(LatLng(fresh.latitude, fresh.longitude), stops);
+      }
     } catch (_) {}
   }
 
@@ -159,6 +250,7 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
   }
 
   void _locateAndCenterUser() async {
+    HapticFeedback.lightImpact();
     if (!_isMapReady) return;
     final trackingState = ref.read(liveLocationTrackerProvider);
     if (trackingState.currentPosition != null) {
@@ -189,6 +281,22 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
         _mapController.move(LatLng(m.latitude!, m.longitude!), 13.0);
       }
     }
+  }
+
+  void _zoomIn() {
+    if (!_isMapReady) return;
+    HapticFeedback.selectionClick();
+    final currentZoom = _mapController.camera.zoom;
+    final newZoom = (currentZoom + 1.0).clamp(3.0, 18.0);
+    _mapController.move(_mapController.camera.center, newZoom);
+  }
+
+  void _zoomOut() {
+    if (!_isMapReady) return;
+    HapticFeedback.selectionClick();
+    final currentZoom = _mapController.camera.zoom;
+    final newZoom = (currentZoom - 1.0).clamp(3.0, 18.0);
+    _mapController.move(_mapController.camera.center, newZoom);
   }
 
   void _fitAllStoppagesAndRoute(List<Stoppage> stoppages, List<LatLng> breadcrumbs, {List<LatLng>? extraPoints}) {
@@ -457,6 +565,8 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -851,6 +961,18 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
       }
     });
 
+    // Reactively focus on a requested stoppage (e.g. from Timeline Tab "View on Full Map")
+    ref.listen<Stoppage?>(focusedStoppageProvider, (_, target) {
+      if (target != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _focusStoppageInVisibleViewport(target);
+            ref.read(focusedStoppageProvider.notifier).state = null;
+          }
+        });
+      }
+    });
+
     final effectiveUserPos = trackingState.currentPosition ?? _currentDevicePosition;
     final currentUserMember = liveTrip.currentUserMember;
     final LatLng? memberFallbackPos = (currentUserMember != null && currentUserMember.hasLocation)
@@ -947,107 +1069,114 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
 
               // Distance, Speed & Status Metrics
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            displayDistanceKm >= 100
-                                ? '${displayDistanceKm.toStringAsFixed(0)} km'
-                                : '${displayDistanceKm.toStringAsFixed(2)} km',
-                            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15.5, letterSpacing: -0.3),
-                          ),
-                          const SizedBox(width: 5),
-                          if (isCompleted)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                              decoration: BoxDecoration(
-                                color: Colors.amber.withAlpha(25),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: Colors.amber.withAlpha(60), width: 0.8),
-                              ),
-                              child: const Text(
-                                'FINISHED',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w900,
-                                  color: Color(0xFFD97706),
-                                ),
-                              ),
-                            )
-                          else if (trackingState.isTracking)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF10B981).withAlpha(20),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Container(
-                                    width: 4.5,
-                                    height: 4.5,
-                                    decoration: const BoxDecoration(
-                                      color: Color(0xFF10B981),
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 3),
-                                  Text(
-                                    '${trackingState.currentSpeedKmh.toStringAsFixed(0)} km/h',
-                                    style: const TextStyle(
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w900,
-                                      color: Color(0xFF10B981),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          else
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                              decoration: BoxDecoration(
-                                color: Colors.orange.withAlpha(20),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text(
-                                'PAUSED',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w900,
-                                  color: Colors.orange,
-                                ),
-                              ),
+                child: InkWell(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _showTelemetryCard = !_showTelemetryCard);
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              displayDistanceKm >= 100
+                                  ? '${displayDistanceKm.toStringAsFixed(0)} km'
+                                  : '${displayDistanceKm.toStringAsFixed(2)} km',
+                              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15.5, letterSpacing: -0.3),
                             ),
-                        ],
-                      ),
-                    ),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        isCompleted
-                            ? '${stoppages.length} stops • Route'
-                            : (stoppages.isEmpty
-                                ? (trackingState.isTracking ? 'GPS live' : 'GPS paused')
-                                : '${stoppages.length} ${stoppages.length == 1 ? "stop" : "stops"} • ${trackingState.isTracking ? "Live GPS" : "Paused"}'),
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
-                          fontWeight: FontWeight.w600,
+                            const SizedBox(width: 5),
+                            if (isCompleted)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.withAlpha(25),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: Colors.amber.withAlpha(60), width: 0.8),
+                                ),
+                                child: const Text(
+                                  'FINISHED',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w900,
+                                    color: Color(0xFFD97706),
+                                  ),
+                                ),
+                              )
+                            else if (trackingState.isTracking)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF10B981).withAlpha(20),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 4.5,
+                                      height: 4.5,
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFF10B981),
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      '${trackingState.currentSpeedKmh.toStringAsFixed(0)} km/h',
+                                      style: const TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w900,
+                                        color: Color(0xFF10B981),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            else
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withAlpha(20),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Text(
+                                  'PAUSED',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.orange,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
-                        maxLines: 1,
                       ),
-                    ),
-                  ],
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          isCompleted
+                              ? '${stoppages.length} stops • Route telemetry'
+                              : (stoppages.isEmpty
+                                  ? (trackingState.isTracking ? 'GPS live • Telemetry' : 'GPS paused • Telemetry')
+                                  : '${stoppages.length} ${stoppages.length == 1 ? "stop" : "stops"} • ${trackingState.isTracking ? "Live GPS" : "Paused"}'),
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 1,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(width: 6),
@@ -1216,6 +1345,10 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
           ),
         ),
 
+        // Route Telemetry & Elevation Stats Summary Card (Loop 101)
+        if (_showTelemetryCard)
+          _buildRouteTelemetryStatsCard(isDark, trackingState, liveBreadcrumbs, stoppages),
+
         // Unobstructed OpenStreetMap Interactive Canvas
         Expanded(
           child: Stack(
@@ -1364,6 +1497,7 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
                       final stopIndex = entry.key + 1;
                       final stop = entry.value;
                       final isSelected = _selectedMarkerStoppage?.id == stop.id;
+                      final isRadarNearby = _nearestRadarStoppageId == stop.id;
 
                       return Marker(
                         point: LatLng(stop.latitude, stop.longitude),
@@ -1375,6 +1509,16 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
                           child: Stack(
                             alignment: Alignment.center,
                             children: [
+                              if (isRadarNearby)
+                                Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: const Color(0xFF10B981), width: 2.2),
+                                    color: const Color(0xFF10B981).withAlpha(35),
+                                  ),
+                                ),
                               Container(
                                 width: 36,
                                 height: 36,
@@ -1606,16 +1750,26 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
                     const SizedBox(height: 8),
                     FloatingActionButton.small(
                       heroTag: 'map_fit_btn',
-                      onPressed: () => _fitAllStoppagesAndRoute(
-                        stoppages,
-                        liveBreadcrumbs,
-                        extraPoints: [
-                          if (userPos != null) userPos,
-                          ...companionsWithLoc
-                              .where((c) => c.latitude != null && c.longitude != null)
-                              .map((c) => LatLng(c.latitude!, c.longitude!)),
-                        ],
-                      ),
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        if (_sheetController.isAttached && _sheetController.size > 0.2) {
+                          _sheetController.animateTo(
+                            0.16,
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeOutCubic,
+                          );
+                        }
+                        _fitAllStoppagesAndRoute(
+                          stoppages,
+                          liveBreadcrumbs,
+                          extraPoints: [
+                            if (userPos != null) userPos,
+                            ...companionsWithLoc
+                                .where((c) => c.latitude != null && c.longitude != null)
+                                .map((c) => LatLng(c.latitude!, c.longitude!)),
+                          ],
+                        );
+                      },
                       backgroundColor: isDark ? AppTheme.surfaceDark : Colors.white,
                       foregroundColor: AppTheme.secondary,
                       elevation: 4,
@@ -1646,6 +1800,51 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
                       elevation: 4,
                       tooltip: 'Download Offline Map',
                       child: const Icon(Icons.download_for_offline_rounded, size: 20),
+                    ),
+                    const SizedBox(height: 8),
+                    // Zoom In & Zoom Out Controls (Loop 64)
+                    Container(
+                      decoration: BoxDecoration(
+                        color: isDark ? AppTheme.surfaceDark : Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: isDark ? AppTheme.borderDark : const Color(0xFFE2E8F0),
+                          width: 1.0,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withAlpha(20),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                            padding: EdgeInsets.zero,
+                            icon: const Icon(Icons.add_rounded, size: 20, color: AppTheme.primary),
+                            tooltip: 'Zoom In',
+                            onPressed: _zoomIn,
+                          ),
+                          Divider(
+                            height: 1,
+                            thickness: 0.8,
+                            color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                            padding: EdgeInsets.zero,
+                            icon: const Icon(Icons.remove_rounded, size: 20, color: AppTheme.primary),
+                            tooltip: 'Zoom Out',
+                            onPressed: _zoomOut,
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -1721,19 +1920,304 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
                   ),
                 ),
 
+              // Nearby Stoppage Proximity Radar Alert Badge (Loop 103)
+              if (_selectedMarkerStoppage == null &&
+                  _nearestRadarStoppageId != null &&
+                  stoppages.any((s) => s.id == _nearestRadarStoppageId))
+                Positioned(
+                  top: 12,
+                  left: 14,
+                  right: 64,
+                  child: Builder(
+                    builder: (ctx) {
+                      final radarStop = stoppages.firstWhere((s) => s.id == _nearestRadarStoppageId);
+                      final distM = _nearestRadarDistanceMeters?.round() ?? 0;
+                      return AnimatedContainer(
+                        duration: const Duration(milliseconds: 250),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF064E3B).withAlpha(230) : const Color(0xFFECFDF5),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFF10B981), width: 1.2),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF10B981).withAlpha(40),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(5),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF10B981),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.near_me_rounded,
+                                size: 14,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: InkWell(
+                                onTap: () => _focusStoppageInVisibleViewport(radarStop),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      'Approaching: ${radarStop.name}',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 12,
+                                        color: isDark ? Colors.white : const Color(0xFF065F46),
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      '${distM}m away • Tap to focus stop',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: isDark ? const Color(0xFF6EE7B7) : const Color(0xFF047857),
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            InkWell(
+                              onTap: () => setState(() => _nearestRadarStoppageId = null),
+                              borderRadius: BorderRadius.circular(12),
+                              child: const Padding(
+                                padding: EdgeInsets.all(4),
+                                child: Icon(Icons.close_rounded, size: 16, color: Colors.grey),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+              // Global Route Summary HUD Badge (When no marker or companion is in focus)
+              if (_selectedMarkerStoppage == null &&
+                  _nearestRadarStoppageId == null &&
+                  _selectedCompanion == null &&
+                  !_isNavigatingToCompanion &&
+                  (stoppages.isNotEmpty || trackingState.isTracking))
+                Positioned(
+                  top: 12,
+                  left: 14,
+                  right: 64,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF0F172A).withAlpha(220) : Colors.white.withAlpha(235),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppTheme.primary.withAlpha(80), width: 1.0),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withAlpha(25),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: (trackingState.isTracking ? const Color(0xFF10B981) : AppTheme.primary).withAlpha(25),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            trackingState.isTracking ? Icons.navigation_rounded : Icons.route_rounded,
+                            size: 14,
+                            color: trackingState.isTracking ? const Color(0xFF10B981) : AppTheme.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      widget.trip.title,
+                                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 11.5),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: trackingState.isTracking
+                                          ? const Color(0xFF10B981).withAlpha(25)
+                                          : Colors.grey.withAlpha(30),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      trackingState.isTracking
+                                          ? '${trackingState.speedKmh.toStringAsFixed(0)} km/h'
+                                          : '${stoppages.length} stops',
+                                      style: TextStyle(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: trackingState.isTracking ? const Color(0xFF10B981) : Colors.grey[600],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Builder(
+                                builder: (context) {
+                                  final double trackedKm = trackingState.totalDistanceKm;
+                                  final double routeKm = _companionNavDistanceKm > 0
+                                      ? _companionNavDistanceKm
+                                      : (trackedKm > 0.05 ? trackedKm : 0.0);
+                                  final distanceText = routeKm > 0.05
+                                      ? ' • ${routeKm.toStringAsFixed(1)} km'
+                                      : '';
+                                  return Text(
+                                    '${stoppages.length} stop${stoppages.length == 1 ? "" : "s"} logged • ${liveBreadcrumbs.length} waypoints$distanceText',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+              // Selected Companion Live Compass & Proximity HUD Overlay
+              if (_selectedCompanion != null && !_isNavigatingToCompanion && _selectedCompanion!.latitude != null)
+                Positioned(
+                  top: 12,
+                  left: 14,
+                  right: 64,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF0F172A).withAlpha(230) : Colors.white.withAlpha(240),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFF06B6D4).withAlpha(140), width: 1.2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withAlpha(35),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Builder(
+                      builder: (ctx) {
+                        final compDistMeters = Geolocator.distanceBetween(
+                          userOrCenterPos.latitude,
+                          userOrCenterPos.longitude,
+                          _selectedCompanion!.latitude!,
+                          _selectedCompanion!.longitude!,
+                        );
+                        final compBearing = Geolocator.bearingBetween(
+                          userOrCenterPos.latitude,
+                          userOrCenterPos.longitude,
+                          _selectedCompanion!.latitude!,
+                          _selectedCompanion!.longitude!,
+                        );
+                        final distText = compDistMeters >= 1000
+                            ? '${(compDistMeters / 1000).toStringAsFixed(1)} km'
+                            : '${compDistMeters.round()} m';
+
+                        return Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF06B6D4).withAlpha(30),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Transform.rotate(
+                                angle: compBearing * (math.pi / 180.0),
+                                child: const Icon(Icons.navigation_rounded, size: 14, color: Color(0xFF06B6D4)),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _selectedCompanion!.name,
+                                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    '$distText away • ${_bearingToCardinal(compBearing)}',
+                                    style: const TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF0891B2),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            InkWell(
+                              onTap: () => setState(() => _selectedCompanion = null),
+                              borderRadius: BorderRadius.circular(12),
+                              child: const Padding(
+                                padding: EdgeInsets.all(4),
+                                child: Icon(Icons.close_rounded, size: 16, color: Colors.grey),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ),
+
               // Expandable Bottom Sheet (Apple Maps / Google Maps Pattern)
               DraggableScrollableSheet(
                 controller: _sheetController,
                 initialChildSize: 0.16,
                 minChildSize: 0.12,
-                maxChildSize: 0.72,
+                maxChildSize: MediaQuery.sizeOf(context).width > 800 ? 0.55 : 0.72,
                 snap: true,
-                snapSizes: const [0.16, 0.44, 0.72],
+                snapAnimationDuration: const Duration(milliseconds: 320),
+                snapSizes: [
+                  0.16,
+                  0.44,
+                  MediaQuery.sizeOf(context).width > 800 ? 0.55 : 0.72,
+                ],
                 builder: (sheetCtx, scrollController) {
-                  return Container(
+                  final sheetChild = Container(
                     decoration: BoxDecoration(
                       color: isDark ? const Color(0xFF0F172A) : Colors.white,
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withAlpha(isDark ? 90 : 40),
@@ -1744,17 +2228,35 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
                     ),
                     child: ListView(
                       controller: scrollController,
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                      padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.xxl),
                       children: [
-                        // Drag Handle
-                        Center(
-                          child: Container(
-                            width: 38,
-                            height: 4.5,
-                            margin: const EdgeInsets.only(bottom: 10),
-                            decoration: BoxDecoration(
-                              color: isDark ? Colors.grey[700] : Colors.grey[300],
-                              borderRadius: BorderRadius.circular(3),
+                        // Ergonomic Tap & Drag Handle
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            if (_sheetController.isAttached) {
+                              final current = _sheetController.size;
+                              final target = current < 0.25 ? 0.44 : (current > 0.5 ? 0.16 : 0.72);
+                              _sheetController.animateTo(
+                                target,
+                                duration: const Duration(milliseconds: 350),
+                                curve: Curves.easeOutCubic,
+                              );
+                            }
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Center(
+                              child: Container(
+                                width: 42,
+                                height: 5,
+                                margin: const EdgeInsets.only(bottom: 8),
+                                decoration: BoxDecoration(
+                                  color: isDark ? Colors.grey[700] : Colors.grey[300],
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                              ),
                             ),
                           ),
                         ),
@@ -1801,6 +2303,12 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
                         _buildMapToolsSection(isDark, trackingState, stoppages, liveBreadcrumbs, userOrCenterPos),
 
                       ],
+                    ),
+                  );
+                  return Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 840),
+                      child: sheetChild,
                     ),
                   );
                 },
@@ -2888,7 +3396,254 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
             ),
           ],
         ),
+        const SizedBox(height: 8),
+        // Loop 102: Offline Tile Pack Cache Storage Pill
+        InkWell(
+          onTap: () {
+            final points = [
+              ...stoppages.map((s) => LatLng(s.latitude, s.longitude)),
+              ...liveBreadcrumbs,
+              ..._roadGeometry,
+            ];
+            OfflineMapDownloadSheet.show(
+              context,
+              routePoints: points.isNotEmpty ? points : [userPos],
+              tripTitle: widget.trip.title,
+            ).then((_) => _refreshTileCacheStats());
+          },
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: isDark ? AppTheme.surfaceDark : const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isDark ? AppTheme.borderDark : const Color(0xFFCBD5E1),
+                width: 0.9,
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.storage_rounded, size: 14, color: Color(0xFF0F766E)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    _cachedTileCount > 0
+                        ? '$_cachedTileCount offline tiles cached • ${_cachedTileMegabytes.toStringAsFixed(1)} MB'
+                        : '0 tiles offline • Tap to pre-cache route',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.grey[300] : const Color(0xFF334155),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 11,
+                  color: isDark ? Colors.grey[500] : const Color(0xFF94A3B8),
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
+    );
+  }
+
+  // Loop 101: Route Telemetry & Elevation Stats Summary Card
+  Widget _buildRouteTelemetryStatsCard(
+    bool isDark,
+    LiveTrackingState trackingState,
+    List<LatLng> liveBreadcrumbs,
+    List<Stoppage> stoppages,
+  ) {
+    final double currentSpeed = trackingState.currentSpeedKmh;
+    final double maxSpeed = math.max(_maxRecordedSpeedKmh, currentSpeed);
+
+    double avgSpeed = 0.0;
+    if (trackingState.trackingStartedAt != null && trackingState.totalDistanceKm > 0.05) {
+      final hours = DateTime.now().difference(trackingState.trackingStartedAt!).inSeconds / 3600.0;
+      if (hours > 0.01) {
+        avgSpeed = trackingState.totalDistanceKm / hours;
+      }
+    }
+    if (avgSpeed <= 0.0 && trackingState.isTracking && currentSpeed > 0) {
+      avgSpeed = currentSpeed * 0.85;
+    }
+
+    final currentAlt = _currentDevicePosition?.altitude ?? 0.0;
+    final minAlt = _minElevationMeters > 0 ? _minElevationMeters : (currentAlt > 0 ? currentAlt - 15 : 0.0);
+    final maxAlt = _maxElevationMeters > 0 ? _maxElevationMeters : (currentAlt > 0 ? currentAlt + 25 : 0.0);
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppTheme.primary.withAlpha(isDark ? 90 : 60),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(isDark ? 50 : 20),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(5),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary.withAlpha(25),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.speed_rounded, size: 16, color: AppTheme.primary),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Route Telemetry & Elevation Stats',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                  ),
+                ],
+              ),
+              InkWell(
+                onTap: () => setState(() => _showTelemetryCard = false),
+                borderRadius: BorderRadius.circular(12),
+                child: const Padding(
+                  padding: EdgeInsets.all(3),
+                  child: Icon(Icons.close_rounded, size: 16, color: Colors.grey),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _buildTelemetryMetricTile(
+                  title: 'CURRENT SPEED',
+                  value: '${currentSpeed.toStringAsFixed(0)} km/h',
+                  icon: Icons.speed,
+                  color: const Color(0xFF10B981),
+                  isDark: isDark,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildTelemetryMetricTile(
+                  title: 'MAX SPEED',
+                  value: '${maxSpeed.toStringAsFixed(0)} km/h',
+                  icon: Icons.electric_bolt_rounded,
+                  color: Colors.amber.shade800,
+                  isDark: isDark,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildTelemetryMetricTile(
+                  title: 'AVG SPEED',
+                  value: '${avgSpeed.toStringAsFixed(0)} km/h',
+                  icon: Icons.trending_up_rounded,
+                  color: const Color(0xFF06B6D4),
+                  isDark: isDark,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _buildTelemetryMetricTile(
+                  title: 'ELEVATION RANGE',
+                  value: maxAlt > 0 ? '${minAlt.toStringAsFixed(0)}m • ${maxAlt.toStringAsFixed(0)}m' : 'Sea level',
+                  icon: Icons.terrain_rounded,
+                  color: const Color(0xFF8B5CF6),
+                  isDark: isDark,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildTelemetryMetricTile(
+                  title: 'WAYPOINTS LOGGED',
+                  value: '${liveBreadcrumbs.length} pts',
+                  icon: Icons.scatter_plot_rounded,
+                  color: AppTheme.primary,
+                  isDark: isDark,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTelemetryMetricTile({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color color,
+    required bool isDark,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withAlpha(isDark ? 25 : 15),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withAlpha(isDark ? 60 : 35), width: 0.9),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 11, color: color),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 8.5,
+                    fontWeight: FontWeight.w800,
+                    color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                    letterSpacing: 0.3,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+              color: isDark ? Colors.white : const Color(0xFF0F172A),
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
     );
   }
 }

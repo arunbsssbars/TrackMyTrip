@@ -410,6 +410,10 @@ class FirestoreSyncService {
           final data = change.doc.data();
           if (data == null) continue;
           final memory = Memory.fromJson({...data, 'id': change.doc.id});
+          if (TombstoneService.isMemoryTombstoned(memory.id)) {
+            deleteMemory(tripId, memory.id);
+            continue;
+          }
           switch (change.type) {
             case DocumentChangeType.added:
             case DocumentChangeType.modified:
@@ -710,7 +714,7 @@ class FirestoreSyncService {
 
   /// Writes [memory] to Firestore.
   Future<void> pushMemory(Memory memory) async {
-    if (memory.tripId.isEmpty || TombstoneService.isTombstoned(memory.tripId)) return;
+    if (memory.tripId.isEmpty || TombstoneService.isTombstoned(memory.tripId) || TombstoneService.isMemoryTombstoned(memory.id)) return;
     try {
       await _db
           .collection('trips')
@@ -723,6 +727,21 @@ class FirestoreSyncService {
       }, SetOptions(merge: true));
     } catch (e) {
       if (kDebugMode) debugPrint('[FirestoreSyncService] pushMemory error: $e');
+    }
+  }
+
+  /// Removes [memoryId] from Firestore.
+  Future<void> deleteMemory(String tripId, String memoryId) async {
+    if (tripId.isEmpty || memoryId.isEmpty) return;
+    try {
+      await _db
+          .collection('trips')
+          .doc(tripId)
+          .collection('memories')
+          .doc(memoryId)
+          .delete();
+    } catch (e) {
+      if (kDebugMode) debugPrint('[FirestoreSyncService] deleteMemory error: $e');
     }
   }
 
@@ -1144,9 +1163,12 @@ class FirestoreSyncService {
     }
 
     final memoriesSnap = await tripRef.collection('memories').get();
-    final memories = memoriesSnap.docs.map((d) => Memory.fromJson(d.data())).toList();
+    final memories = memoriesSnap.docs
+        .map((d) => Memory.fromJson(d.data()))
+        .where((m) => !TombstoneService.isMemoryTombstoned(m.id))
+        .toList();
     if (memories.isEmpty && roomPkg != null) {
-      memories.addAll(roomPkg.memories);
+      memories.addAll(roomPkg.memories.where((m) => !TombstoneService.isMemoryTombstoned(m.id)));
     }
 
     final settlementsSnap = await tripRef.collection('settlements').get();

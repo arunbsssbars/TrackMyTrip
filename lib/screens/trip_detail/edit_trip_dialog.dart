@@ -310,8 +310,9 @@ class _EditTripDialogState extends ConsumerState<EditTripDialog> {
                     ),
                     IconButton(
                       icon: const Icon(Icons.close, size: 20),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
+                      padding: const EdgeInsets.all(10),
+                      constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                      tooltip: 'Close',
                       onPressed: () => Navigator.of(context).pop(),
                     ),
                   ],
@@ -495,9 +496,14 @@ class _EditTripDialogState extends ConsumerState<EditTripDialog> {
                 OutlinedButton.icon(
                   onPressed: _openCompanionSearch,
                   icon: const Icon(Icons.person_search_rounded, size: 18),
-                  label: const Text('Search App Users (@username)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  label: const Text(
+                    'Invite via App (@username)',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
@@ -531,9 +537,9 @@ class _EditTripDialogState extends ConsumerState<EditTripDialog> {
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.add, size: 16),
-                          SizedBox(width: 3),
-                          Text('Add', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                          Icon(Icons.person_add_alt_1_rounded, size: 15),
+                          SizedBox(width: 4),
+                          Text('Add Member', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                         ],
                       ),
                     ),

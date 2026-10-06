@@ -25,6 +25,11 @@ class OfflineSyncEngine extends ChangeNotifier {
   bool get isSyncing => _isSyncing;
   DateTime? get lastSyncedTime => _lastSyncedTime;
   String? get lastSyncError => _lastSyncError;
+  // Loop 44: allow UI to dismiss the sync error banner
+  void clearLastSyncError() {
+    _lastSyncError = null;
+    notifyListeners();
+  }
   int get pendingCount => _storage.getPendingMutations().where((m) => m.status == SyncStatus.pending || m.status == SyncStatus.failed).length;
   List<SyncMutation> get pendingMutations => _storage.getPendingMutations();
 
@@ -42,23 +47,88 @@ class OfflineSyncEngine extends ChangeNotifier {
     });
   }
 
+  /// Consolidates and deduplicates mutations for the same entity:
+  /// 1. If an entity has an 'add' followed by a 'delete', both cancel out (no remote write needed).
+  /// 2. If an entity has multiple 'update' mutations, merge their payloads into the latest one.
+  /// 3. If an entity has an 'add' followed by 'update', merge payload into the 'add' mutation.
+  /// 4. If an entity has 'update' followed by 'delete', discard the update and keep only the delete.
+  List<SyncMutation> consolidateMutations(List<SyncMutation> mutations) {
+    final Map<String, List<SyncMutation>> grouped = {};
+    final List<SyncMutation> order = [];
+
+    for (final m in mutations) {
+      final key = '${m.entityType}_${m.entityId}';
+      if (!grouped.containsKey(key)) {
+        grouped[key] = [];
+        order.add(m);
+      }
+      grouped[key]!.add(m);
+    }
+
+    final List<SyncMutation> consolidated = [];
+
+    for (final placeholder in order) {
+      final key = '${placeholder.entityType}_${placeholder.entityId}';
+      final list = grouped[key]!;
+      if (list.isEmpty) continue;
+      if (list.length == 1) {
+        consolidated.add(list.first);
+        continue;
+      }
+
+      // Sort chronological
+      list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+      final first = list.first;
+      final last = list.last;
+
+      final isAdd = first.action == MutationAction.addExpense ||
+          first.action == MutationAction.addStoppage ||
+          first.action == MutationAction.addMemory ||
+          first.action == MutationAction.addSettlement ||
+          first.action == MutationAction.createTrip;
+
+      final isLastDelete = last.action == MutationAction.deleteExpense ||
+          last.action == MutationAction.deleteStoppage ||
+          last.action == MutationAction.deleteMemory ||
+          last.action == MutationAction.deleteSettlement ||
+          last.action == MutationAction.deleteTrip;
+
+      // Case 1: Added and then Deleted while offline -> completely canceled out locally!
+      if (isAdd && isLastDelete) {
+        continue;
+      }
+
+      // Case 2: Last action is Delete -> only need the delete mutation
+      if (isLastDelete) {
+        consolidated.add(last);
+        continue;
+      }
+
+      // Case 3: Merge multiple updates or add + updates into one consolidated payload
+      final mergedPayload = <String, dynamic>{};
+      for (final m in list) {
+        mergedPayload.addAll(m.payload);
+      }
+
+      consolidated.add(last.copyWith(
+        action: isAdd ? first.action : last.action,
+        payload: mergedPayload,
+      ));
+    }
+
+    return consolidated;
+  }
+
   Future<void> _cleanupPendingQueue() async {
     try {
       final all = _storage.getPendingMutations();
-      final Map<String, SyncMutation> unique = {};
-      for (final m in all) {
-        if (m.status == SyncStatus.pending || m.status == SyncStatus.failed) {
-          final key = '${m.entityType}_${m.entityId}';
-          final existing = unique[key];
-          if (existing == null || m.createdAt.isAfter(existing.createdAt)) {
-            unique[key] = m;
-          }
-        } else {
-          unique[m.id] = m;
-        }
-      }
-      if (unique.length < all.length) {
-        await _storage.saveAllMutations(unique.values.toList());
+      final pending = all.where((m) => m.status == SyncStatus.pending || m.status == SyncStatus.failed).toList();
+      final other = all.where((m) => m.status != SyncStatus.pending && m.status != SyncStatus.failed).toList();
+
+      final consolidated = consolidateMutations(pending);
+      if (consolidated.length < pending.length) {
+        await _storage.saveAllMutations([...other, ...consolidated]);
         notifyListeners();
       }
     } catch (_) {}
@@ -133,10 +203,20 @@ class OfflineSyncEngine extends ChangeNotifier {
       return false;
     }
 
-    final pending = _storage.getPendingMutations().where((m) => m.status == SyncStatus.pending || m.status == SyncStatus.failed).toList();
-    if (pending.isEmpty) {
+    final rawPending = _storage.getPendingMutations().where((m) => m.status == SyncStatus.pending || m.status == SyncStatus.failed).toList();
+    if (rawPending.isEmpty) {
       _lastSyncError = null;
       return true;
+    }
+
+    // Deduplicate and consolidate mutations for idempotency and bandwidth efficiency
+    final pending = consolidateMutations(rawPending);
+    if (pending.length < rawPending.length) {
+      final activeIds = pending.map((m) => m.id).toSet();
+      final obsoleteMutations = rawPending.where((m) => !activeIds.contains(m.id));
+      for (final m in obsoleteMutations) {
+        await _storage.removeMutation(m.id);
+      }
     }
 
     _isSyncing = true;
@@ -223,6 +303,10 @@ class OfflineSyncEngine extends ChangeNotifier {
 
     // Process individual pending mutations with per-item resilience
     for (final mutation in pending) {
+      if (mutation.retryCount >= 8) {
+        // Skip mutations that repeatedly failed to prevent hammering network
+        continue;
+      }
       try {
         final isTripEntity = mutation.entityType.toLowerCase() == 'trip';
         if (isTripEntity) {
@@ -247,6 +331,10 @@ class OfflineSyncEngine extends ChangeNotifier {
               mutation.action == MutationAction.deleteSettlement) {
             await docRef.delete();
           } else {
+            if (mutation.action == MutationAction.addMemory && TombstoneService.isMemoryTombstoned(mutation.entityId)) {
+              await _storage.removeMutation(mutation.id);
+              continue;
+            }
             await docRef.set(mutation.payload, SetOptions(merge: true));
           }
         }

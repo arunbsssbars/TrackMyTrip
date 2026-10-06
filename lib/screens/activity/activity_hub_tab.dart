@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/design_system/design_system.dart';
 import '../../core/services/proximity_alert_service.dart';
 import '../../core/services/user_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -37,12 +38,14 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
   Timer? _searchDebounceTimer;
   String _searchQuery = '';
   bool _groupByTrip = false;
+  bool _unreadOnly = false;
   final Set<String> _manuallyExpandedDates = {};
   final Set<String> _manuallyCollapsedDates = {};
   final Set<String> _collapsedTrips = {};
   final Set<String> _collapsedMonths = {};
   final ScrollController _scrollController = ScrollController();
   int _displayedLimit = 25;
+  bool _showJumpToLatest = false;
 
   bool _isDateCollapsed(String dateKey) {
     // Check if the date is within the last 7 days
@@ -103,12 +106,13 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
   }
 
   void _onScroll() {
-    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
-      if (mounted) {
-        setState(() {
-          _displayedLimit += 20;
-        });
-      }
+    final pos = _scrollController.position;
+    if (pos.pixels >= pos.maxScrollExtent - 200) {
+      if (mounted) setState(() => _displayedLimit += 20);
+    }
+    final shouldShow = pos.pixels > 300;
+    if (shouldShow != _showJumpToLatest && mounted) {
+      setState(() => _showJumpToLatest = shouldShow);
     }
   }
 
@@ -438,6 +442,10 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
 
     final int unreadInvitesTab = pendingInvites.length + invitationAlerts.where((a) => !a.isRead).length;
     final int unreadActivityTab = activityAlerts.where((a) => !a.isRead).length;
+    final int unreadBillsTab = relevantAlerts.where((a) => !a.isRead && (a.itemType == 'bill' || a.itemType == 'settlement' || a.type == AlertType.billAdded || a.type == AlertType.settlementRecorded)).length;
+    final int unreadStopsTab = relevantAlerts.where((a) => !a.isRead && (a.itemType == 'stop' || a.type == AlertType.stoppageAdded)).length;
+    final int unreadMemoriesTab = relevantAlerts.where((a) => !a.isRead && (a.itemType == 'memory' || a.type == AlertType.memoryAdded)).length;
+    final int unreadAuditsTab = relevantAlerts.where((a) => !a.isRead && (a.itemType == 'audit' || a.itemType == 'trust' || a.type == AlertType.tripReopened || a.type == AlertType.sosEmergency)).length;
     final int totalUnread = unreadInvitesTab + unreadActivityTab;
 
     final listItems = _buildListItems(
@@ -446,6 +454,7 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
       trips: userTrips,
       selectedFilter: _selectedFilter,
       searchQuery: _searchQuery,
+      unreadOnly: _unreadOnly,
     );
 
     return Scaffold(
@@ -504,6 +513,23 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
           const SizedBox(width: 4),
         ],
       ),
+      floatingActionButton: _showJumpToLatest
+          ? FloatingActionButton.extended(
+              heroTag: 'activity_jump_latest',
+              onPressed: () {
+                HapticFeedback.selectionClick();
+                _scrollController.animateTo(
+                  0,
+                  duration: AppMotion.duration(context, const Duration(milliseconds: 400)),
+                  curve: Curves.easeOutCubic,
+                );
+              },
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.keyboard_double_arrow_up_rounded, size: 18),
+              label: const Text('Latest', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+            )
+          : null,
       body: Column(
         children: [
           // Debounced Search Bar
@@ -562,6 +588,8 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                 children: [
                   _buildFilterChip('All', 0, totalUnread),
                   const SizedBox(width: 8),
+                  _buildUnreadToggleChip(totalUnread),
+                  const SizedBox(width: 8),
                   // Grouping & Sort Mode at Second Place (Point 2)
                   InkWell(
                     onTap: () {
@@ -606,6 +634,14 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                   _buildFilterChip('Alerts & Activity', 1, unreadActivityTab),
                   const SizedBox(width: 8),
                   _buildFilterChip('Invitations', 2, unreadInvitesTab),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('Bills', 3, unreadBillsTab),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('Stops', 4, unreadStopsTab),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('Memories', 5, unreadMemoriesTab),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('Audit Logs', 6, unreadAuditsTab),
                 ],
               ),
             ),
@@ -660,7 +696,42 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                   } else if (item is _TripHeaderItem) {
                     return _buildTripHeader(item, isDark);
                   } else if (item is _AlertCardItem) {
-                    return _buildAlertCard(context, item.alert, isDark, trip: item.trip);
+                    return Dismissible(
+                      key: Key('alert_dismiss_${item.alert.id}'),
+                      direction: DismissDirection.endToStart,
+                      background: Container(
+                        margin: const EdgeInsets.symmetric(vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withAlpha(220),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.only(right: 18),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Dismiss',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                            ),
+                            SizedBox(width: 6),
+                            Icon(Icons.delete_outline_rounded, color: Colors.white, size: 20),
+                          ],
+                        ),
+                      ),
+                      onDismissed: (_) {
+                        HapticFeedback.mediumImpact();
+                        ref.read(proximityAlertServiceProvider).deleteAlert(item.alert.id, tripId: item.alert.tripId);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Dismissed: "${item.alert.title}"'),
+                            behavior: SnackBarBehavior.floating,
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                      child: _buildAlertCard(context, item.alert, isDark, trip: item.trip),
+                    );
                   } else if (item is _EmptyStateItem) {
                     return _buildEmptyState(item, isDark);
                   }
@@ -680,6 +751,7 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
     required List<Trip> trips,
     required int selectedFilter,
     required String searchQuery,
+    bool unreadOnly = false,
   }) {
     final List<_ActivityListItem> items = [];
 
@@ -709,6 +781,9 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
 
     // Filter generalized activities by tab and search
     final filteredAlerts = uniqueAlerts.where((alert) {
+      if (unreadOnly && alert.isRead) {
+        return false;
+      }
       final isInviteAlert = alert.type == AlertType.invitation ||
           alert.type == AlertType.invitationAccepted ||
           alert.type == AlertType.invitationRejected;
@@ -718,6 +793,34 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
       }
       if (selectedFilter == 2 && !isInviteAlert) {
         return false;
+      }
+      if (selectedFilter == 3) {
+        final isBill = alert.itemType == 'bill' ||
+            alert.itemType == 'settlement' ||
+            alert.type == AlertType.billAdded ||
+            alert.type == AlertType.billUpdated ||
+            alert.type == AlertType.billDeleted ||
+            alert.type == AlertType.settlementRecorded;
+        if (!isBill) return false;
+      }
+      if (selectedFilter == 4) {
+        final isStop = alert.itemType == 'stop' ||
+            alert.type == AlertType.stoppageAdded ||
+            alert.type == AlertType.stoppageArrival ||
+            alert.type == AlertType.stoppageDeparture;
+        if (!isStop) return false;
+      }
+      if (selectedFilter == 5) {
+        final isMemory = alert.itemType == 'memory' || alert.type == AlertType.memoryAdded;
+        if (!isMemory) return false;
+      }
+      if (selectedFilter == 6) {
+        final isAudit = alert.itemType == 'audit' ||
+            alert.itemType == 'trust' ||
+            alert.type == AlertType.tripReopened ||
+            alert.type == AlertType.sosEmergency ||
+            alert.type == AlertType.general;
+        if (!isAudit) return false;
       }
 
       if (searchQuery.isNotEmpty) {
@@ -749,6 +852,12 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
           title: 'No matching activities',
           message: 'Try searching with another keyword or clear the search filter.',
           icon: Icons.search_off_rounded,
+        ));
+      } else if (unreadOnly) {
+        items.add(_EmptyStateItem(
+          title: 'No unread notifications',
+          message: "You're all caught up! Toggle off 'Unread' to view all activity history.",
+          icon: Icons.mark_email_read_rounded,
         ));
       } else if (selectedFilter == 2) {
         items.add(_EmptyStateItem(
@@ -896,6 +1005,63 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
     return items;
   }
 
+  Widget _buildUnreadToggleChip(int totalUnread) {
+    return FilterChip(
+      selected: _unreadOnly,
+      showCheckmark: false,
+      avatar: Icon(
+        _unreadOnly ? Icons.mark_email_unread_rounded : Icons.mark_email_unread_outlined,
+        size: 14,
+        color: _unreadOnly ? Colors.white : AppTheme.primary,
+      ),
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Unread',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: _unreadOnly ? FontWeight.bold : FontWeight.w600,
+              color: _unreadOnly ? Colors.white : null,
+            ),
+          ),
+          if (totalUnread > 0) ...[
+            const SizedBox(width: 5),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+              decoration: BoxDecoration(
+                color: _unreadOnly ? Colors.white : AppTheme.primary,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '$totalUnread',
+                style: TextStyle(
+                  color: _unreadOnly ? AppTheme.primary : Colors.white,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 10,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+      selectedColor: AppTheme.primary,
+      backgroundColor: Colors.transparent,
+      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(
+          color: _unreadOnly ? AppTheme.primary : Colors.grey.withAlpha(60),
+        ),
+      ),
+      onSelected: (val) {
+        HapticFeedback.selectionClick();
+        setState(() => _unreadOnly = val);
+      },
+    );
+  }
+
   Widget _buildFilterChip(String label, int index, int badgeCount) {
     final isSelected = _selectedFilter == index;
     return ChoiceChip(
@@ -1031,30 +1197,76 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
           children: [
             const Icon(Icons.calendar_month_rounded, size: 14, color: AppTheme.primary),
             const SizedBox(width: 8),
-            Text(
-              item.dateLabel,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w800,
-                color: isDark ? Colors.white : const Color(0xFF0F172A),
-              ),
-            ),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withAlpha(20),
-                borderRadius: BorderRadius.circular(8),
-              ),
+            Expanded(
               child: Text(
-                '${item.alertCount} events',
-                style: const TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.primary,
+                item.dateLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
                 ),
               ),
             ),
+            const SizedBox(width: 6),
+            if (item.dateLabel.toLowerCase().contains('today'))
+              Tooltip(
+                message: 'Mark today as read',
+                child: InkWell(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    ref.read(proximityAlertServiceProvider).markAlertsAsReadForDate(DateTime.now());
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('✓ Marked today’s activities as read'),
+                        behavior: SnackBarBehavior.floating,
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withAlpha(25),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF10B981).withAlpha(80), width: 0.8),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.done_all_rounded, size: 12, color: Color(0xFF059669)),
+                        SizedBox(width: 3),
+                        Text(
+                          'Mark Read',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF059669),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            else
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withAlpha(20),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '${item.alertCount} events',
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primary,
+                  ),
+                ),
+              ),
             const SizedBox(width: 6),
             Icon(
               item.isCollapsed ? Icons.expand_more_rounded : Icons.expand_less_rounded,
@@ -1908,29 +2120,12 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
   }
 
   Widget _buildEmptyState(_EmptyStateItem item, bool isDark) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.only(top: 60, bottom: 40),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(item.icon, size: 52, color: Colors.grey[400]),
-            const SizedBox(height: 12),
-            Text(
-              item.title,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            const SizedBox(height: 4),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Text(
-                item.message,
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12.5, color: Colors.grey[500]),
-              ),
-            ),
-          ],
-        ),
+    return Padding(
+      padding: const EdgeInsets.only(top: 40, bottom: 40),
+      child: AppEmptyState(
+        icon: item.icon,
+        title: item.title,
+        message: item.message,
       ),
     );
   }

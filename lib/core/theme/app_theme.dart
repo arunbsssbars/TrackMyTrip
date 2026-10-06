@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../design_system/app_status_colors.dart';
 
 class AppTheme {
   // Google Stitch / Senior Modern Palette
@@ -123,6 +124,9 @@ class AppTheme {
         labelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
         unselectedLabelStyle: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
       ),
+      extensions: const [
+        AppStatusColors.light,
+      ],
     );
   }
 
@@ -220,6 +224,9 @@ class AppTheme {
         labelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
         unselectedLabelStyle: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
       ),
+      extensions: const [
+        AppStatusColors.dark,
+      ],
     );
   }
 }

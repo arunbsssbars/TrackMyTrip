@@ -1,8 +1,11 @@
+import 'dart:async';
 import '../common/trip_menu_button.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/cloud_trip_sync_service.dart';
 import '../../core/services/live_location_tracker_service.dart';
+import '../../core/services/offline_sync_engine.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/app_snackbar.dart';
 import '../../core/utils/date_formatter.dart';
@@ -29,6 +32,7 @@ import '../common/sos_badge_icon.dart';
 import '../common/universal_bottom_bar.dart';
 import '../../widgets/app_floating_button.dart';
 import '../../widgets/quick_bill_action_sheet.dart';
+import '../../core/design_system/design_system.dart';
 
 class TripDetailScreen extends ConsumerStatefulWidget {
   final String tripId;
@@ -223,6 +227,8 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
         titleSpacing: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 19),
+          tooltip: 'Back to journeys',
+          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Column(
@@ -307,6 +313,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
           ],
         ),
         actions: [
+          _buildSyncStatusAction(context),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
             child: SosBadgeIcon(
@@ -377,45 +384,54 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
                 labelPadding: const EdgeInsets.symmetric(horizontal: 6),
                 splashBorderRadius: BorderRadius.circular(18),
                 tabs: [
-                  const Tab(
+                  Tab(
                     height: 34,
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 8),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.timeline_rounded, size: 14),
-                          SizedBox(width: 4),
-                          Text('Timeline', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
-                        ],
+                    child: Semantics(
+                      label: 'Timeline tab',
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.timeline_rounded, size: 14),
+                            SizedBox(width: 4),
+                            Text('Timeline', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                  const Tab(
+                  Tab(
                     height: 34,
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 8),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.map_rounded, size: 14),
-                          SizedBox(width: 4),
-                          Text('Route', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
-                        ],
+                    child: Semantics(
+                      label: 'Route tab',
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.map_rounded, size: 14),
+                            SizedBox(width: 4),
+                            Text('Route', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                  const Tab(
+                  Tab(
                     height: 34,
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 8),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.groups_rounded, size: 14),
-                          SizedBox(width: 4),
-                          Text('Members', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
-                        ],
+                    child: Semantics(
+                      label: 'Members tab',
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.groups_rounded, size: 14),
+                            SizedBox(width: 4),
+                            Text('Members', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -470,9 +486,10 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
       ),
       body: Column(
         children: [
+          const _SyncErrorBanner(),
           if (trip.isArchivedByCreator)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
               color: Colors.amber.withAlpha(isDark ? 30 : 20),
               child: Row(
                 children: [
@@ -576,7 +593,13 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
               child: TabBarView(
                 controller: _tabController,
                 children: [
-                  TimelineTab(trip: trip),
+                  TimelineTab(
+                    trip: trip,
+                    onNavigateToMap: (stoppage) {
+                      _tabController.animateTo(1);
+                      ref.read(focusedStoppageProvider.notifier).state = stoppage;
+                    },
+                  ),
                   MapTab(trip: trip),
                   MembersTab(trip: trip),
                   ExpensesTab(trip: trip),
@@ -667,6 +690,178 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
         },
       ),
       bottomNavigationBar: const UniversalBottomBar(),
+    );
+  }
+
+  Widget _buildSyncStatusAction(BuildContext context) {
+    final syncEngine = ref.watch(offlineSyncEngineProvider);
+    final pendingCount = syncEngine.pendingCount;
+    final isSyncing = syncEngine.isSyncing;
+
+    if (!isSyncing && pendingCount == 0) {
+      return const SizedBox.shrink();
+    }
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 2),
+      child: Tooltip(
+        message: isSyncing 
+            ? 'Syncing changes to cloud...' 
+            : '$pendingCount pending offline changes. Tap to sync now.',
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () async {
+            HapticFeedback.lightImpact();
+            if (syncEngine.isSyncing) return;
+            AppSnackBar.showInfo(context, 'Syncing $pendingCount pending changes to cloud...');
+            final success = await syncEngine.syncPendingMutationsNow();
+            if (context.mounted) {
+              if (success) {
+                AppSnackBar.showSuccess(context, 'All offline changes successfully synced!');
+              } else {
+                AppSnackBar.showError(context, syncEngine.lastSyncError ?? 'Sync paused. Changes kept safe locally.');
+              }
+            }
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            decoration: BoxDecoration(
+              color: isSyncing
+                  ? AppTheme.primary.withAlpha(isDark ? 50 : 25)
+                  : Colors.amber.withAlpha(isDark ? 50 : 25),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isSyncing
+                    ? AppTheme.primary.withAlpha(isDark ? 120 : 80)
+                    : Colors.amber.withAlpha(isDark ? 140 : 90),
+                width: 0.8,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isSyncing) ...[
+                  const SizedBox(
+                    width: 11,
+                    height: 11,
+                    child: CircularProgressIndicator(strokeWidth: 1.6, color: AppTheme.primary),
+                  ),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'Syncing',
+                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                  ),
+                ] else ...[
+                  Icon(Icons.cloud_upload_outlined, size: 13, color: isDark ? Colors.amber[300] : Colors.amber[900]),
+                  const SizedBox(width: 3),
+                  Text(
+                    '$pendingCount',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w900,
+                      color: isDark ? Colors.amber[300] : Colors.amber[900],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Loop 44: Auto-dismissing Sync Failure Banner ─────────────────────────────
+
+class _SyncErrorBanner extends ConsumerStatefulWidget {
+  const _SyncErrorBanner();
+
+  @override
+  ConsumerState<_SyncErrorBanner> createState() => _SyncErrorBannerState();
+}
+
+class _SyncErrorBannerState extends ConsumerState<_SyncErrorBanner> {
+  static const Duration _autoDismissAfter = Duration(seconds: 8);
+  Timer? _dismissTimer;
+  String? _scheduledFor;
+
+  @override
+  void dispose() {
+    _dismissTimer?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleDismiss(String error) {
+    if (_scheduledFor == error) return;
+    _scheduledFor = error;
+    _dismissTimer?.cancel();
+    _dismissTimer = Timer(_autoDismissAfter, () {
+      if (!mounted) return;
+      final engine = ref.read(offlineSyncEngineProvider);
+      if (engine.lastSyncError == error) engine.clearLastSyncError();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final engine = ref.watch(offlineSyncEngineProvider);
+    final error = engine.lastSyncError;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    if (error == null || error.trim().isEmpty) {
+      _scheduledFor = null;
+      _dismissTimer?.cancel();
+      return const SizedBox.shrink();
+    }
+    _scheduleDismiss(error);
+
+    return Material(
+      color: isDark ? const Color(0xFF451A03) : const Color(0xFFFFF7ED),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 4, 4, 4),
+        child: Row(
+          children: [
+            const Icon(Icons.cloud_off_rounded, size: 16, color: Color(0xFFEA580C)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Sync paused • Changes kept safe locally',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? const Color(0xFFFED7AA) : const Color(0xFF9A3412),
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(44, 44),
+                foregroundColor: const Color(0xFFEA580C),
+              ),
+              onPressed: engine.isSyncing
+                  ? null
+                  : () {
+                      HapticFeedback.lightImpact();
+                      engine.clearLastSyncError();
+                      engine.syncPendingMutationsNow();
+                    },
+              child: const Text('Retry', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800)),
+            ),
+            IconButton(
+              tooltip: 'Dismiss',
+              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+              icon: const Icon(Icons.close_rounded, size: 16),
+              color: isDark ? Colors.white70 : const Color(0xFF9A3412),
+              onPressed: engine.clearLastSyncError,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -146,8 +146,9 @@ class _GlobalExpensesSheetState extends ConsumerState<GlobalExpensesSheet> {
                 IconButton(
                   onPressed: () => Navigator.of(context).pop(),
                   icon: const Icon(Icons.close_rounded, size: 22),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                  padding: const EdgeInsets.all(10),
+                  constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                  tooltip: 'Close Ledger',
                 ),
               ],
             ),
@@ -181,6 +182,8 @@ class _GlobalExpensesSheetState extends ConsumerState<GlobalExpensesSheet> {
                         suffixIcon: _searchQuery.isNotEmpty
                             ? IconButton(
                                 icon: const Icon(Icons.clear_rounded, size: 16),
+                                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                                tooltip: 'Clear Search',
                                 onPressed: () {
                                   _searchController.clear();
                                   setState(() => _searchQuery = '');
@@ -520,6 +523,8 @@ class _GlobalExpensesSheetState extends ConsumerState<GlobalExpensesSheet> {
               ),
               child: Text(
                 expense.category,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 9.5,
                   fontWeight: FontWeight.bold,

@@ -44,7 +44,15 @@ _ActionDescriptor _resolveAction(String actionType) {
     case 'update_budget':
     case 'trip_budget_allocated':
       return const _ActionDescriptor(label: 'Budget Set', icon: Icons.account_balance_wallet_rounded, color: Color(0xFF0D9488));
+    case 'sos':
+    case 'trigger_sos':
+    case 'sos_emergency':
+    case 'emergency_sos':
+      return const _ActionDescriptor(label: 'SOS Sent', icon: Icons.emergency_rounded, color: Color(0xFFEF4444));
     default:
+      if (actionType.contains('sos') || actionType.contains('emergency')) {
+        return const _ActionDescriptor(label: 'SOS Sent', icon: Icons.emergency_rounded, color: Color(0xFFEF4444));
+      }
       return const _ActionDescriptor(label: 'Financial Ledger', icon: Icons.verified_user_rounded, color: AppTheme.primary);
   }
 }

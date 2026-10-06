@@ -140,6 +140,8 @@ class AuditLogNotifier extends StateNotifier<List<TripAuditLog>> {
   }
 
   Future<void> logAction(TripAuditLog log, {bool broadcast = true}) async {
+    // Stoppages are navigation waypoints, not financial audit records (User point 4)
+    if (log.actionType.contains('stop')) return;
     if (state.any((l) => l.id == log.id)) return;
     if (log.actionType.contains('settle') || log.actionType.contains('advance')) {
       if (state.any((l) =>
@@ -148,6 +150,16 @@ class AuditLogNotifier extends StateNotifier<List<TripAuditLog>> {
           l.itemTitle == log.itemTitle &&
           l.timestamp.difference(log.timestamp).abs().inSeconds < 5)) {
         return; // Suppress duplicate settlement/advance log
+      }
+    }
+    if (log.actionType.contains('expense') || log.actionType.contains('bill')) {
+      if (state.any((l) =>
+          l.tripId == log.tripId &&
+          l.itemTitle == log.itemTitle &&
+          l.amount == log.amount &&
+          log.amount != null &&
+          l.timestamp.difference(log.timestamp).abs().inSeconds < 5)) {
+        return; // Suppress duplicate expense log within 5 seconds
       }
     }
     final updated = [log, ...state];

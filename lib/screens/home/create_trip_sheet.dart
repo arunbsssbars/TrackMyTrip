@@ -301,8 +301,9 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
                   ),
                   IconButton(
                     icon: const Icon(Icons.close, size: 20),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(10),
+                    constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                    tooltip: 'Close',
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],

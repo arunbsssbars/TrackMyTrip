@@ -571,6 +571,8 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
                           suffixIcon: searchQuery.isNotEmpty
                               ? IconButton(
                                   icon: const Icon(Icons.clear_rounded, size: 18),
+                                  constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                                  tooltip: 'Clear Search',
                                   onPressed: () {
                                     searchController.clear();
                                     setModalState(() {
@@ -1186,11 +1188,14 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
         ref.read(allStoppagesProvider.notifier).reload();
         ref.read(allExpensesProvider.notifier).reload();
       },
-      child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 36),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 900),
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 36),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Concluded Journey Status Alert Banner
             if (trip.isCompleted) ...[
@@ -1561,7 +1566,9 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
           ],
         ),
       ),
-    );
+    ),
+  ),
+);
   }
 
   Widget _buildAuditTrailAndTrustHistoryButton(BuildContext context, Trip trip, bool isDark) {

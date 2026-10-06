@@ -7,12 +7,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/services/media_cache_service.dart';
 import '../../core/services/image_compression_service.dart';
-import '../../core/services/firebase_storage_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/memory.dart';
 import '../../models/stoppage.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/trip_provider.dart';
+import '../../core/services/realtime_sync_service.dart';
 
 class AddMemoryDialog extends ConsumerStatefulWidget {
   final String tripId;
@@ -105,69 +105,58 @@ class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
 
     final currentTrip = ref.read(currentTripProvider);
     final uploaderId = _selectedMemberId ?? currentTrip?.currentUserMember?.id ?? 'me';
-    const uuid = Uuid();
-    final memoryId = uuid.v4();
+    final uploaderName = currentTrip?.getMemberName(uploaderId) ?? 'Companion';
 
-    String finalMediaPath = _activePhoto!;
-    String? localPath;
-    MediaUploadStatus uploadStatus = MediaUploadStatus.local;
+    // Broadcast companion memory uploading presence
+    ref.read(realtimeSyncServiceProvider).broadcastMemoryActivity(widget.tripId, uploaderId, uploaderName, true);
 
-    // Cache image permanently into local app storage
-    if (_pickedFile != null && !kIsWeb && !_activePhoto!.startsWith('data:image')) {
-      try {
-        final mediaService = ref.read(mediaCacheServiceProvider);
-        final item = await mediaService.cacheAndQueue(
-          sourcePath: _activePhoto!,
-          entityType: 'memory',
-          entityId: memoryId,
-          tripId: widget.tripId,
-        );
-        finalMediaPath = item.localPath;
-        localPath = item.localPath;
-        uploadStatus = item.status;
-      } catch (e) {
-        localPath = _activePhoto;
-      }
-    }
+    try {
+      const uuid = Uuid();
+      final memoryId = uuid.v4();
 
-    final newMemory = Memory(
-      id: memoryId,
-      tripId: widget.tripId,
-      stoppageId: widget.stoppage.id,
-      uploadedByMemberId: uploaderId,
-      mediaPath: finalMediaPath,
-      localPath: localPath,
-      uploadStatus: uploadStatus,
-      caption: _captionController.text.trim().isNotEmpty
-          ? _captionController.text.trim()
-          : null,
-      createdAt: DateTime.now(),
-      likedByMemberIds: [],
-    );
+      String finalMediaPath = _activePhoto!;
+      String? localPath;
+      bool isQueueing = false;
 
-    ref.read(allMemoriesProvider.notifier).addMemory(newMemory);
-
-    // Asynchronously upload directly to Firebase Cloud Storage and update memory remoteUrl
-    if (!kIsWeb && localPath != null) {
-      final storageService = ref.read(firebaseStorageServiceProvider);
-      if (storageService.isAvailable) {
-        final f = File(localPath);
-        if (await f.exists()) {
-          storageService.uploadMemoryPhoto(
+      // Cache image permanently into local app storage
+      if (_pickedFile != null && !kIsWeb && !_activePhoto!.startsWith('data:image')) {
+        try {
+          final mediaService = ref.read(mediaCacheServiceProvider);
+          final item = await mediaService.cacheAndQueue(
+            sourcePath: _activePhoto!,
+            entityType: 'memory',
+            entityId: memoryId,
             tripId: widget.tripId,
-            memoryId: memoryId,
-            file: f,
-          ).then((cloudUrl) {
-            if (cloudUrl != null && cloudUrl.isNotEmpty) {
-              ref.read(allMemoriesProvider.notifier).updateMemoryMediaUrl(memoryId, cloudUrl);
-            } else {
-              ref.read(allMemoriesProvider.notifier).updateMemoryUploadStatus(memoryId, MediaUploadStatus.local);
-            }
-          }).catchError((_) {
-            ref.read(allMemoriesProvider.notifier).updateMemoryUploadStatus(memoryId, MediaUploadStatus.local);
-          });
+          );
+          finalMediaPath = item.localPath;
+          localPath = item.localPath;
+          isQueueing = true;
+        } catch (e) {
+          localPath = _activePhoto;
         }
       }
+
+      final newMemory = Memory(
+        id: memoryId,
+        tripId: widget.tripId,
+        stoppageId: widget.stoppage.id,
+        uploadedByMemberId: uploaderId,
+        mediaPath: finalMediaPath,
+        localPath: localPath,
+        uploadStatus: isQueueing ? MediaUploadStatus.uploading : MediaUploadStatus.local,
+        caption: _captionController.text.trim().isNotEmpty
+            ? _captionController.text.trim()
+            : null,
+        createdAt: DateTime.now(),
+        likedByMemberIds: [],
+      );
+
+      await ref.read(allMemoriesProvider.notifier).addMemory(newMemory);
+    } finally {
+      // Clear memory activity presence safely
+      try {
+        ref.read(realtimeSyncServiceProvider).broadcastMemoryActivity(widget.tripId, uploaderId, uploaderName, false);
+      } catch (_) {}
     }
 
     if (mounted) Navigator.of(context).pop();

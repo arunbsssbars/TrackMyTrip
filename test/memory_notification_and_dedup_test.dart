@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackmytrip/core/services/media_cache_service.dart';
+import 'package:trackmytrip/core/services/tombstone_service.dart';
 import 'package:trackmytrip/core/utils/notification_formatter.dart';
 import 'package:trackmytrip/models/memory.dart';
 import 'package:trackmytrip/models/proximity_alert.dart';
@@ -71,6 +72,21 @@ void main() {
 
       expect(NotificationFormatter.formatTitle(sosAlert, currentUserId: 'u1'), '🚨 SOS Distress Active');
     });
+
+    test('converts SOS added to SOS Sent in activity card', () {
+      final sosAddedAlert = ProximityAlert(
+        id: 'sos_added_1',
+        tripId: 't1',
+        type: AlertType.sosEmergency,
+        title: 'SOS Added',
+        message: 'Arun added SOS',
+        senderMemberId: 'u1',
+        senderName: 'Arun',
+        timestamp: DateTime.now(),
+      );
+      expect(NotificationFormatter.formatTitle(sosAddedAlert, currentUserId: 'u1'), 'SOS Sent');
+      expect(NotificationFormatter.formatTitle(sosAddedAlert, currentUserId: 'other'), 'SOS Sent');
+    });
   });
 
   group('Memory MediaUploadStatus Tests', () {
@@ -94,6 +110,30 @@ void main() {
       final rehydrated = Memory.fromJson(json);
       expect(rehydrated.uploadStatus, MediaUploadStatus.uploaded);
       expect(rehydrated.localPath, 'C:/Users/Arun/Pictures/sunset.jpg');
+    });
+
+    test('TombstoneService correctly marks and verifies memory tombstones', () async {
+      const memId = 'mem_tombstone_test_1';
+      expect(TombstoneService.isMemoryTombstoned(memId), isFalse);
+
+      await TombstoneService.markMemoryTombstoned(memId);
+      expect(TombstoneService.isMemoryTombstoned(memId), isTrue);
+      expect(TombstoneService.getAllTombstonedMemoryIds().contains(memId), isTrue);
+    });
+
+    test('MediaCacheService registers and purges item via deleteForEntity', () async {
+      final service = MediaCacheService();
+      final item = service.register(
+        localPath: 'test_path_1.jpg',
+        entityType: 'memory',
+        entityId: 'mem_entity_1',
+      );
+
+      expect(service.itemForEntity('mem_entity_1'), isNotNull);
+      expect(service.itemForEntity('mem_entity_1')?.id, item.id);
+
+      await service.deleteForEntity('mem_entity_1');
+      expect(service.itemForEntity('mem_entity_1'), isNull);
     });
   });
 }

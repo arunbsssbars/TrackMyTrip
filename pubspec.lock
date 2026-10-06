@@ -17,6 +17,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.13.2"
+  aqil_core:
+    dependency: "direct main"
+    description:
+      path: "packages/aqil_core_v10"
+      relative: true
+    source: path
+    version: "10.0.0"
   archive:
     dependency: "direct main"
     description:
@@ -138,7 +145,7 @@ packages:
     source: hosted
     version: "0.3.5+5"
   crypto:
-    dependency: transitive
+    dependency: "direct dev"
     description:
       name: crypto
       sha256: c8ea0233063ba03258fbcf2ca4d6dadfefe14f02fab57702265467a19f27fadf

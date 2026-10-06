@@ -465,12 +465,12 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
     final alertService = ref.watch(proximityAlertServiceProvider);
     final trips = ref.watch(tripListProvider);
     final allAlerts = alertService.alerts;
-    // Keep only safety/proximity alerts and sort in descending order (most recent first)
+    // Keep only emergency SOS and companion stray safety alerts (activities are segregated into Activity Hub)
     final alerts = allAlerts.where((a) => 
       a.type == AlertType.sosEmergency || 
-      a.type == AlertType.companionStray ||
-      a.type == AlertType.stoppageArrival
+      a.type == AlertType.companionStray
     ).toList()..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    final unreadSafetyCount = alerts.where((a) => !a.isRead).length;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
@@ -504,10 +504,10 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: AppTheme.primary.withAlpha(25),
+                    color: Colors.red.withAlpha(25),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.notifications_active_rounded, color: AppTheme.primary, size: 20),
+                  child: const Icon(Icons.sos_rounded, color: Colors.red, size: 22),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -524,7 +524,7 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: -0.3),
                             ),
                           ),
-                          if (alertService.unreadCount > 0) ...[
+                          if (unreadSafetyCount > 0) ...[
                             const SizedBox(width: 6),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -533,7 +533,7 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(
-                                '${alertService.unreadCount}',
+                                '$unreadSafetyCount',
                                 style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
                               ),
                             ),
@@ -541,7 +541,7 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                         ],
                       ),
                       const Text(
-                        'AWS SNS Geofencing & Companion Safety',
+                        'Live Geofencing & Companion Emergency Signals',
                         style: TextStyle(fontSize: 11, color: Colors.grey),
                       ),
                     ],
@@ -551,15 +551,15 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                   PopupMenuButton<String>(
                     tooltip: 'Clear notifications',
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
                         color: Colors.red.withAlpha(20),
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(10),
                       ),
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.delete_sweep_rounded, size: 15, color: Colors.red),
+                          Icon(Icons.delete_sweep_rounded, size: 16, color: Colors.red),
                           SizedBox(width: 4),
                           Text('Clear', style: TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.bold)),
                         ],
@@ -737,6 +737,7 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                               _buildThresholdChip(alertService, 1000, '1.0 km'),
                               _buildThresholdChip(alertService, 1500, '1.5 km'),
                               _buildThresholdChip(alertService, 2500, '2.5 km'),
+                              _buildThresholdChip(alertService, 5000, '5.0 km'),
                             ],
                           ),
                         ],
@@ -789,14 +790,14 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                           Icon(Icons.verified_rounded, size: 48, color: Colors.green.withAlpha(140)),
                           const SizedBox(height: 10),
                           const Text(
-                            'All Clear & Group In Range',
+                            'All Clear • No Active SOS Alerts',
                             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                           ),
                           const SizedBox(height: 4),
                           const Text(
-                            'Proximity alerts and stop arrivals will appear here automatically.',
+                            'Emergency SOS signals and companion stray alerts will appear here.\nTrip activities and updates can be found in the Activity Hub tab.',
                             textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.grey, fontSize: 12),
+                            style: TextStyle(color: Colors.grey, fontSize: 12, height: 1.3),
                           ),
                         ],
                       ),
@@ -826,7 +827,10 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
   Widget _buildThresholdChip(ProximityAlertService service, double meters, String label) {
     final isSelected = service.strayThresholdMeters == meters;
     return InkWell(
-      onTap: () => service.setStrayThreshold(meters),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        service.setStrayThreshold(meters);
+      },
       borderRadius: BorderRadius.circular(16),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
@@ -1052,6 +1056,39 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                         ],
                       ),
                     ),
+                    if (alert.type == AlertType.sosEmergency && alert.isResolved) ...[
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withAlpha(isDark ? 30 : 15),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: Colors.green.withAlpha(isDark ? 70 : 40),
+                            width: 0.8,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.check_circle_rounded, size: 12, color: Colors.green),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                'RESOLVED: ${alert.resolutionReason ?? "Issue resolved"}',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.green,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                   // Quick Action Buttons: Shown only to companions (never to sender)
                   if (!isSender &&
@@ -1064,6 +1101,38 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                       spacing: 8,
                       runSpacing: 6,
                       children: [
+                        // Resolve SOS button
+                        if (alert.type == AlertType.sosEmergency && !alert.isResolved)
+                          InkWell(
+                            onTap: () => _showResolveSosDialog(context, service, alert),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4.5),
+                              decoration: BoxDecoration(
+                                color: Colors.green.withAlpha(isDark ? 35 : 20),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: Colors.green.withAlpha(isDark ? 90 : 60),
+                                  width: 0.9,
+                                ),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.check_circle_outline_rounded, size: 13, color: Colors.green),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Resolve SOS',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.green,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         // Call button: SOS emergency cards only
                         if (alert.type == AlertType.sosEmergency &&
                             alert.senderMemberId.isNotEmpty &&
@@ -1159,5 +1228,76 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
   ),
 ),
 );
+  }
+
+  void _showResolveSosDialog(BuildContext context, ProximityAlertService service, ProximityAlert alert) {
+    HapticFeedback.selectionClick();
+    final reasons = ['Assistance Arrived', 'Safe with Group', 'Issue Resolved', 'False Alarm'];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).brightness == Brightness.dark ? AppTheme.surfaceDark : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 38,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade400,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Row(
+                  children: [
+                    Icon(Icons.shield_outlined, color: Colors.green, size: 22),
+                    SizedBox(width: 8),
+                    Text(
+                      'Resolve SOS Alert',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Select the resolution reason to clear the emergency broadcast for ${alert.senderName}:',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: reasons.map((r) {
+                    return ActionChip(
+                      label: Text(r, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        service.resolveSosAlert(alert.id, resolutionReason: r, tripId: alert.tripId);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('✅ Emergency SOS resolved: $r'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      },
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 }

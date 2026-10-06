@@ -110,7 +110,7 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
 
   void _analyzeInput(String text) async {
     var clean = text.trim();
-    if (clean.isEmpty) {
+    if (clean.isEmpty || clean == 'TRIP-') {
       setState(() {
         _parsedPackage = null;
         _errorMessage = null;
@@ -119,11 +119,14 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
       return;
     }
 
-    // Auto-extract 6-character room code from invite messages if pasted
-    final match = RegExp(r'TRIP-[A-Z0-9]{4}', caseSensitive: false).firstMatch(clean);
+    // Normalize spacing and hyphens: "trip - 7482" -> "TRIP-7482"
+    clean = clean.replaceAll(RegExp(r'\s*-\s*'), '-');
+
+    // Auto-extract room code from rich invite messages if pasted
+    final match = RegExp(r'TRIP-[A-Z0-9]{4,8}', caseSensitive: false).firstMatch(clean);
     if (match != null) {
       clean = match.group(0)!.toUpperCase();
-    } else if (clean.length == 4 && !clean.contains(':')) {
+    } else if (RegExp(r'^[A-Za-z0-9]{4,8}$').hasMatch(clean)) {
       clean = 'TRIP-${clean.toUpperCase()}';
     }
 
@@ -355,6 +358,9 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.close_rounded),
+                  padding: const EdgeInsets.all(10),
+                  constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                  tooltip: 'Close',
                   onPressed: () => Navigator.of(context).pop(),
                 ),
               ],

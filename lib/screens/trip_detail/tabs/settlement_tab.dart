@@ -21,6 +21,68 @@ class SettlementTab extends ConsumerStatefulWidget {
 
   const SettlementTab({super.key, required this.trip});
 
+  static String generateSettlementSummaryReport(Trip trip, Map<String, double> netBalances, List<DebtTransfer> transfers) {
+    final buffer = StringBuffer();
+    buffer.writeln('💰 Settlement Summary: ${trip.title}');
+    buffer.writeln('----------------------------------------');
+    if (transfers.isEmpty) {
+      buffer.writeln('✨ All companions are completely settled up!');
+    } else {
+      buffer.writeln('Recommended Transfers to Settle:');
+      for (final t in transfers) {
+        final fromName = trip.getMemberName(t.fromMemberId);
+        final toName = trip.getMemberName(t.toMemberId);
+        final amt = CurrencyFormatter.format(t.amount, currency: trip.defaultCurrency);
+        buffer.writeln('• $fromName pays $toName: $amt');
+      }
+    }
+    buffer.writeln('\nIndividual Balances:');
+    for (final m in trip.members) {
+      final bal = netBalances[m.id] ?? 0.0;
+      final formatted = CurrencyFormatter.format(bal.abs(), currency: trip.defaultCurrency);
+      if (bal > 0.01) {
+        buffer.writeln('• ${m.name}: +$formatted (gets back)');
+      } else if (bal < -0.01) {
+        buffer.writeln('• ${m.name}: -$formatted (owes)');
+      } else {
+        buffer.writeln('• ${m.name}: Settled');
+      }
+    }
+    buffer.writeln('----------------------------------------');
+    buffer.writeln('Tracked with TrackMyTrip');
+    return buffer.toString();
+  }
+
+  static String generateSettlementCsv(
+    Trip trip,
+    Map<String, double> netBalances,
+    List<DebtTransfer> transfers,
+    List<Settlement> settlements,
+  ) {
+    final buffer = StringBuffer();
+    buffer.writeln('Type,Member Name,Member ID,Amount,Currency,Status');
+    for (final m in trip.members) {
+      final bal = netBalances[m.id] ?? 0.0;
+      final status = bal > 0.01 ? 'Gets Back' : (bal < -0.01 ? 'Owes' : 'Settled');
+      buffer.writeln('Balance,"${m.name.replaceAll('"', '""')}",${m.id},${bal.toStringAsFixed(2)},${trip.defaultCurrency},$status');
+    }
+    buffer.writeln('\nTransfer Type,From Member,To Member,Amount,Currency');
+    for (final t in transfers) {
+      final fromName = trip.getMemberName(t.fromMemberId);
+      final toName = trip.getMemberName(t.toMemberId);
+      buffer.writeln('Recommended Transfer,"${fromName.replaceAll('"', '""')}","${toName.replaceAll('"', '""')}",${t.amount.toStringAsFixed(2)},${trip.defaultCurrency}');
+    }
+    buffer.writeln('\nSettlement ID,Payer,Receiver,Amount,Currency,Payment Method,Date,Notes');
+    for (final s in settlements) {
+      final payerName = trip.getMemberName(s.payerMemberId);
+      final receiverName = trip.getMemberName(s.receiverMemberId);
+      final dateStr = s.settledAt.toIso8601String().split('T').first;
+      final noteSafe = (s.notes ?? '').replaceAll('"', '""');
+      buffer.writeln('${s.id},"${payerName.replaceAll('"', '""')}","${receiverName.replaceAll('"', '""')}",${s.amount.toStringAsFixed(2)},${trip.defaultCurrency},${s.paymentMethod},$dateStr,"$noteSafe"');
+    }
+    return buffer.toString();
+  }
+
   @override
   ConsumerState<SettlementTab> createState() => _SettlementTabState();
 }
@@ -97,9 +159,14 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
         currentTrip.isCreator(m.id, m.email) ||
         (currentTrip.createdByMemberId.isNotEmpty && m.id == currentTrip.createdByMemberId));
 
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final hPad = screenWidth < 360
+        ? 10.0
+        : (screenWidth >= 800 ? ((screenWidth - 760) / 2).clamp(16.0, 380.0) : 16.0);
+
     return ListView(
       physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 80),
+      padding: EdgeInsets.fromLTRB(hPad, 14, hPad, 80),
       children: [
         if (widget.trip.isFamily)
           Container(
@@ -132,23 +199,21 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
           ),
 
         // Net Balances Section
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 4,
           children: [
-            Expanded(
-              child: Text(
-                currentTrip.isFamily ? 'Family Member Contributions' : 'Individual Balances',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
-                  color: isDark ? Colors.white : AppTheme.textMainLight,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+            Text(
+              currentTrip.isFamily ? 'Family Member Contributions' : 'Individual Balances',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
+                color: isDark ? Colors.white : AppTheme.textMainLight,
               ),
             ),
-            const SizedBox(width: 8),
             Consumer(builder: (context, ref, _) {
               final imbalance = ref.watch(ledgerImbalanceProvider);
               final isZeroDrift = imbalance.abs() < 0.01;
@@ -231,7 +296,7 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
                   }
                 },
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  padding: EdgeInsets.symmetric(horizontal: screenWidth < 360 ? 8 : 12, vertical: 10),
                   child: Row(
                     children: [
                       UserAvatar(
@@ -278,12 +343,16 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
                                             color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706),
                                           ),
                                           const SizedBox(width: 2.5),
-                                          Text(
-                                            'Creator',
-                                            style: TextStyle(
-                                              fontSize: 9,
-                                              fontWeight: FontWeight.w800,
-                                              color: isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E),
+                                          Flexible(
+                                            child: Text(
+                                              'Creator',
+                                              style: TextStyle(
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.w800,
+                                                color: isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E),
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
+                                              maxLines: 1,
                                             ),
                                           ),
                                         ],
@@ -357,23 +426,21 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
         const SizedBox(height: 20),
 
         // Simplified Debt Transfers (The Solution)
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 6,
           children: [
-            Expanded(
-              child: Text(
-                'Simplified Transfers',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
-                  color: isDark ? Colors.white : AppTheme.textMainLight,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+            Text(
+              'Simplified Transfers',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
+                color: isDark ? Colors.white : AppTheme.textMainLight,
               ),
             ),
-            const SizedBox(width: 8),
             Wrap(
               spacing: 6,
               runSpacing: 4,
@@ -447,63 +514,89 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
                       borderRadius: BorderRadius.circular(18),
                       border: Border.all(color: const Color(0xFFFDE68A), width: 1.2),
                     ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.arrow_circle_right_rounded, color: Color(0xFFD97706), size: 28),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              RichText(
-                                text: TextSpan(
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: isDark ? Colors.white : const Color(0xFF1E293B),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final isNarrow = constraints.maxWidth < 270;
+                        final detailsCol = Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            RichText(
+                              text: TextSpan(
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: isDark ? Colors.white : const Color(0xFF1E293B),
+                                ),
+                                children: [
+                                  TextSpan(
+                                    text: fromMember?.name ?? 'Someone',
+                                    style: const TextStyle(fontWeight: FontWeight.bold),
                                   ),
-                                  children: [
-                                    TextSpan(
-                                      text: fromMember?.name ?? 'Someone',
-                                      style: const TextStyle(fontWeight: FontWeight.bold),
-                                    ),
-                                    const TextSpan(text: ' pays '),
-                                    TextSpan(
-                                      text: toMember?.name ?? 'Someone',
-                                      style: const TextStyle(fontWeight: FontWeight.bold),
-                                    ),
-                                  ],
-                                ),
+                                  const TextSpan(text: ' pays '),
+                                  TextSpan(
+                                    text: toMember?.name ?? 'Someone',
+                                    style: const TextStyle(fontWeight: FontWeight.bold),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                CurrencyFormatter.format(transfer.amount, currency: currentTrip.defaultCurrency),
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: -0.3,
-                                  color: Color(0xFFB45309),
-                                ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              CurrencyFormatter.format(transfer.amount, currency: currentTrip.defaultCurrency),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.3,
+                                color: Color(0xFFB45309),
                               ),
-                            ],
-                          ),
-                        ),
-                        FilledButton(
+                            ),
+                          ],
+                        );
+
+                        final markPaidBtn = FilledButton(
                           onPressed: () => _openRecordSettlementDialog(context, defaultTransfer: transfer),
                           style: FilledButton.styleFrom(
                             backgroundColor: const Color(0xFFD97706),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            visualDensity: VisualDensity.compact,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
                           child: const Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text('Mark Paid', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
-                              SizedBox(width: 3),
-                              Icon(Icons.chevron_right_rounded, size: 14, color: Colors.white),
+                              Text('Mark Paid', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.white)),
+                              SizedBox(width: 2),
+                              Icon(Icons.chevron_right_rounded, size: 13, color: Colors.white),
                             ],
                           ),
-                        ),
-                      ],
+                        );
+
+                        if (isNarrow) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.arrow_circle_right_rounded, color: Color(0xFFD97706), size: 26),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: detailsCol),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Align(alignment: Alignment.centerRight, child: markPaidBtn),
+                            ],
+                          );
+                        }
+
+                        return Row(
+                          children: [
+                            const Icon(Icons.arrow_circle_right_rounded, color: Color(0xFFD97706), size: 28),
+                            const SizedBox(width: 10),
+                            Expanded(child: detailsCol),
+                            const SizedBox(width: 6),
+                            markPaidBtn,
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ),

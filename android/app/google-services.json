@@ -15,6 +15,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "731719697818-c08msnpieloveafvdrfi8g7sa9vr7s7e.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.trackmytrip.app",
+            "certificate_hash": "908ee37291ac67802c557bd7f4cf836f3c3fba5e"
+          }
+        },
+        {
           "client_id": "731719697818-ljfrslc4gbqucih5n6qfnt01v5ct3nsj.apps.googleusercontent.com",
           "client_type": 3
         }

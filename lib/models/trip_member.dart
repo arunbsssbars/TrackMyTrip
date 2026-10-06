@@ -83,8 +83,8 @@ class TripMember {
 
   factory TripMember.fromJson(Map<String, dynamic> json) {
     return TripMember(
-      id: json['id'] as String,
-      name: json['name'] as String,
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? 'Traveler',
       email: json['email'] as String?,
       avatarUrl: json['avatarUrl'] as String?,
       colorHex: json['colorHex'] as String?,

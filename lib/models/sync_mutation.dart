@@ -13,6 +13,7 @@ enum MutationAction {
   deleteSettlement,
   updateMemberLocation,
   addMemory,
+  updateMemory,
   deleteMemory,
 }
 

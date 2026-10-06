@@ -1,9 +1,12 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'dart:io';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/design_system/design_system.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../models/expense.dart';
@@ -11,6 +14,7 @@ import '../../models/trip.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/stoppage_provider.dart';
 import '../../providers/trip_provider.dart';
+import '../../core/services/trip_share_service.dart';
 import '../common/universal_bottom_bar.dart';
 
 class TripAnalyticsScreen extends ConsumerStatefulWidget {
@@ -31,6 +35,7 @@ class TripAnalyticsScreen extends ConsumerStatefulWidget {
 
 class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  String _previewCurrency = 'INR';
 
   @override
   void initState() {
@@ -175,7 +180,7 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
       ..sort((a, b) => (tripSpendMap[b.id] ?? 0.0).compareTo(tripSpendMap[a.id] ?? 0.0));
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+      padding: EdgeInsets.fromLTRB(MediaQuery.sizeOf(context).width > 800 ? (MediaQuery.sizeOf(context).width - 760) / 2 : 16.0, 12, MediaQuery.sizeOf(context).width > 800 ? (MediaQuery.sizeOf(context).width - 760) / 2 : 16.0, 32),
       children: [
         // Top Global Total Summary Card
         Container(
@@ -204,13 +209,62 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
               ),
               const SizedBox(height: 6),
               Text(
-                CurrencyFormatter.format(totalSpent, currency: 'INR'),
+                CurrencyFormatter.format(
+                  CurrencyFormatter.convertEstimated(totalSpent, 'INR', _previewCurrency),
+                  currency: _previewCurrency,
+                ),
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
                   letterSpacing: -0.5,
                 ),
+              ),
+              if (_previewCurrency != 'INR') ...[
+                const SizedBox(height: 3),
+                Text(
+                  'Base: ${CurrencyFormatter.format(totalSpent, currency: 'INR')}',
+                  style: const TextStyle(color: Colors.white60, fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+              ],
+              const SizedBox(height: 12),
+              // Currency Preview Switcher
+              SizedBox(
+                width: double.infinity,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'THB'].map((cur) {
+                    final isSel = _previewCurrency == cur;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 3),
+                      child: InkWell(
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          setState(() => _previewCurrency = cur);
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: isSel ? Colors.white : Colors.white.withAlpha(35),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            cur,
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w800,
+                              color: isSel ? const Color(0xFF0D9488) : Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
               ),
               const SizedBox(height: 14),
               Row(
@@ -484,18 +538,11 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              subtitle: Row(
-                children: [
-                  Text(
-                    '${tripExpenses.length} bill${tripExpenses.length == 1 ? "" : "s"}',
-                    style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : const Color(0xFF64748B)),
-                  ),
-                  const Text(' • ', style: TextStyle(color: Colors.grey)),
-                  Text(
-                    DateFormatter.formatTripDateRange(trip.startDate, trip.endDate),
-                    style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : const Color(0xFF64748B)),
-                  ),
-                ],
+              subtitle: Text(
+                '${tripExpenses.length} bill${tripExpenses.length == 1 ? "" : "s"} • ${DateFormatter.formatTripDateRange(trip.startDate, trip.endDate)}',
+                style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
               trailing: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -625,8 +672,34 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
   ) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('${trip.title} • Hub'),
+        title: Text(
+          '${trip.title} • Hub',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.file_download_outlined),
+            tooltip: 'Export Trip Financial Ledger (CSV)',
+            onPressed: () {
+              final csvContent = StringBuffer();
+              csvContent.writeln('ID,Title,Category,Amount,Currency,Payer,Date');
+              for (final e in expenses) {
+                final payer = trip.getMemberName(e.paidByMemberId);
+                csvContent.writeln('"${e.id}","${e.title}","${e.category}",${e.totalAmount},"${e.currency}","$payer","${e.createdAt.toIso8601String()}"');
+              }
+              TripShareService.shareText(
+                'Financial Ledger for ${trip.title}\n\n${csvContent.toString()}',
+                subject: '${trip.title} - Expense Ledger CSV',
+              );
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Financial ledger ready to share/export.'), behavior: SnackBarBehavior.floating),
+              );
+            },
+          ),
+          const SizedBox(width: 4),
+        ],
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: AppTheme.primary,
@@ -665,6 +738,17 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
     bool isDark,
   ) {
     final totalSpent = expenses.fold<double>(0.0, (sum, e) => sum + e.totalAmount);
+    final tripDurationDays = math.max(1, trip.endDate.difference(trip.startDate).inDays + 1);
+    final daysElapsed = math.max(1, math.min(tripDurationDays, DateTime.now().difference(trip.startDate).inDays + 1));
+    final dailyAvgSpent = totalSpent / daysElapsed;
+    final budget = trip.budget;
+    final hasBudget = budget != null && budget > 0;
+    final budgetRemaining = hasBudget ? (budget - totalSpent) : null;
+    final budgetPercent = hasBudget ? (totalSpent / budget).clamp(0.0, 1.0) : 0.0;
+    final isOverBudget = hasBudget && totalSpent > budget;
+    final daysOfBudgetRemaining = (hasBudget && !isOverBudget && dailyAvgSpent > 0.01 && budgetRemaining! > 0)
+        ? (budgetRemaining / dailyAvgSpent)
+        : null;
 
     if (expenses.isEmpty) {
       return _buildNoDataPlaceholder(
@@ -684,7 +768,7 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
       ..sort((a, b) => b.value.compareTo(a.value));
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+      padding: EdgeInsets.fromLTRB(MediaQuery.sizeOf(context).width > 800 ? (MediaQuery.sizeOf(context).width - 760) / 2 : 16.0, 12, MediaQuery.sizeOf(context).width > 800 ? (MediaQuery.sizeOf(context).width - 760) / 2 : 16.0, 32),
       children: [
         // Top Trip Total Summary Card
         Container(
@@ -714,12 +798,61 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
               ),
               const SizedBox(height: 6),
               Text(
-                CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency),
+                CurrencyFormatter.format(
+                  CurrencyFormatter.convertEstimated(totalSpent, trip.defaultCurrency, _previewCurrency),
+                  currency: _previewCurrency,
+                ),
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
                   letterSpacing: -0.5,
+                ),
+              ),
+              if (_previewCurrency != trip.defaultCurrency) ...[
+                const SizedBox(height: 3),
+                Text(
+                  'Base: ${CurrencyFormatter.format(totalSpent, currency: trip.defaultCurrency)}',
+                  style: const TextStyle(color: Colors.white60, fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+              ],
+              const SizedBox(height: 12),
+              // Currency Preview Switcher
+              SizedBox(
+                width: double.infinity,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: {trip.defaultCurrency, 'INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'THB'}.map((cur) {
+                      final isSel = _previewCurrency == cur;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        child: InkWell(
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            setState(() => _previewCurrency = cur);
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: isSel ? Colors.white : Colors.white.withAlpha(35),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              cur,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w800,
+                                color: isSel ? const Color(0xFF0D9488) : Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
                 ),
               ),
               const SizedBox(height: 14),
@@ -745,7 +878,142 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
             ],
           ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 14),
+
+        // Budget Health & Burn-Rate Forecast Card
+        Card(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Icon(
+                            hasBudget ? (isOverBudget ? Icons.warning_rounded : Icons.savings_rounded) : Icons.trending_up_rounded,
+                            size: 18,
+                            color: hasBudget ? (isOverBudget ? Colors.red : const Color(0xFF10B981)) : AppTheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              hasBudget ? 'Budget Health & Pace' : 'Daily Spending Pace',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (hasBudget) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: (isOverBudget ? Colors.red : const Color(0xFF10B981)).withAlpha(20),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          isOverBudget ? 'Over Budget' : '${(budgetPercent * 100).toStringAsFixed(0)}% Used',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
+                            color: isOverBudget ? Colors.red : const Color(0xFF10B981),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (hasBudget) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value: budgetPercent,
+                      minHeight: 8,
+                      backgroundColor: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        isOverBudget
+                            ? Colors.red
+                            : (budgetPercent > 0.8 ? Colors.amber : const Color(0xFF10B981)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Budget: ${CurrencyFormatter.format(budget, currency: trip.defaultCurrency)}',
+                          style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          isOverBudget
+                              ? 'Over: ${CurrencyFormatter.format(totalSpent - budget, currency: trip.defaultCurrency)}'
+                              : 'Left: ${CurrencyFormatter.format(budgetRemaining!, currency: trip.defaultCurrency)}',
+                          textAlign: TextAlign.end,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: isOverBudget ? Colors.red : const Color(0xFF10B981),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Burn: ${CurrencyFormatter.format(dailyAvgSpent, currency: trip.defaultCurrency)}/d',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: isDark ? Colors.grey[300] : const Color(0xFF334155)),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: daysOfBudgetRemaining != null
+                          ? Text(
+                              '~${daysOfBudgetRemaining.toStringAsFixed(1)}d left',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.end,
+                            )
+                          : Text(
+                              'Day $daysElapsed/$tripDurationDays',
+                              style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.end,
+                            ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
 
         // Category Spending Pie Chart
         Card(
@@ -1180,24 +1448,11 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
       child: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
         child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 48, color: Colors.grey),
-              const SizedBox(height: 14),
-              Text(
-                title,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                subtitle,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-            ],
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.lg),
+          child: AppEmptyState(
+            icon: icon,
+            title: title,
+            message: subtitle,
           ),
         ),
       ),

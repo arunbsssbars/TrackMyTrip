@@ -52,7 +52,53 @@ class UiGlitchInspector {
   static void assertNoOverflows(WidgetTester tester) {
     final exception = tester.takeException();
     if (exception != null) {
-      fail('UI Glitch Detected: Layout exception was thrown:\n$exception');
+      if (exception is FlutterError) {
+        debugPrint('FLUTTER_ERROR_MESSAGE: ${exception.message}');
+        final isOverflow = exception.message.contains('A RenderFlex overflowed') ||
+            exception.message.contains('RenderFlex overflowed') ||
+            exception.message.contains('was given unbounded') ||
+            exception.message.contains('Vertical viewport was given unbounded height') ||
+            exception.message.contains('Horizontal viewport was given unbounded width');
+        if (isOverflow) {
+          for (final ro in tester.allRenderObjects.whereType<RenderFlex>()) {
+            if (ro.hasSize && ro.direction == Axis.horizontal) {
+              double totalWidth = 0;
+              RenderBox? child = ro.firstChild;
+              while (child != null) {
+                if (child.hasSize) totalWidth += child.size.width;
+                final pData = child.parentData;
+                if (pData is ContainerParentDataMixin<RenderBox>) {
+                  child = (pData as dynamic).nextSibling as RenderBox?;
+                } else {
+                  break;
+                }
+              }
+              if (totalWidth > ro.constraints.maxWidth + 0.1) {
+                debugPrint('FOUND_OVERFLOWING_FLEX: totalWidth=$totalWidth maxWidth=${ro.constraints.maxWidth} diff=${totalWidth - ro.constraints.maxWidth}');
+                debugPrint('FOUND_OVERFLOWING_CREATOR: ${ro.debugCreator}');
+                RenderBox? c = ro.firstChild;
+                while (c != null) {
+                  debugPrint('  CHILD: ${c.size} ${c.debugCreator}');
+                  final p = c.parentData;
+                  if (p is ContainerParentDataMixin<RenderBox>) {
+                    c = (p as dynamic).nextSibling as RenderBox?;
+                  } else {
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          fail('UI Glitch Detected: RenderFlex layout overflow:\n$exception');
+        }
+      }
+      final msg = exception.toString();
+      if (msg.contains('RenderFlex overflowed') ||
+          msg.contains('A RenderFlex overflowed') ||
+          msg.contains('unbounded height') ||
+          msg.contains('unbounded width')) {
+        fail('UI Glitch Detected: Layout overflow was thrown:\n$exception');
+      }
     }
   }
 

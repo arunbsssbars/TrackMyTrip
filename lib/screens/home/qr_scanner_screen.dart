@@ -145,7 +145,8 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
         actions: [
           IconButton(
             icon: Icon(_isTorchOn ? Icons.flash_on_rounded : Icons.flash_off_rounded),
-            tooltip: 'Toggle Flashlight',
+            tooltip: _isTorchOn ? 'Turn Flash Off' : 'Turn Flash On',
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
             onPressed: () async {
               await _controller.toggleTorch();
               setState(() => _isTorchOn = !_isTorchOn);
@@ -154,6 +155,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
           IconButton(
             icon: const Icon(Icons.cameraswitch_rounded),
             tooltip: 'Switch Camera',
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
             onPressed: () => _controller.switchCamera(),
           ),
         ],
