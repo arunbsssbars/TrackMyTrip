@@ -8,7 +8,7 @@ on:
 jobs:
   build-ios:
     name: Build iOS IPA (Unsigned)
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -19,12 +19,15 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Verify CocoaPods Environment
+      - name: Ensure Stable CocoaPods Environment
         run: |
-          pod --version || brew install cocoapods
+          sudo gem install cocoapods --no-document
+          pod --version
 
       - name: Install Dependencies
-        run: flutter pub get
+        run: |
+          mkdir -p build/ios/SourcePackages
+          flutter pub get
 
       - name: Create fallback .env file for asset bundling
         run: |
@@ -34,44 +37,14 @@ jobs:
             touch .env
           fi
 
-      - name: Precache iOS Artifacts & CocoaPods setup
-        run: |
-          flutter precache --ios
-          cd ios
-          pod install --repo-update || pod install
-          cd ..
-
       - name: Build iOS App with Unsigned Signing Allowed
         run: |
-          flutter build ios --release --no-codesign --config-only
-          cd ios
-          xcodebuild -workspace Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath ../build/ios_derived \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build
+          flutter build ios --release --no-codesign
 
       - name: Bundle Payload into Unsigned IPA
         run: |
           mkdir -p build/Payload
-          if [ -d "build/ios_derived/Build/Products/Release-iphoneos/Runner.app" ]; then
-            cp -r build/ios_derived/Build/Products/Release-iphoneos/Runner.app build/Payload/
-          elif [ -d "build/ios/iphoneos/Runner.app" ]; then
-            cp -r build/ios/iphoneos/Runner.app build/Payload/
-          else
-            APP_PATH=$(find build -name "Runner.app" -type d | head -n 1)
-            if [ -n "$APP_PATH" ]; then
-              cp -r "$APP_PATH" build/Payload/
-            else
-              echo "Error: Runner.app not found in build directory"
-              find build -maxdepth 4
-              exit 1
-            fi
-          fi
+          cp -r build/ios/iphoneos/Runner.app build/Payload/ 2>/dev/null || cp -r build/ios_derived/Build/Products/Release-iphoneos/Runner.app build/Payload/
           cd build
           zip -r -q TrackMyTrip-release-unsigned.ipa Payload
           rm -rf Payload
