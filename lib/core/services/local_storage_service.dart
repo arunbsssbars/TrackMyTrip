@@ -718,7 +718,18 @@ class LocalStorageService {
 
   Future<void> saveAuthSession(AuthUser user) async {
     _cachedAuthUser = user;
-      await _db.saveAuthSession(user);
+    await _db.saveAuthSession(user);
+    if (user.email.isNotEmpty) {
+      await saveRegisteredUser({
+        'id': user.id,
+        'email': user.email,
+        'username': user.username,
+        'displayName': user.displayName,
+        'phone': user.phone,
+        'bio': user.bio,
+        'colorHex': user.colorHex,
+      });
+    }
   }
 
   Future<void> clearAuthSession() async {

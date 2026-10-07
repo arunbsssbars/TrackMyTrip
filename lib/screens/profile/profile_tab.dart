@@ -167,8 +167,8 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
       final updatedName = enteredName.isNotEmpty
           ? enteredName
           : (currentSession?.displayName.isNotEmpty == true ? currentSession!.displayName : current.displayName);
-      final updatedPhone = enteredPhone.isNotEmpty ? enteredPhone : (currentSession?.phone ?? current.phone);
-      final updatedBio = enteredBio.isNotEmpty ? enteredBio : (currentSession?.bio ?? current.bio);
+      final updatedPhone = enteredPhone.isNotEmpty ? enteredPhone : null;
+      final updatedBio = enteredBio.isNotEmpty ? enteredBio : null;
       final updatedEmail = enteredEmail.isNotEmpty ? enteredEmail : (currentSession?.email ?? current.email);
 
       // Handle is immutable

@@ -64,15 +64,18 @@
 		<string>remote-notification</string>
 	</array>
 
-	<!-- Google Sign-in Section -->
+	<!-- URL Schemes (Google Sign-in + TrackMyTrip App Scheme) -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.trackmytrip.app</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>com.googleusercontent.apps.731719697818-l1okiq2d45hp9bkepcjb3c5tof6sdsuh</string>
+				<string>trackmytrip</string>
 			</array>
 		</dict>
 	</array>

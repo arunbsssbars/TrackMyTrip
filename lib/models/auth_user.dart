@@ -99,7 +99,7 @@ class AuthUser {
       displayName: json['displayName'] as String,
       email: json['email'] as String,
       photoUrl: json['photoUrl'] as String?,
-      phone: json['phone'] as String?,
+      phone: (json['phone'] ?? json['phoneNumber'] ?? json['mobile'] ?? json['mobileNumber']) as String?,
       bio: json['bio'] as String?,
       colorHex: json['colorHex'] as String?,
       provider: AuthProviderType.values.firstWhere(

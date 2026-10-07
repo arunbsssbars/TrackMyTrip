@@ -16,7 +16,7 @@ class EmailVerificationScreen extends ConsumerStatefulWidget {
   ConsumerState<EmailVerificationScreen> createState() => _EmailVerificationScreenState();
 }
 
-class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScreen> {
+class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScreen> with WidgetsBindingObserver {
   bool _isChecking = false;
   bool _isResending = false;
   int _resendCooldown = 0;
@@ -26,14 +26,24 @@ class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScree
   @override
   void initState() {
     super.initState();
-    // Periodically poll every 4 seconds to see if the user clicked the link in their email
-    _periodicCheckTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+    WidgetsBinding.instance.addObserver(this);
+    // Periodically poll every 3 seconds to see if the user clicked the link in their email
+    _periodicCheckTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       _checkVerificationStatus(silent: true);
     });
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // User switched back from email client or browser; check status immediately
+      _checkVerificationStatus(silent: true);
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _cooldownTimer?.cancel();
     _periodicCheckTimer?.cancel();
     super.dispose();
@@ -127,7 +137,20 @@ class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScree
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
-        await user.sendEmailVerification();
+        try {
+          await user.sendEmailVerification(
+            ActionCodeSettings(
+              url: 'https://trackmytrip-sync-2026.web.app/verify-email?appName=TrackMyTrip',
+              handleCodeInApp: false,
+              androidPackageName: 'com.trackmytrip.app',
+              androidInstallApp: true,
+              androidMinimumVersion: '1',
+              iOSBundleId: 'com.trackmytrip.app',
+            ),
+          );
+        } catch (_) {
+          await user.sendEmailVerification();
+        }
         _startCooldown();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(

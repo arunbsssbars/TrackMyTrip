@@ -87,7 +87,7 @@ class UserProfile {
       username: json['username'] as String,
       displayName: json['displayName'] as String,
       email: json['email'] as String?,
-      phone: json['phone'] as String?,
+      phone: (json['phone'] ?? json['phoneNumber'] ?? json['mobile'] ?? json['mobileNumber']) as String?,
       avatarUrl: json['avatarUrl'] as String?,
       colorHex: json['colorHex'] as String?,
       bio: json['bio'] as String?,

@@ -130,8 +130,21 @@ class AuthService {
         );
         
         await credential.user?.updateDisplayName(cleanName);
-        // Dispatch built-in free Firebase email verification link
-        await credential.user?.sendEmailVerification();
+        // Dispatch branded Firebase email verification link with redirect settings
+        try {
+          await credential.user?.sendEmailVerification(
+            ActionCodeSettings(
+              url: 'https://trackmytrip-sync-2026.web.app/verify-email?appName=TrackMyTrip',
+              handleCodeInApp: false,
+              androidPackageName: 'com.trackmytrip.app',
+              androidInstallApp: true,
+              androidMinimumVersion: '1',
+              iOSBundleId: 'com.trackmytrip.app',
+            ),
+          );
+        } catch (_) {
+          await credential.user?.sendEmailVerification();
+        }
         
         final newUser = AuthUser(
           id: credential.user!.uid,
@@ -230,7 +243,8 @@ class AuthService {
               if (fsName != null && fsName.isNotEmpty) displayName = fsName;
               final fsUser = (data['username'] as String?)?.trim();
               if (fsUser != null && fsUser.isNotEmpty) username = fsUser;
-              phone = data['phone'] as String?;
+              phone = (data['phone'] ?? data['phoneNumber'] ?? data['mobile'] ?? data['mobileNumber']) as String?;
+              phone ??= credential.user!.phoneNumber;
               bio = data['bio'] as String?;
               final fsColor = data['colorHex'] as String?;
               if (fsColor != null && fsColor.isNotEmpty) colorHex = fsColor;
@@ -338,7 +352,8 @@ class AuthService {
               if (fsName != null && fsName.isNotEmpty) displayName = fsName;
               final fsUser = (data['username'] as String?)?.trim();
               if (fsUser != null && fsUser.isNotEmpty) username = fsUser;
-              phone = data['phone'] as String?;
+              phone = (data['phone'] ?? data['phoneNumber'] ?? data['mobile'] ?? data['mobileNumber']) as String?;
+              phone ??= userCredential.user!.phoneNumber;
               bio = data['bio'] as String?;
               final fsColor = data['colorHex'] as String?;
               if (fsColor != null && fsColor.isNotEmpty) colorHex = fsColor;
@@ -726,9 +741,13 @@ class AuthService {
 
         if (authUser.phone != null && authUser.phone!.trim().isNotEmpty) {
           updateData['phone'] = authUser.phone!.trim();
+        } else {
+          updateData['phone'] = null;
         }
         if (authUser.bio != null && authUser.bio!.trim().isNotEmpty) {
           updateData['bio'] = authUser.bio!.trim();
+        } else {
+          updateData['bio'] = null;
         }
 
         await fs.collection('users').doc(docId).set(updateData, SetOptions(merge: true));
