@@ -39,6 +39,11 @@ jobs:
 
       - name: Build iOS App with Unsigned Signing Allowed
         run: |
+          if [ -f ios/Podfile ]; then
+            cd ios
+            pod install || pod install --repo-update
+            cd ..
+          fi
           flutter build ios --release --no-codesign
 
       - name: Bundle Payload into Unsigned IPA
