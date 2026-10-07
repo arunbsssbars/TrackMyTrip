@@ -75,12 +75,12 @@ abstract final class AqilCommandPaletteAuditor {
         ),
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.all(12),
+            const Padding(
+              padding: EdgeInsets.all(12),
               child: TextField(
-                key: const Key('command_palette_search_input'),
+                key: Key('command_palette_search_input'),
                 autofocus: true,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   prefixIcon: Icon(Icons.search),
                   hintText: 'Type a command or search (e.g. Punch In, Settings)...',
                   border: InputBorder.none,

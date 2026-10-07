@@ -92,7 +92,7 @@ abstract final class AqilMediaAssetAuditor {
       // Check error fallback
       if (img.errorBuilder == null && img.image is NetworkImage) {
         foundMissingFallback = true;
-        violations.add(MediaAssetViolation(
+        violations.add(const MediaAssetViolation(
           type: MediaDefectType.missingErrorFallback,
           description: 'NetworkImage lacks an errorBuilder fallback for offline/404 handling',
           recommendation: 'Specify errorBuilder: (ctx, err, stack) => Icon(Icons.broken_image)',

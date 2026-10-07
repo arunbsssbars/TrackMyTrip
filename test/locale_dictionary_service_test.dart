@@ -41,7 +41,7 @@ void main() {
     });
 
     test('ExpeditionLocale JSON serialization and fallback deserialization', () {
-      final loc = const ExpeditionLocale(
+      const loc = ExpeditionLocale(
         languageCode: 'ja',
         nativeName: '日本語',
         englishName: 'Japanese',

@@ -114,7 +114,7 @@ class AqilLifecycleSentinel {
         home: Stack(
           children: [
             Builder(builder: backgroundBuilder),
-            ModalBarrier(color: Colors.black54),
+            const ModalBarrier(color: Colors.black54),
             Builder(builder: modalBuilder),
           ],
         ),

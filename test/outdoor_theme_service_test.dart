@@ -22,7 +22,7 @@ void main() {
 
     test('Adapts ColorScheme for Sunlight Glare high contrast', () {
       service.setMode(OutdoorDisplayMode.sunlightGlareHighContrast);
-      final baseScheme = const ColorScheme.light();
+      const baseScheme = ColorScheme.light();
       final adapted = service.getAdaptedColorScheme(baseScheme);
 
       expect(adapted.surface, Colors.white);
@@ -32,7 +32,7 @@ void main() {
 
     test('Adapts ColorScheme for OLED Night Vision Red and Amber', () {
       service.setMode(OutdoorDisplayMode.nightVisionOledRed);
-      final baseScheme = const ColorScheme.dark();
+      const baseScheme = ColorScheme.dark();
       final adaptedRed = service.getAdaptedColorScheme(baseScheme);
 
       expect(adaptedRed.surface, Colors.black);

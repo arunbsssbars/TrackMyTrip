@@ -200,7 +200,7 @@ class AqilSelfHealer {
             .first
             .trim();
         final match = RegExp(
-          'IconButton\\([^)]*?' + RegExp.escape(innerFirstArg) + '[^)]*?\\)',
+          'IconButton\\([^)]*?${RegExp.escape(innerFirstArg)}[^)]*?\\)',
         ).firstMatch(source);
         if (match != null) {
           trimmed = match.group(0)!;

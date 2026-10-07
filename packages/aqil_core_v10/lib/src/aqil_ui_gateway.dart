@@ -401,7 +401,7 @@ class _AqilUiGatewayState extends State<AqilUiGateway> {
                   const Divider(color: Colors.white24, height: 16),
 
                   // Viewport Selector
-                  Text('Viewport Simulation', style: _hudSectionHeaderStyle),
+                  const Text('Viewport Simulation', style: _hudSectionHeaderStyle),
                   const SizedBox(height: 4),
                   DropdownButtonFormField<AqilSimulatedViewport>(
                     initialValue: _viewport,

@@ -135,8 +135,8 @@ void main() {
           home: Scaffold(
             body: Column(
               children: [
-                TextField(
-                  decoration: const InputDecoration(labelText: 'Name'),
+                const TextField(
+                  decoration: InputDecoration(labelText: 'Name'),
                 ),
                 ElevatedButton(
                   onPressed: () {},
@@ -522,14 +522,14 @@ void main() {
     });
 
     test('AqilTypeScaleAuditor evaluates text themes for accessibility line height headroom', () {
-      final theme = const TextTheme(
+      const theme = TextTheme(
         bodyMedium: TextStyle(fontSize: 14.0, height: 1.4),
       );
       final report = AqilTypeScaleAuditor.auditTheme(theme);
       expect(report.totalAuditedStyles, equals(15));
       expect(report.isCompliant, isTrue);
 
-      final collisionStyle = const TextStyle(fontSize: 18.0, height: 1.0);
+      const collisionStyle = TextStyle(fontSize: 18.0, height: 1.0);
       final warning = AqilTypeScaleAuditor.auditStyle(collisionStyle, name: 'tightHeader');
       expect(warning, contains('Risk of line collision'));
     });
@@ -577,8 +577,8 @@ void main() {
     });
 
     test('AqilTouchCrowdingAuditor detects hazardous proximity between touch targets', () {
-      final btn1 = const Rect.fromLTWH(20, 100, 48, 48);
-      final btn2 = const Rect.fromLTWH(72, 100, 48, 48); // gap = 72 - 68 = 4dp < 12dp
+      const btn1 = Rect.fromLTWH(20, 100, 48, 48);
+      const btn2 = Rect.fromLTWH(72, 100, 48, 48); // gap = 72 - 68 = 4dp < 12dp
       final gap = AqilTouchCrowdingAuditor.auditDistance(
         firstTarget: btn1,
         secondTarget: btn2,
@@ -589,7 +589,7 @@ void main() {
       expect(gap!.category, equals('TouchCrowding'));
       expect(gap.description, contains('spaced only 4.0dp apart'));
 
-      final btnFar = const Rect.fromLTWH(120, 100, 48, 48); // gap = 120 - 68 = 52dp > 12dp
+      const btnFar = Rect.fromLTWH(120, 100, 48, 48); // gap = 120 - 68 = 52dp > 12dp
       final safe = AqilTouchCrowdingAuditor.auditDistance(firstTarget: btn1, secondTarget: btnFar);
       expect(safe, isNull);
     });
@@ -616,7 +616,7 @@ void main() {
       expect(shadows.length, equals(2));
       expect(AqilElevationAuditor.auditBoxShadow(shadows.first), isNull);
 
-      final harsh = const BoxShadow(color: Color(0x99000000), blurRadius: 4.0);
+      const harsh = BoxShadow(color: Color(0x99000000), blurRadius: 4.0);
       expect(AqilElevationAuditor.auditBoxShadow(harsh), contains('harsh opacity'));
     });
 

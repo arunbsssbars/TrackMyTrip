@@ -133,7 +133,7 @@ abstract final class AqilSurfaceOpticsAuditor {
 
         if (decor.color != null) {
           final surfaceLuminance = decor.color!.computeLuminance();
-          final bgLuminance = 1.0; // Assume light reference
+          const bgLuminance = 1.0; // Assume light reference
           final contrast = (bgLuminance + 0.05) / (surfaceLuminance + 0.05);
           if (contrast < minContrast) minContrast = contrast;
         }
