@@ -867,12 +867,24 @@ class FirestoreSyncService {
     }
   }
 
-  /// Permanently hard-deletes a trip from Firestore:
-  /// Cascades deletion through all subcollections using batch operations,
-  /// removes room references, and completely deletes the top-level trip document.
+  /// Permanently cascades deletion of a trip from Firestore:
+  /// 1. Writes persistent 3-field tombstone record to `deleted_trips_tombstones`
+  /// 2. Batch-purges all subcollections (expenses, stoppages, memories, etc.)
+  /// 3. Removes live room docs and permanently deletes the main trip document from `trips`
   Future<void> markTripDeleted(String tripId) async {
     try {
-      // 1. Purge subcollections in Firestore concurrently using batch writes
+      // 1. Write persistent cloud tombstone record
+      try {
+        await _db.collection('deleted_trips_tombstones').doc(tripId).set({
+          'tripId': tripId,
+          'status': 'deleted',
+          'deletedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } catch (e) {
+        if (kDebugMode) debugPrint('[FirestoreSyncService] Tombstone record error: $e');
+      }
+
+      // 2. Purge subcollections in Firestore concurrently using batch writes
       final subcollections = [
         'stoppages',
         'expenses',
@@ -884,13 +896,7 @@ class FirestoreSyncService {
         'invitations',
       ];
       final snaps = await Future.wait(
-        subcollections.map((sub) => _db
-            .collection('trips')
-            .doc(tripId)
-            .collection(sub)
-            .get()
-            .then<QuerySnapshot<Map<String, dynamic>>?>((s) => s)
-            .catchError((_) => null)),
+        subcollections.map((sub) => _db.collection('trips').doc(tripId).collection(sub).get().then<QuerySnapshot<Map<String, dynamic>>?>((s) => s).catchError((_) => null)),
       );
       WriteBatch? batch = _db.batch();
       var count = 0;
@@ -911,11 +917,13 @@ class FirestoreSyncService {
         await batch.commit();
       }
 
-      // 2. Purge trip_rooms, room mapping, and the top-level trip doc concurrently
+      // 3. Purge trip_rooms, live room, and permanently delete the main trip document
       await Future.wait([
         _db.collection('trip_rooms').doc(tripId).delete().catchError((_) {}),
         CloudTripSyncService.deleteRoom(tripId).catchError((_) {}),
-        _db.collection('trips').doc(tripId).delete().catchError((_) {}),
+        _db.collection('trips').doc(tripId).delete().catchError((e) {
+          if (kDebugMode) debugPrint('[FirestoreSyncService] trips.doc delete error: $e');
+        }),
       ]);
     } catch (e) {
       if (kDebugMode) debugPrint('[FirestoreSyncService] markTripDeleted error: $e');
@@ -932,6 +940,15 @@ class FirestoreSyncService {
       return true;
     }
     try {
+      // 1. Check cloud tombstones collection first
+      try {
+        final tombstone = await _db.collection('deleted_trips_tombstones').doc(tripId).get();
+        if (tombstone.exists) {
+          return true;
+        }
+      } catch (_) {}
+
+      // 2. Check main trip doc
       final doc = await _db.collection('trips').doc(tripId).get();
       if (!doc.exists || doc.data() == null) {
         return true; // Document no longer exists -> deleted!

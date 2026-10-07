@@ -1,12 +1,12 @@
-# Track My Trip (TrackMyTrip)
+# TrackMyTrip
 
 [![Flutter Version](https://img.shields.io/badge/Flutter-3.x-blue.svg)](https://flutter.dev)
 [![Dart Version](https://img.shields.io/badge/Dart-3.x-teal.svg)](https://dart.dev)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20Riverpod%20%2B%20Offline--First-indigo.svg)](https://riverpod.dev)
-[![Tests Passing](https://img.shields.io/badge/Tests-119%20Passing-brightgreen.svg)](https://github.com/arunbsssbars/TrackMyTrip)
+[![Tests Passing](https://img.shields.io/badge/Tests-Passing-brightgreen.svg)](https://github.com/arunbsssbars/TrackMyTrip)
 [![Release](https://img.shields.io/badge/Release-v2.3--overhaul-orange.svg)](https://github.com/arunbsssbars/TrackMyTrip/releases)
 
-**Track My Trip** is an enterprise-grade, offline-first mobile application designed for solo travelers, families, and expedition convoys. It unifies high-precision GPS telemetry, multi-party mathematical expense splitting, real-time companion radar, and anti-resurrection distributed data integrity across SQLite and Cloud Firestore.
+**TrackMyTrip** is an enterprise-grade, offline-first mobile application designed for solo travelers, families, and expedition convoys. It unifies high-precision GPS telemetry, multi-party mathematical expense splitting, real-time companion radar, and anti-resurrection distributed data integrity across SQLite and Cloud Firestore.
 
 ---
 
@@ -24,7 +24,7 @@
 
 ## 1. Executive Architectural Overview
 
-Track My Trip follows a decoupled, layered Clean Architecture powered by **Flutter Riverpod**:
+TrackMyTrip follows a decoupled, layered Clean Architecture powered by **Flutter Riverpod**:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -58,7 +58,7 @@ In hybrid offline-first architectures (SQLite + Cloud Firestore), deleted entiti
 3. Without tombstones, the app interprets this as an active trip, re-inserts it into SQLite, and triggers mutations that re-push it to the cloud.
 
 ### Enterprise Solution: Dual-Layer Tombstones
-Track My Trip enforces **Anti-Resurrection Invariants** via [`TombstoneService`](file:///d:/Program/Antigravity/TripTrackerApp/lib/core/services/tombstone_service.dart):
+TrackMyTrip enforces **Anti-Resurrection Invariants** via [`TombstoneService`](file:///d:/Program/Antigravity/TripTrackerApp/lib/core/services/tombstone_service.dart):
 
 ```
                    Trip Deletion Triggered
@@ -89,7 +89,7 @@ Track My Trip enforces **Anti-Resurrection Invariants** via [`TombstoneService`]
 
 ## 3. Core Financial Ledger & Split Engine
 
-Financial software requires absolute mathematical precision. Track My Trip guarantees zero floating-point accumulation drift:
+Financial software requires absolute mathematical precision. TrackMyTrip guarantees zero floating-point accumulation drift:
 
 ### Mathematical Invariants
 1. **Conservation of Money**:
@@ -154,7 +154,7 @@ lib/
 
 ## 5. Database Schema & Storage Architecture
 
-Track My Trip utilizes **per-user database partitioning** (`trip_tracker_{uid}.db`) ensuring strict multi-tenant isolation on the physical device:
+TrackMyTrip utilizes **per-user database partitioning** (`trip_tracker_{uid}.db`) ensuring strict multi-tenant isolation on the physical device:
 
 | Table | Primary Key | Key Foreign Keys / Indexed Columns | Purpose |
 | :--- | :--- | :--- | :--- |
@@ -172,7 +172,7 @@ Track My Trip utilizes **per-user database partitioning** (`trip_tracker_{uid}.d
 
 ## 6. Navigation & Global UI System
 
-Track My Trip features a persistent dock navigation system:
+TrackMyTrip features a persistent dock navigation system:
 
 - **Journeys Dashboard (Tab 0)**: `Icons.dashboard_rounded` / `Icons.dashboard_outlined`
 - **Active Journey (Tab 1)**: `Icons.explore_rounded` / `Icons.explore_outlined`

@@ -52,7 +52,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyD3xg07jKRC-jDcfKCXBLC5-EMCzz4VRgc',
-    appId: '1:731719697818:android:9eebe113d9181780bce623',
+    appId: '1:731719697818:android:fbf3b3bfba7fa282bce623',
     messagingSenderId: '731719697818',
     projectId: 'trackmytrip-sync-2026',
     databaseURL: 'https://trackmytrip-sync-2026-default-rtdb.asia-southeast1.firebasedatabase.app',
@@ -61,7 +61,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyAxYF_y9I8jnWH3jQOn-7lER5LRK7Bx1Es',
-    appId: '1:731719697818:ios:650f05cd26c18c0cbce623',
+    appId: '1:731719697818:ios:c695ae0f15590c96bce623',
     messagingSenderId: '731719697818',
     projectId: 'trackmytrip-sync-2026',
     databaseURL: 'https://trackmytrip-sync-2026-default-rtdb.asia-southeast1.firebasedatabase.app',
@@ -71,7 +71,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyAxYF_y9I8jnWH3jQOn-7lER5LRK7Bx1Es',
-    appId: '1:731719697818:ios:650f05cd26c18c0cbce623',
+    appId: '1:731719697818:ios:c695ae0f15590c96bce623',
     messagingSenderId: '731719697818',
     projectId: 'trackmytrip-sync-2026',
     databaseURL: 'https://trackmytrip-sync-2026-default-rtdb.asia-southeast1.firebasedatabase.app',

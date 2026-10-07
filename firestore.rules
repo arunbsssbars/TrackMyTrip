@@ -114,5 +114,10 @@ service cloud.firestore {
     match /mutations/{mutationId} {
       allow read, write: if isAuthenticated();
     }
+
+    // Tombstones collection (for deleted trips anti-resurrection)
+    match /deleted_trips_tombstones/{tripId} {
+      allow read, write: if isAuthenticated();
+    }
   }
 }

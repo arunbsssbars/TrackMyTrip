@@ -19,15 +19,18 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Ensure Stable CocoaPods Environment
+      - name: Verify CocoaPods Environment
         run: |
-          sudo gem install cocoapods --no-document
           pod --version
 
       - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Install CocoaPods
         run: |
-          mkdir -p build/ios/SourcePackages
-          flutter pub get
+          cd ios
+          pod install --repo-update
+          cd ..
 
       - name: Create fallback .env file for asset bundling
         run: |
@@ -39,11 +42,6 @@ jobs:
 
       - name: Build iOS App with Unsigned Signing Allowed
         run: |
-          if [ -f ios/Podfile ]; then
-            cd ios
-            pod install || pod install --repo-update
-            cd ..
-          fi
           flutter build ios --release --no-codesign
 
       - name: Bundle Payload into Unsigned IPA
@@ -60,3 +58,4 @@ jobs:
           name: TrackMyTrip-ios-ipa
           path: build/TrackMyTrip-release-unsigned.ipa
           retention-days: 7
+

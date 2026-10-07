@@ -22,7 +22,7 @@ void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
 
-  testWidgets('TrackMyTrip launches LoginScreen when unauthenticated', (WidgetTester tester) async {
+  testWidgets('Trip Tracker launches LoginScreen when unauthenticated', (WidgetTester tester) async {
     late LocalStorageService storage;
     await tester.runAsync(() async {
       SharedPreferences.setMockInitialValues({});
@@ -48,7 +48,7 @@ void main() {
     expect(find.text('Continue with Google (Gmail)'), findsOneWidget);
   });
 
-  testWidgets('TrackMyTrip launches HomeScreen when authenticated', (WidgetTester tester) async {
+  testWidgets('Trip Tracker launches HomeScreen when authenticated', (WidgetTester tester) async {
     late LocalStorageService storage;
     await tester.runAsync(() async {
       SharedPreferences.setMockInitialValues({});
