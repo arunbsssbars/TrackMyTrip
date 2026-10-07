@@ -227,14 +227,15 @@ class LocalStorageService {
     _cachedAlerts.removeWhere((a) => a.tripId == tripId);
     _cachedInvitations.removeWhere((i) => i.tripId == tripId);
 
-    await saveTrips(_cachedTrips);
-    await saveAllStoppages(_cachedStoppages);
-    await saveAllExpenses(_cachedExpenses);
-    await saveAllMemories(_cachedMemories);
-    await saveAllSettlements(_cachedSettlements);
-    await saveAllAuditLogs(_cachedAuditLogs);
-
-    await _db.deleteTrip(tripId);
+    await Future.wait([
+      saveTrips(_cachedTrips),
+      saveAllStoppages(_cachedStoppages),
+      saveAllExpenses(_cachedExpenses),
+      saveAllMemories(_cachedMemories),
+      saveAllSettlements(_cachedSettlements),
+      saveAllAuditLogs(_cachedAuditLogs),
+      _db.deleteTrip(tripId),
+    ]);
   }
 
   Future<Trip> importTripPackage(TripPackage package, {String? activeMemberId}) async {

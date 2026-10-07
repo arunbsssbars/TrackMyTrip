@@ -872,21 +872,21 @@ class FirestoreSyncService {
   /// removes live room doc, and deletes the trip document.
   Future<void> markTripDeleted(String tripId) async {
     try {
-      // 1. Write persistent cloud tombstone to stop companions from resurrecting
-      await _db.collection('deleted_trips_tombstones').doc(tripId).set({
-        'tripId': tripId,
-        'status': 'deleted',
-        'deletedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      // 1 & 2. Concurrently write persistent cloud tombstone and mark trip doc as deleted
+      await Future.wait([
+        _db.collection('deleted_trips_tombstones').doc(tripId).set({
+          'tripId': tripId,
+          'status': 'deleted',
+          'deletedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true)),
+        _db.collection('trips').doc(tripId).set({
+          'status': 'deleted',
+          'isDeleted': true,
+          'deletedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true)),
+      ]);
 
-      // 2. Mark trip doc as deleted first so any active listeners know immediately
-      await _db.collection('trips').doc(tripId).set({
-        'status': 'deleted',
-        'isDeleted': true,
-        'deletedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      // 3. Purge subcollections in Firestore
+      // 3. Purge subcollections in Firestore concurrently using batch writes
       final subcollections = [
         'stoppages',
         'expenses',
@@ -897,27 +897,34 @@ class FirestoreSyncService {
         'member_locations',
         'invitations',
       ];
-      for (final sub in subcollections) {
-        try {
-          final snap = await _db.collection('trips').doc(tripId).collection(sub).get();
+      final snaps = await Future.wait(
+        subcollections.map((sub) => _db.collection('trips').doc(tripId).collection(sub).get().then<QuerySnapshot<Map<String, dynamic>>?>((s) => s).catchError((_) => null)),
+      );
+      WriteBatch? batch = _db.batch();
+      var count = 0;
+      for (final snap in snaps) {
+        if (snap != null) {
           for (final doc in snap.docs) {
-            await doc.reference.delete();
+            batch?.delete(doc.reference);
+            count++;
+            if (count >= 400) {
+              await batch?.commit();
+              batch = _db.batch();
+              count = 0;
+            }
           }
-        } catch (_) {}
+        }
+      }
+      if (count > 0 && batch != null) {
+        await batch.commit();
       }
 
-      // 4. Purge trip_rooms and rooms if exists
-      try {
-        await _db.collection('trip_rooms').doc(tripId).delete();
-      } catch (_) {}
-      try {
-        await CloudTripSyncService.deleteRoom(tripId);
-      } catch (_) {}
-
-      // 5. Finally, permanently delete the trip doc
-      try {
-        await _db.collection('trips').doc(tripId).delete();
-      } catch (_) {}
+      // 4 & 5. Purge trip_rooms, deleteRoom, and the main trip doc concurrently
+      await Future.wait([
+        _db.collection('trip_rooms').doc(tripId).delete().catchError((_) {}),
+        CloudTripSyncService.deleteRoom(tripId).catchError((_) {}),
+        _db.collection('trips').doc(tripId).delete().catchError((_) {}),
+      ]);
     } catch (e) {
       if (kDebugMode) debugPrint('[FirestoreSyncService] markTripDeleted error: $e');
     }
@@ -1034,11 +1041,12 @@ class FirestoreSyncService {
           .where('createdByMemberId', isEqualTo: userId)
           .get();
       for (final doc in creatorQuery2.docs) {
+        if (TombstoneService.isTombstoned(doc.id)) continue;
         try {
           final data = doc.data();
           if (data['status'] == 'deleted' || data['isDeleted'] == true) continue;
           final trip = Trip.fromJson(data);
-          if (trip.isDeleted) continue;
+          if (trip.isDeleted || TombstoneService.isTombstoned(trip.id)) continue;
           if (!results.containsKey(trip.id)) {
             final pkg = await _fetchTripPackage(trip);
             results[trip.id] = pkg;
@@ -1056,11 +1064,12 @@ class FirestoreSyncService {
           .where('memberIds', arrayContains: userId)
           .get();
       for (final doc in memberQuery.docs) {
+        if (TombstoneService.isTombstoned(doc.id)) continue;
         try {
           final data = doc.data();
           if (data['status'] == 'deleted' || data['isDeleted'] == true) continue;
           final trip = Trip.fromJson(data);
-          if (trip.isDeleted) continue;
+          if (trip.isDeleted || TombstoneService.isTombstoned(trip.id)) continue;
           if (!results.containsKey(trip.id)) {
             final pkg = await _fetchTripPackage(trip);
             results[trip.id] = pkg;
@@ -1079,11 +1088,12 @@ class FirestoreSyncService {
             .where('memberEmails', arrayContains: cleanEmail)
             .get();
         for (final doc in emailQuery.docs) {
+          if (TombstoneService.isTombstoned(doc.id)) continue;
           try {
             final data = doc.data();
             if (data['status'] == 'deleted' || data['isDeleted'] == true) continue;
             final trip = Trip.fromJson(data);
-            if (trip.isDeleted) continue;
+            if (trip.isDeleted || TombstoneService.isTombstoned(trip.id)) continue;
             if (!results.containsKey(trip.id)) {
               final pkg = await _fetchTripPackage(trip);
               results[trip.id] = pkg;
@@ -1099,6 +1109,7 @@ class FirestoreSyncService {
     try {
       final roomsSnap = await _db.collection('rooms').limit(100).get();
       for (final doc in roomsSnap.docs) {
+        if (TombstoneService.isTombstoned(doc.id)) continue;
         try {
           final data = doc.data();
           if (data['status'] == 'deleted' || data['isDeleted'] == true) continue;
@@ -1106,7 +1117,7 @@ class FirestoreSyncService {
             final pkgMap = data['package'] as Map<String, dynamic>;
             final pkg = TripPackage.fromJson(pkgMap);
             final trip = pkg.trip;
-            if (trip.isDeleted) continue;
+            if (trip.isDeleted || TombstoneService.isTombstoned(trip.id)) continue;
             final isCreator = trip.createdByMemberId == userId;
             final isMember = trip.members.any((m) {
               final matchId = m.id == userId;

@@ -309,9 +309,9 @@ class _MembersTabState extends ConsumerState<MembersTab> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () async {
+            onPressed: () {
               Navigator.of(ctx).pop();
-              await ref.read(tripListProvider.notifier).leaveTrip(widget.trip.id);
+              ref.read(tripListProvider.notifier).leaveTrip(widget.trip.id);
               if (mounted && Navigator.of(context).canPop()) {
                 Navigator.of(context).pop();
               }

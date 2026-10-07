@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/services/cloud_trip_sync_service.dart';
@@ -304,53 +305,58 @@ class TripNotifier extends StateNotifier<List<Trip>> {
 
     final isLead = trip != null && (trip.isCreator(currentUid) || trip.isCreator(trip.currentUserMember?.id));
 
-    if (isLead) {
-      // 1. Broadcast deletion to connected companions FIRST while still connected
-      try {
-        _ref.read(realtimeSyncServiceProvider).broadcastTripDeleted(tripId);
-      } catch (_) {}
-
-      // 2. Mark deleted in Firestore & delete live room doc
-      try {
-        await _ref.read(firestoreSyncServiceProvider).markTripDeleted(tripId);
-        await CloudTripSyncService.deleteRoom(tripId);
-      } catch (_) {}
-    } else {
-      // Non-creator leaving trip
-      await leaveTrip(tripId);
-      return;
+    // 1. Instantly update Riverpod state so front-end reflects deletion with 0ms delay!
+    state = state.where((t) => t.id != tripId).toList();
+    if (_ref.read(selectedTripIdProvider) == tripId) {
+      _ref.read(selectedTripIdProvider.notifier).state = null;
     }
+    _reloadDependentProviders();
 
-    // 3. Stop live sync & disconnect after broadcasting
+    // 2. Stop live sync and disconnect immediately
     CloudTripSyncService.stopLiveSync(tripId);
     try {
       _ref.read(realtimeSyncServiceProvider).disconnect();
     } catch (_) {}
 
-    // 4. Purge locally
-    // Clean up local media files on disk for this trip
-    try {
-      final tripMemories = _storage.getMemories(tripId);
-      for (final m in tripMemories) {
-        MediaCacheService.deleteMediaFile(m.mediaPath);
-      }
-      final tripExpenses = _storage.getExpenses(tripId);
-      for (final e in tripExpenses) {
-        if (e.receiptImagePath != null) {
-          MediaCacheService.deleteMediaFile(e.receiptImagePath);
-        }
-      }
-    } catch (_) {}
-
-    state = state.where((t) => t.id != tripId).toList();
+    // 3. Purge local storage immediately (local SQLite delete takes < 5ms)
     await _storage.deleteTrip(tripId);
     try {
       await _ref.read(proximityAlertServiceProvider).clearAlertsForTrip(tripId);
     } catch (_) {}
-    if (_ref.read(selectedTripIdProvider) == tripId) {
-      _ref.read(selectedTripIdProvider.notifier).state = null;
+
+    // 4. Cascade cloud sync and room cleanup in background
+    if (isLead) {
+      try {
+        _ref.read(realtimeSyncServiceProvider).broadcastTripDeleted(tripId);
+      } catch (_) {}
+
+      unawaited(() async {
+        try {
+          await _ref.read(firestoreSyncServiceProvider).markTripDeleted(tripId);
+        } catch (_) {}
+        try {
+          await CloudTripSyncService.deleteRoom(tripId);
+        } catch (_) {}
+      }());
+    } else {
+      unawaited(leaveTrip(tripId));
     }
-    _reloadDependentProviders();
+
+    // 5. Clean up local media files in background
+    unawaited(() async {
+      try {
+        final tripMemories = _storage.getMemories(tripId);
+        for (final m in tripMemories) {
+          MediaCacheService.deleteMediaFile(m.mediaPath);
+        }
+        final tripExpenses = _storage.getExpenses(tripId);
+        for (final e in tripExpenses) {
+          if (e.receiptImagePath != null) {
+            MediaCacheService.deleteMediaFile(e.receiptImagePath);
+          }
+        }
+      } catch (_) {}
+    }());
   }
 
   Future<void> leaveTrip(String tripId) async {
@@ -368,68 +374,73 @@ class TripNotifier extends StateNotifier<List<Trip>> {
     final memberId = activeMember?.id ?? currentUid;
     final memberName = activeMember?.name ?? authUser?.displayName ?? 'Companion';
 
-    // 1. Stop live sync
+    // 0. Mark tombstone FIRST
+    await TombstoneService.markTombstoned(tripId);
+
+    // 1. Instantly update Riverpod state so front-end reflects departure with 0ms delay!
+    state = state.where((t) => t.id != tripId).toList();
+    if (_ref.read(selectedTripIdProvider) == tripId) {
+      _ref.read(selectedTripIdProvider.notifier).state = null;
+    }
+    _reloadDependentProviders();
+
+    // 2. Stop live sync immediately
     CloudTripSyncService.stopLiveSync(tripId);
     try {
       _ref.read(realtimeSyncServiceProvider).disconnect();
     } catch (_) {}
 
-    // 2. Broadcast departure to other members
-    if (memberId != null) {
-      try {
-        _ref.read(realtimeSyncServiceProvider).broadcastMemberLeft(tripId, memberId, memberName);
-      } catch (_) {}
-      try {
-        _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
-          tripId: tripId,
-          type: AlertType.memberLeft,
-          title: 'Member Left Trip',
-          message: '$memberName has left the trip "${trip?.title ?? ""}"',
-          senderMemberId: memberId,
-          senderName: memberName,
-        );
-      } catch (_) {}
-    }
-
-    // 3. Remove membership from Firestore & room package
-    if (memberId != null) {
-      try {
-        await _ref.read(firestoreSyncServiceProvider).removeMemberFromTripInCloud(
-          tripId,
-          memberId,
-          email: currentEmail,
-        );
-        await CloudTripSyncService.removeMemberFromRoom(tripId, memberId);
-      } catch (_) {}
-    }
-
-    // 4. Purge locally for this user
-    state = state.where((t) => t.id != tripId).toList();
+    // 3. Purge local storage immediately
     await _storage.deleteTrip(tripId);
     try {
       await _ref.read(proximityAlertServiceProvider).clearAlertsForTrip(tripId);
     } catch (_) {}
-    if (_ref.read(selectedTripIdProvider) == tripId) {
-      _ref.read(selectedTripIdProvider.notifier).state = null;
+
+    // 4. Background cloud broadcast and removal
+    if (memberId != null) {
+      unawaited(() async {
+        try {
+          _ref.read(realtimeSyncServiceProvider).broadcastMemberLeft(tripId, memberId, memberName);
+        } catch (_) {}
+        try {
+          _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
+            tripId: tripId,
+            type: AlertType.memberLeft,
+            title: 'Member Left Trip',
+            message: '$memberName has left the trip "${trip?.title ?? ""}"',
+            senderMemberId: memberId,
+            senderName: memberName,
+          );
+        } catch (_) {}
+        try {
+          await _ref.read(firestoreSyncServiceProvider).removeMemberFromTripInCloud(
+            tripId,
+            memberId,
+            email: currentEmail,
+          );
+          await CloudTripSyncService.removeMemberFromRoom(tripId, memberId);
+        } catch (_) {}
+      }());
     }
-    _reloadDependentProviders();
   }
 
   Future<void> deleteTripLocally(String tripId) async {
     await TombstoneService.markTombstoned(tripId);
-    CloudTripSyncService.stopLiveSync(tripId);
-    try {
-      _ref.read(realtimeSyncServiceProvider).disconnect();
-    } catch (_) {}
+    // Instantly update state
     state = state.where((t) => t.id != tripId).toList();
-    await _storage.deleteTrip(tripId);
-    try {
-      await _ref.read(proximityAlertServiceProvider).clearAlertsForTrip(tripId);
-    } catch (_) {}
     if (_ref.read(selectedTripIdProvider) == tripId) {
       _ref.read(selectedTripIdProvider.notifier).state = null;
     }
     _reloadDependentProviders();
+
+    CloudTripSyncService.stopLiveSync(tripId);
+    try {
+      _ref.read(realtimeSyncServiceProvider).disconnect();
+    } catch (_) {}
+    await _storage.deleteTrip(tripId);
+    try {
+      await _ref.read(proximityAlertServiceProvider).clearAlertsForTrip(tripId);
+    } catch (_) {}
   }
 
   /// When a creator deletes a shared journey, industry standard (Splitwise/Tricount)

@@ -1043,7 +1043,8 @@ class _CurrentTripTabState extends ConsumerState<CurrentTripTab> {
             TripMenuButton(
               trip: currentTrip,
               onTripDeleted: () {
-                ref.read(tripListProvider.notifier).reload();
+                // Front end already optimistically removed trip from state;
+                // Do not trigger a full cloud sync reload.
               },
             ),
           const SizedBox(width: 4),

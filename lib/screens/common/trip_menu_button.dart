@@ -379,9 +379,9 @@ class TripMenuButton extends ConsumerWidget {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () async {
+            onPressed: () {
               Navigator.of(ctx).pop();
-              await ref.read(tripListProvider.notifier).deleteTrip(trip.id);
+              ref.read(tripListProvider.notifier).deleteTrip(trip.id);
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
@@ -419,7 +419,7 @@ class TripMenuButton extends ConsumerWidget {
     );
 
     if (confirmed && context.mounted) {
-      await ref.read(tripListProvider.notifier).leaveTrip(trip.id);
+      ref.read(tripListProvider.notifier).leaveTrip(trip.id);
       if (context.mounted) {
         AppSnackBar.showInfo(context, 'You left the trip.');
         onTripDeleted?.call();

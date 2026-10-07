@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/cloud_trip_sync_service.dart';
 import '../../core/services/live_location_tracker_service.dart';
 import '../../core/services/offline_sync_engine.dart';
+import '../../core/services/tombstone_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/app_snackbar.dart';
 import '../../core/utils/date_formatter.dart';
@@ -146,7 +147,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
       if (previous != null && previous.any((t) => t.id == widget.tripId)) {
         if (!next.any((t) => t.id == widget.tripId)) {
           final stillInStorage = ref.read(localStorageServiceProvider).getTrip(widget.tripId);
-          if (stillInStorage == null) {
+          if (stillInStorage == null || stillInStorage.isDeleted || TombstoneService.isTombstoned(widget.tripId)) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (context.mounted) {
                 Navigator.of(context).popUntil((route) => route.isFirst);
@@ -171,7 +172,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
     Trip? tripCandidate = matchedTrip ?? (currentTrip?.id == widget.tripId ? currentTrip : null);
     if (tripCandidate == null) {
       final fromStorage = ref.read(localStorageServiceProvider).getTrip(widget.tripId);
-      if (fromStorage != null && !fromStorage.isDeleted) {
+      if (fromStorage != null && !fromStorage.isDeleted && !TombstoneService.isTombstoned(widget.tripId)) {
         tripCandidate = fromStorage;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           ref.read(tripListProvider.notifier).reload();
