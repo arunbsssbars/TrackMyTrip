@@ -514,7 +514,7 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
         ),
         const SizedBox(height: 4),
         Text(
-          'Ask your friend to scan this QR code using their camera or Track My Trip app.',
+          'Ask your friend to scan this QR code using their camera or TrackMyTrip app.',
           style: TextStyle(
             fontSize: 12,
             color: isDark ? Colors.grey[400] : const Color(0xFF64748B),

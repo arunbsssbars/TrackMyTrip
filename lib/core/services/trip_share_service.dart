@@ -205,7 +205,7 @@ ${senderName != null ? 'Shared by: $senderName\n' : ''}
 🔑 Live Join Code: $roomCode
 
 📲 How to join:
-1. Open Track My Trip App
+1. Open TrackMyTrip App
 2. Tap "Join Trip" and enter code: $roomCode (or scan QR in the app)
 ''';
   }

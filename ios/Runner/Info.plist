@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Trip Tracker App</string>
+	<string>TrackMyTrip</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -47,15 +47,15 @@
 	<true/>
 	<!-- Privacy & Permissions Descriptions (App Store Compliance) -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Trip Tracker requires access to your location to record travel routes, map milestones, and display nearby companions during active trips.</string>
+	<string>TrackMyTrip requires access to your location to record travel routes, map milestones, and display nearby companions during active trips.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Trip Tracker requires background location access to broadcast proximity alerts and record live tracks when a trip journey is active.</string>
+	<string>TrackMyTrip requires background location access to broadcast proximity alerts and record live tracks when a trip journey is active.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>Trip Tracker requires background location access to broadcast proximity alerts and record live tracks when a trip journey is active.</string>
+	<string>TrackMyTrip requires background location access to broadcast proximity alerts and record live tracks when a trip journey is active.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Trip Tracker uses your camera to scan companion invitation QR codes and photograph receipts for automatic OCR expense splitting.</string>
+	<string>TrackMyTrip uses your camera to scan companion invitation QR codes and photograph receipts for automatic OCR expense splitting.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Trip Tracker needs photo library access to attach receipt images and travel memories to your trips.</string>
+	<string>TrackMyTrip needs photo library access to attach receipt images and travel memories to your trips.</string>
 
 	<!-- Background Execution Modes -->
 	<key>UIBackgroundModes</key>

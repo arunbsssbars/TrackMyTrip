@@ -78,7 +78,7 @@ class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScree
             ref.read(authNotifierProvider.notifier).refreshSession();
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('✓ Email verified successfully! Welcome to Track My Trip.'),
+                content: Text('✓ Email verified successfully! Welcome to TrackMyTrip.'),
                 backgroundColor: Color(0xFF10B981),
                 behavior: SnackBarBehavior.floating,
               ),

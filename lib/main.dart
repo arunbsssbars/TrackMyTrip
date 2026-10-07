@@ -105,7 +105,7 @@ class TripStopsApp extends ConsumerWidget {
 
     return MaterialApp(
       navigatorKey: appNavigatorKey,
-      title: 'Track My Trip',
+      title: 'TrackMyTrip',
       debugShowCheckedModeBanner: false,
       scrollBehavior: const AppScrollBehavior(),
       theme: AppTheme.lightTheme,

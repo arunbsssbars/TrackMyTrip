@@ -22,7 +22,7 @@ void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
 
-  testWidgets('Trip Tracker launches LoginScreen when unauthenticated', (WidgetTester tester) async {
+  testWidgets('TrackMyTrip launches LoginScreen when unauthenticated', (WidgetTester tester) async {
     late LocalStorageService storage;
     await tester.runAsync(() async {
       SharedPreferences.setMockInitialValues({});
@@ -43,12 +43,12 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('Track My Trip'), findsWidgets);
+    expect(find.text('TrackMyTrip'), findsWidgets);
     expect(find.text('Sign In'), findsOneWidget);
     expect(find.text('Continue with Google (Gmail)'), findsOneWidget);
   });
 
-  testWidgets('Trip Tracker launches HomeScreen when authenticated', (WidgetTester tester) async {
+  testWidgets('TrackMyTrip launches HomeScreen when authenticated', (WidgetTester tester) async {
     late LocalStorageService storage;
     await tester.runAsync(() async {
       SharedPreferences.setMockInitialValues({});
@@ -81,7 +81,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('Track My Trip'), findsWidgets);
+    expect(find.text('TrackMyTrip'), findsWidgets);
     expect(find.text('New Trip'), findsOneWidget);
   });
 }

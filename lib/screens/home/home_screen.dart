@@ -272,7 +272,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(
-                    'Track My Trip',
+                    'TrackMyTrip',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(

@@ -186,7 +186,7 @@ void main() {
       // Verify header text is not truncated
       final truncated = UiFlawInspector.findTruncatedTexts(tester);
       expect(
-        truncated.where((t) => t.contains('Track My Trip')),
+        truncated.where((t) => t.contains('TrackMyTrip')),
         isEmpty,
         reason: 'App title was truncated under accessibility font scaling!',
       );

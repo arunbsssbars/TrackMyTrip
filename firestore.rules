@@ -38,6 +38,10 @@ service cloud.firestore {
       allow delete: if isAuthenticated();
     }
 
+    match /trip_rooms/{tripId} {
+      allow read, write: if isAuthenticated();
+    }
+
     // 2. Users collection (user profiles)
     match /users/{userId} {
       allow read: if true;

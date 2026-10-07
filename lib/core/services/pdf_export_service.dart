@@ -223,7 +223,7 @@ class PdfExportService {
             pw.SizedBox(height: 24),
             pw.Center(
               child: pw.Text(
-                'Generated with Track My Trip  |  The Stoppage & Memory Expense Companion',
+                'Generated with TrackMyTrip  |  The Stoppage & Memory Expense Companion',
                 style: const pw.TextStyle(color: PdfColors.grey600, fontSize: 8),
               ),
             ),

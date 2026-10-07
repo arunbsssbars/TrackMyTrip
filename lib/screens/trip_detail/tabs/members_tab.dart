@@ -210,8 +210,8 @@ class _MembersTabState extends ConsumerState<MembersTab> {
 
 
   void _shareTripCode(String code, String tripTitle) {
-    final text = 'Join my trip "$tripTitle" on Track My Trip!\nUse code: $code\nDownload the app to follow route & split expenses.';
-    Share.share(text, subject: 'Track My Trip Invite: $tripTitle');
+    final text = 'Join my trip "$tripTitle" on TrackMyTrip!\nUse code: $code\nDownload the app to follow route & split expenses.';
+    Share.share(text, subject: 'TrackMyTrip Invite: $tripTitle');
   }
 
 

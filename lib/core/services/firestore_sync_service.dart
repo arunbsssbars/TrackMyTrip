@@ -867,26 +867,12 @@ class FirestoreSyncService {
     }
   }
 
-  /// Permanently cascades deletion of a trip from Firestore:
-  /// Writes to persistent tombstones collection, clears all subcollections,
-  /// removes live room doc, and deletes the trip document.
+  /// Permanently hard-deletes a trip from Firestore:
+  /// Cascades deletion through all subcollections using batch operations,
+  /// removes room references, and completely deletes the top-level trip document.
   Future<void> markTripDeleted(String tripId) async {
     try {
-      // 1 & 2. Concurrently write persistent cloud tombstone and mark trip doc as deleted
-      await Future.wait([
-        _db.collection('deleted_trips_tombstones').doc(tripId).set({
-          'tripId': tripId,
-          'status': 'deleted',
-          'deletedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true)),
-        _db.collection('trips').doc(tripId).set({
-          'status': 'deleted',
-          'isDeleted': true,
-          'deletedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true)),
-      ]);
-
-      // 3. Purge subcollections in Firestore concurrently using batch writes
+      // 1. Purge subcollections in Firestore concurrently using batch writes
       final subcollections = [
         'stoppages',
         'expenses',
@@ -898,7 +884,13 @@ class FirestoreSyncService {
         'invitations',
       ];
       final snaps = await Future.wait(
-        subcollections.map((sub) => _db.collection('trips').doc(tripId).collection(sub).get().then<QuerySnapshot<Map<String, dynamic>>?>((s) => s).catchError((_) => null)),
+        subcollections.map((sub) => _db
+            .collection('trips')
+            .doc(tripId)
+            .collection(sub)
+            .get()
+            .then<QuerySnapshot<Map<String, dynamic>>?>((s) => s)
+            .catchError((_) => null)),
       );
       WriteBatch? batch = _db.batch();
       var count = 0;
@@ -919,7 +911,7 @@ class FirestoreSyncService {
         await batch.commit();
       }
 
-      // 4 & 5. Purge trip_rooms, deleteRoom, and the main trip doc concurrently
+      // 2. Purge trip_rooms, room mapping, and the top-level trip doc concurrently
       await Future.wait([
         _db.collection('trip_rooms').doc(tripId).delete().catchError((_) {}),
         CloudTripSyncService.deleteRoom(tripId).catchError((_) {}),
