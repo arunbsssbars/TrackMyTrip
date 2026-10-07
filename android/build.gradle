@@ -8,7 +8,9 @@ allprojects {
 
 rootProject.buildDir = "../build"
 subprojects {
-    project.buildDir = "${rootProject.buildDir}/${project.name}"
+    if (project.projectDir.path.startsWith(rootProject.projectDir.parent)) {
+        project.buildDir = "${rootProject.buildDir}/${project.name}"
+    }
 }
 subprojects {
     project.evaluationDependsOn(":app")
