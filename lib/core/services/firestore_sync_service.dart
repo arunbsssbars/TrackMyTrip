@@ -851,14 +851,15 @@ class FirestoreSyncService {
       try {
         authUid = FirebaseAuth.instance.currentUser?.uid;
       } catch (_) {}
-      final effectiveCreatorId = (authUid != null && authUid.isNotEmpty)
-          ? authUid
-          : trip.createdByMemberId;
+      // Preserve original creator if already assigned, otherwise fallback to authUid
+      final effectiveCreatorId = (trip.createdByMemberId.isNotEmpty)
+          ? trip.createdByMemberId
+          : ((authUid != null && authUid.isNotEmpty) ? authUid : '');
 
       await _db.collection('trips').doc(trip.id).set({
         ...trip.toJson(),
-        'createdByMemberId': effectiveCreatorId,
-        'creatorId': effectiveCreatorId,
+        if (effectiveCreatorId.isNotEmpty) 'createdByMemberId': effectiveCreatorId,
+        if (effectiveCreatorId.isNotEmpty) 'creatorId': effectiveCreatorId,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (e) {

@@ -2,27 +2,42 @@ import 'package:intl/intl.dart';
 
 class DateFormatter {
   static String formatShortDate(DateTime date) {
-    return DateFormat('MMM d, y').format(date);
+    final local = date.isUtc ? date.toLocal() : date;
+    return DateFormat('MMM d, y').format(local);
   }
 
   static String formatMonthYear(DateTime date) {
-    return DateFormat('MMMM yyyy').format(date);
+    final local = date.isUtc ? date.toLocal() : date;
+    return DateFormat('MMMM yyyy').format(local);
   }
 
   static String formatDateTime(DateTime dateTime) {
-    return DateFormat('MMM d, y • h:mm a').format(dateTime);
+    final local = dateTime.isUtc ? dateTime.toLocal() : dateTime;
+    return DateFormat('MMM d, y • h:mm a').format(local);
   }
 
   static String formatDateTimeWithSeconds(DateTime dateTime) {
-    return DateFormat('MMM d, y • h:mm:ss a').format(dateTime);
+    final local = dateTime.isUtc ? dateTime.toLocal() : dateTime;
+    return DateFormat('MMM d, y • h:mm:ss a').format(local);
   }
 
   static String formatTimeOnly(DateTime dateTime) {
-    return DateFormat('h:mm a').format(dateTime);
+    final local = dateTime.isUtc ? dateTime.toLocal() : dateTime;
+    return DateFormat('h:mm a').format(local);
   }
 
   static String formatTimeWithSeconds(DateTime dateTime) {
-    return DateFormat('h:mm:ss a').format(dateTime);
+    final local = dateTime.isUtc ? dateTime.toLocal() : dateTime;
+    return DateFormat('h:mm:ss a').format(local);
+  }
+
+  static String formatDateAndTime(DateTime dateTime, {bool showYear = false}) {
+    final local = dateTime.isUtc ? dateTime.toLocal() : dateTime;
+    final now = DateTime.now();
+    if (showYear || local.year != now.year) {
+      return DateFormat('MMM d, y • h:mm a').format(local);
+    }
+    return DateFormat('MMM d • h:mm a').format(local);
   }
 
   /// Whole calendar-day difference (`now` minus `date`), immune to DST/hour drift.
@@ -34,24 +49,27 @@ class DateFormatter {
 
   static String formatRelativeOrTime(DateTime dateTime, {DateTime? now}) {
     final ref = now ?? DateTime.now();
+    final refLocal = ref.isUtc ? ref.toLocal() : ref;
     final local = dateTime.isUtc ? dateTime.toLocal() : dateTime;
-    final dayDiff = _calendarDayDiff(ref, local);
+    final dayDiff = _calendarDayDiff(refLocal, local);
     final time = DateFormat('h:mm a').format(local);
 
     if (dayDiff == 0) return 'Today at $time';
     if (dayDiff == 1) return 'Yesterday at $time';
     if (dayDiff == -1) return 'Tomorrow at $time';
-    if (ref.year == local.year) return DateFormat('MMM d • h:mm a').format(local);
+    if (refLocal.year == local.year) return DateFormat('MMM d • h:mm a').format(local);
     return DateFormat('MMM d, y • h:mm a').format(local);
   }
 
   static String timeAgo(DateTime dateTime, {DateTime? now}) {
     final ref = now ?? DateTime.now();
-    final difference = ref.difference(dateTime);
+    final refLocal = ref.isUtc ? ref.toLocal() : ref;
+    final local = dateTime.isUtc ? dateTime.toLocal() : dateTime;
+    final difference = refLocal.difference(local);
 
     // Future timestamps (clock skew): tolerate small drift, otherwise show the date.
     if (difference.isNegative) {
-      return difference.inMinutes.abs() < 2 ? 'Just now' : DateFormat('MMM d').format(dateTime);
+      return difference.inMinutes.abs() < 2 ? 'Just now' : DateFormat('MMM d').format(local);
     }
     if (difference.inSeconds < 45) {
       return 'Just now';
@@ -61,10 +79,10 @@ class DateFormatter {
       return '${difference.inHours}h ago';
     } else if (difference.inDays < 7) {
       return '${difference.inDays}d ago';
-    } else if (ref.year == dateTime.year) {
-      return DateFormat('MMM d').format(dateTime);
+    } else if (refLocal.year == local.year) {
+      return DateFormat('MMM d').format(local);
     }
-    return DateFormat('MMM d, y').format(dateTime);
+    return DateFormat('MMM d, y').format(local);
   }
 
   static String formatDuration(Duration duration) {

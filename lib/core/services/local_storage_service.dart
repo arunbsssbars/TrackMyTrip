@@ -670,6 +670,12 @@ class LocalStorageService {
     await _prefs.setBool('stoppage_alerts_enabled', enabled);
   }
 
+  bool hasRequestedLocationPermission() => _prefs.getBool('has_requested_location_permission_v1') ?? false;
+
+  Future<void> setRequestedLocationPermission(bool requested) async {
+    await _prefs.setBool('has_requested_location_permission_v1', requested);
+  }
+
   // --- THEME PREFERENCES ---
   ThemeMode getThemeMode() {
     final modeStr = _prefs.getString('app_theme_mode_v1');
@@ -678,8 +684,10 @@ class LocalStorageService {
         return ThemeMode.light;
       case 'dark':
         return ThemeMode.dark;
-      default:
+      case 'system':
         return ThemeMode.system;
+      default:
+        return ThemeMode.light;
     }
   }
 

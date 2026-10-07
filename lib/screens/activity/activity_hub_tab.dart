@@ -404,17 +404,18 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
   }
 
   String _getDateHeader(DateTime timestamp) {
+    final local = timestamp.isUtc ? timestamp.toLocal() : timestamp;
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final yesterday = today.subtract(const Duration(days: 1));
-    final itemDate = DateTime(timestamp.year, timestamp.month, timestamp.day);
+    final itemDate = DateTime(local.year, local.month, local.day);
 
     if (itemDate == today) {
       return 'Today';
     } else if (itemDate == yesterday) {
       return 'Yesterday';
     } else {
-      return DateFormatter.formatShortDate(timestamp);
+      return DateFormatter.formatShortDate(local);
     }
   }
 
@@ -972,7 +973,7 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
     final Map<String, String> dateLabels = {};
 
     for (final alert in filteredAlerts) {
-      final dt = alert.timestamp;
+      final dt = alert.timestamp.isUtc ? alert.timestamp.toLocal() : alert.timestamp;
       final dateKey = '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
       if (!dateGroups.containsKey(dateKey)) {
         dateGroups[dateKey] = [];
@@ -1409,7 +1410,7 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                       overflow: TextOverflow.ellipsis,
                     ),
                     Text(
-                      'Invited by ${inv.inviterName}',
+                      'Invited by ${inv.inviterName} • ${DateFormatter.formatDateTime(inv.createdAt)}',
                       style: TextStyle(fontSize: 11.5, color: isDark ? Colors.grey[400] : const Color(0xFF64748B)),
                     ),
                   ],
@@ -1713,13 +1714,17 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                                   children: [
                                     Icon(nature.icon, size: 9, color: nature.color),
                                     const SizedBox(width: 2.5),
-                                    Text(
-                                      nature.label,
-                                      style: TextStyle(
-                                        fontSize: 8.5,
-                                        fontWeight: FontWeight.w800,
-                                        color: nature.color,
-                                        letterSpacing: 0.3,
+                                    Flexible(
+                                      child: Text(
+                                        nature.label,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 8.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: nature.color,
+                                          letterSpacing: 0.3,
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -1784,16 +1789,18 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                                         fontSize: 7,
                                       ),
                                       const SizedBox(width: 3.5),
-                                      ConstrainedBox(
-                                        constraints: const BoxConstraints(maxWidth: 80),
-                                        child: Text(
-                                          senderMember.name.split(' ').first,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            fontSize: 8.5,
-                                            fontWeight: FontWeight.w600,
-                                            color: isDark ? Colors.grey[300] : const Color(0xFF475569),
+                                      Flexible(
+                                        child: ConstrainedBox(
+                                          constraints: const BoxConstraints(maxWidth: 60),
+                                          child: Text(
+                                            senderMember.name.split(' ').first,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 8.5,
+                                              fontWeight: FontWeight.w600,
+                                              color: isDark ? Colors.grey[300] : const Color(0xFF475569),
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -1806,6 +1813,7 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                         const SizedBox(width: 6),
                         Row(
                           mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
                             if (!alert.isRead) ...[
                               Container(
@@ -1816,23 +1824,38 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                                   shape: BoxShape.circle,
                                 ),
                               ),
-                              const SizedBox(width: 4),
+                              const SizedBox(width: 5),
                             ],
-                            ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 85),
-                              child: Text(
-                                _formatTime(alert.timestamp),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.end,
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: alert.isRead ? FontWeight.w500 : FontWeight.w700,
-                                  color: alert.isRead
-                                      ? (isDark ? Colors.grey[400] : const Color(0xFF94A3B8))
-                                      : (isDark ? Colors.grey[200] : const Color(0xFF334155)),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  DateFormatter.formatShortDate(alert.timestamp),
+                                  maxLines: 1,
+                                  textAlign: TextAlign.end,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: alert.isRead ? FontWeight.w600 : FontWeight.w700,
+                                    color: alert.isRead
+                                        ? (isDark ? Colors.grey[400] : const Color(0xFF94A3B8))
+                                        : (isDark ? Colors.grey[200] : const Color(0xFF334155)),
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(height: 1.5),
+                                Text(
+                                  DateFormatter.formatTimeOnly(alert.timestamp),
+                                  maxLines: 1,
+                                  textAlign: TextAlign.end,
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: alert.isRead ? FontWeight.w500 : FontWeight.w600,
+                                    color: alert.isRead
+                                        ? (isDark ? Colors.grey[500] : const Color(0xFF94A3B8))
+                                        : (isDark ? Colors.grey[300] : const Color(0xFF475569)),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
@@ -2128,14 +2151,6 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
         message: item.message,
       ),
     );
-  }
-
-  String _formatTime(DateTime dt) {
-    final now = DateTime.now();
-    if (now.year == dt.year && now.month == dt.month && now.day == dt.day) {
-      return DateFormatter.formatTimeOnly(dt);
-    }
-    return DateFormatter.formatShortDate(dt);
   }
 }
 

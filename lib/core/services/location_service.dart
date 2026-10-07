@@ -183,31 +183,37 @@ class LocationService {
     }
   }
 
-  static Future<bool> requestPermission() async {
+  static Future<bool> requestPermission({bool promptOnDenied = true}) async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       return false;
     }
 
     LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        return false;
-      }
+    if (permission == LocationPermission.always || permission == LocationPermission.whileInUse) {
+      return true;
     }
 
     if (permission == LocationPermission.deniedForever) {
       return false;
     }
 
-    return true;
+    if (permission == LocationPermission.denied) {
+      if (!promptOnDenied) {
+        return false;
+      }
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        return false;
+      }
+    }
+
+    return permission == LocationPermission.always || permission == LocationPermission.whileInUse;
   }
 
-  /// Acquires high-accuracy current GPS position
-  static Future<Position?> getCurrentPosition() async {
+  static Future<Position?> getCurrentPosition({bool promptIfDenied = false}) async {
     try {
-      final hasPermission = await requestPermission();
+      final hasPermission = await requestPermission(promptOnDenied: promptIfDenied);
       if (!hasPermission) {
         final last = await Geolocator.getLastKnownPosition();
         if (last != null) _detectAndCacheCurrencyFromPosition(last.latitude, last.longitude);

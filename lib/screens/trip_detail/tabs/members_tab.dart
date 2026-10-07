@@ -404,9 +404,8 @@ class _MembersTabState extends ConsumerState<MembersTab> {
     final currentTrip = trips.where((t) => t.id == widget.trip.id).firstOrNull ?? widget.trip;
     final authUser = ref.watch(authNotifierProvider).valueOrNull;
     final currentUid = authUser?.id;
-    final isCreator = currentTrip.isCreator(currentUid, authUser?.email) ||
-        currentTrip.isCreator(currentTrip.currentUserMember?.id) ||
-        (currentTrip.createdByMemberId.isNotEmpty && currentUid != null && currentTrip.createdByMemberId == currentUid);
+    final isCreator = (currentTrip.createdByMemberId.isNotEmpty && currentUid != null && currentTrip.createdByMemberId == currentUid) ||
+        (currentTrip.createdByMemberId.isNotEmpty && authUser?.email != null && currentTrip.members.any((m) => m.id == currentTrip.createdByMemberId && m.email?.trim().toLowerCase() == authUser!.email.trim().toLowerCase()));
 
     final shareCode = (currentTrip.shareCode != null && currentTrip.shareCode!.isNotEmpty)
         ? currentTrip.shareCode!
@@ -587,9 +586,9 @@ class _MembersTabState extends ConsumerState<MembersTab> {
               final isMe = (currentUid != null && member.id == currentUid) ||
                   (authUser?.email != null && member.email != null && authUser!.email.toLowerCase() == member.email!.toLowerCase());
 
-              final isMemberCreator = currentTrip.isMemberCreator(member) ||
-                  (isMe && isCreator) ||
-                  (!hasExplicitCreator && index == 0);
+              final isMemberCreator = (currentTrip.createdByMemberId.isNotEmpty && member.id == currentTrip.createdByMemberId) ||
+                  (member.role == TripMember.roleCreator) ||
+                  (currentTrip.createdByMemberId.isEmpty && !hasExplicitCreator && index == 0);
 
               final memberPaid = tripExpenses
                   .where((e) => e.paidByMemberId == member.id || e.paidByMemberId == member.name)

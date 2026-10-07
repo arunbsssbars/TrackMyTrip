@@ -55,7 +55,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     LocationService.currencyNotifier.addListener(_onCurrencyChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initGlobalSync();
-      LocationService.requestPermission().then((granted) {
+      final storage = ref.read(localStorageServiceProvider);
+      final alreadyPrompted = storage.hasRequestedLocationPermission();
+      // Prompt on launch only once across the lifetime of the install
+      LocationService.requestPermission(promptOnDenied: !alreadyPrompted).then((granted) {
+        if (!alreadyPrompted) {
+          storage.setRequestedLocationPermission(true);
+        }
         if (granted) {
           LocationService.detectLocalCurrency();
         }
@@ -1303,7 +1309,7 @@ class _TripCard extends StatelessWidget {
             : AppSpacing.xl);
 
     return Container(
-      margin: EdgeInsets.symmetric(horizontal: hMargin, vertical: AppSpacing.xs),
+      margin: EdgeInsets.symmetric(horizontal: hMargin, vertical: AppSpacing.sm + 1.0),
       child: Material(
         color: cardBackground,
         elevation: elevation,

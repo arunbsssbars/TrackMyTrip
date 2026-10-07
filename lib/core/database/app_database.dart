@@ -1231,7 +1231,7 @@ class AppDatabase {
     latitude: (r['latitude'] as num?)?.toDouble(),
     longitude: (r['longitude'] as num?)?.toDouble(),
     distanceMeters: (r['distanceMeters'] as num?)?.toDouble(),
-    timestamp: DateTime.parse(r['timestamp'] as String),
+    timestamp: DateTime.parse(r['timestamp'] as String).toLocal(),
     urgency: AlertUrgency.values.firstWhere((u) => u.name == r['urgency'], orElse: () => AlertUrgency.normal),
     isRead: (r['isRead'] as int) == 1,
     amount: (r['amount'] as num?)?.toDouble(),

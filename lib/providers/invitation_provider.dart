@@ -506,6 +506,7 @@ class InvitationNotifier extends StateNotifier<List<TripInvitation>> {
         name: currentUser.displayName,
         email: currentUser.email,
         isCurrentUser: false,
+        role: TripMember.roleMember,
         colorHex: currentUser.colorHex ?? '0xFF0D9488',
       ).toJson();
 
@@ -590,6 +591,7 @@ class InvitationNotifier extends StateNotifier<List<TripInvitation>> {
           name: currentUser.displayName,
           email: currentUser.email,
           isCurrentUser: true,
+          role: TripMember.roleMember,
           colorHex: currentUser.colorHex ?? existingMember?.colorHex ?? newColor,
         );
 

@@ -45,7 +45,7 @@ class UniversalBottomBar extends ConsumerWidget {
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 64,
+          height: 60,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
@@ -192,15 +192,18 @@ class UniversalBottomBar extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 2),
-              AnimatedDefaultTextStyle(
-                duration: const Duration(milliseconds: 200),
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-                  color: isSelected ? activeColor : inactiveColor,
-                  letterSpacing: -0.2,
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 200),
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                    color: isSelected ? activeColor : inactiveColor,
+                    letterSpacing: -0.2,
+                  ),
+                  child: Text(label),
                 ),
-                child: Text(label),
               ),
             ],
           ),

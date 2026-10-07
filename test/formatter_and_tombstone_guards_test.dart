@@ -2,6 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trackmytrip/core/services/tombstone_service.dart';
 import 'package:trackmytrip/core/utils/currency_formatter.dart';
 import 'package:trackmytrip/core/utils/date_formatter.dart';
+import 'package:trackmytrip/models/proximity_alert.dart';
+import 'package:intl/intl.dart';
 
 void main() {
   group('CurrencyFormatter defensive guards (Loop 46)', () {
@@ -100,6 +102,38 @@ void main() {
         DateFormatter.formatTripDateRange(DateTime(2025, 12, 28), DateTime(2026, 1, 4)),
         'Dec 28, 2025 - Jan 4, 2026',
       );
+    });
+
+    test('DateFormatter converts UTC timestamps to local time without hour drift', () {
+      final utcTime = DateTime.utc(2026, 10, 7, 9, 0); // 09:00 UTC
+      final expectedLocalTime = utcTime.toLocal();
+
+      final formattedTimeOnly = DateFormatter.formatTimeOnly(utcTime);
+      final expectedHourString = DateFormat('h:mm a').format(expectedLocalTime);
+      expect(formattedTimeOnly, expectedHourString);
+
+      final formattedDateTime = DateFormatter.formatDateTime(utcTime);
+      final expectedDateTimeString = DateFormat('MMM d, y • h:mm a').format(expectedLocalTime);
+      expect(formattedDateTime, expectedDateTimeString);
+
+      final formattedDateAndTime = DateFormatter.formatDateAndTime(utcTime, showYear: true);
+      expect(formattedDateAndTime, expectedDateTimeString);
+    });
+
+    test('ProximityAlert.fromJson normalizes UTC timestamp to local time', () {
+      final alert = ProximityAlert.fromJson({
+        'id': 'alert_1',
+        'tripId': 'trip_1',
+        'type': 'general',
+        'title': 'Test Alert',
+        'message': 'Test',
+        'senderMemberId': 'u1',
+        'senderName': 'User',
+        'timestamp': '2026-10-07T09:00:00.000Z',
+      });
+
+      expect(alert.timestamp.isUtc, false);
+      expect(alert.timestamp, DateTime.utc(2026, 10, 7, 9, 0).toLocal());
     });
   });
 

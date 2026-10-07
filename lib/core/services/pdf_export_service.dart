@@ -121,7 +121,7 @@ class PdfExportService {
                                 pw.Text(stop.address!, style: const pw.TextStyle(color: PdfColors.grey600, fontSize: 9)),
                               pw.SizedBox(height: 2),
                               pw.Text(
-                                'Category: ${stop.category} • Arrived: ${DateFormatter.formatDateTime(stop.arrivedAt)}',
+                                'Category: ${stop.category}  |  Arrived: ${DateFormatter.formatDateTime(stop.arrivedAt)}',
                                 style: const pw.TextStyle(color: PdfColors.grey700, fontSize: 9),
                               ),
                               if (stop.notes != null)
@@ -223,7 +223,7 @@ class PdfExportService {
             pw.SizedBox(height: 24),
             pw.Center(
               child: pw.Text(
-                'Generated with TripStops • The Stoppage & Memory Expense Companion',
+                'Generated with Track My Trip  |  The Stoppage & Memory Expense Companion',
                 style: const pw.TextStyle(color: PdfColors.grey600, fontSize: 8),
               ),
             ),
@@ -232,9 +232,10 @@ class PdfExportService {
       ),
     );
 
+    final cleanTitle = trip.title.replaceAll(RegExp(r'[^\w\s-]'), '').trim().replaceAll(' ', '_');
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => pdf.save(),
-      name: '${trip.title.replaceAll(' ', '_')}_Summary.pdf',
+      name: '${cleanTitle.isNotEmpty ? cleanTitle : "Trip"}_Summary',
     );
   }
 

@@ -996,20 +996,32 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
                             ],
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 110),
-                          child: Text(
-                            DateFormatter.formatDateTime(alert.timestamp),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.end,
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
-                              fontWeight: FontWeight.w500,
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              DateFormatter.formatShortDate(alert.timestamp),
+                              maxLines: 1,
+                              textAlign: TextAlign.end,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                          ),
+                            const SizedBox(height: 1.5),
+                            Text(
+                              DateFormatter.formatTimeOnly(alert.timestamp),
+                              maxLines: 1,
+                              textAlign: TextAlign.end,
+                              style: TextStyle(
+                                fontSize: 9.5,
+                                color: isDark ? Colors.grey[500] : const Color(0xFF94A3B8),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),

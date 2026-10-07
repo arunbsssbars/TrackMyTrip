@@ -170,7 +170,7 @@ class ProximityAlert {
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
       distanceMeters: (json['distanceMeters'] as num?)?.toDouble(),
-      timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ?? DateTime.now(),
+      timestamp: (DateTime.tryParse(json['timestamp'] as String? ?? '') ?? DateTime.now()).toLocal(),
       urgency: AlertUrgency.values.firstWhere(
         (e) => e.name == json['urgency'],
         orElse: () => AlertUrgency.normal,
@@ -185,7 +185,7 @@ class ProximityAlert {
       resolutionStatus: json['resolutionStatus'] as String?,
       resolutionReason: json['resolutionReason'] as String?,
       resolvedAt: json['resolvedAt'] != null
-          ? DateTime.tryParse(json['resolvedAt'] as String)
+          ? DateTime.tryParse(json['resolvedAt'] as String)?.toLocal()
           : null,
     );
   }

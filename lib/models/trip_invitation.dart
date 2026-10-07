@@ -92,7 +92,7 @@ class TripInvitation {
       inviteeUsername: json['inviteeUsername'] as String? ?? 'Traveler',
       inviteeEmail: json['inviteeEmail'] as String?,
       inviteePhone: json['inviteePhone'] as String?,
-      createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
+      createdAt: (DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now()).toLocal(),
       status: InvitationStatus.values.firstWhere(
         (e) => e.name == json['status'],
         orElse: () => InvitationStatus.pending,
