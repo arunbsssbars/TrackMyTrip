@@ -56,6 +56,7 @@ dependencies:
   url_launcher: ^6.3.1
   path_provider: ^2.1.5
   path: ^1.9.0
+  crypto: ^3.0.3
   sqflite: ^2.3.3+1
   # Firebase — Offline-First Sync Engine
   firebase_core: ^3.13.0
