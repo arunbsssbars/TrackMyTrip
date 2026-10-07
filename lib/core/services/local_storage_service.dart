@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database/app_database.dart';
 import '../../models/trip.dart';
@@ -667,6 +668,35 @@ class LocalStorageService {
 
   Future<void> setStoppageAlertsEnabled(bool enabled) async {
     await _prefs.setBool('stoppage_alerts_enabled', enabled);
+  }
+
+  // --- THEME PREFERENCES ---
+  ThemeMode getThemeMode() {
+    final modeStr = _prefs.getString('app_theme_mode_v1');
+    switch (modeStr) {
+      case 'light':
+        return ThemeMode.light;
+      case 'dark':
+        return ThemeMode.dark;
+      default:
+        return ThemeMode.system;
+    }
+  }
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    String modeStr;
+    switch (mode) {
+      case ThemeMode.light:
+        modeStr = 'light';
+        break;
+      case ThemeMode.dark:
+        modeStr = 'dark';
+        break;
+      case ThemeMode.system:
+        modeStr = 'system';
+        break;
+    }
+    await _prefs.setString('app_theme_mode_v1', modeStr);
   }
 
   // --- AUTH SESSION & REGISTERED ACCOUNTS ---

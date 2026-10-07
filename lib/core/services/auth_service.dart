@@ -23,6 +23,9 @@ class AuthService {
   final SecurityService _securityService;
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     serverClientId: '731719697818-ljfrslc4gbqucih5n6qfnt01v5ct3nsj.apps.googleusercontent.com',
+    clientId: (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS)
+        ? '731719697818-l1okiq2d45hp9bkepcjb3c5tof6sdsuh.apps.googleusercontent.com'
+        : null,
   );
 
   AuthService(

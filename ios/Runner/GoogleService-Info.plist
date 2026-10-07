@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CLIENT_ID</key>
-	<string>731719697818-g985psnmkv32n4bb14q477capf1s316u.apps.googleusercontent.com</string>
+	<string>731719697818-l1okiq2d45hp9bkepcjb3c5tof6sdsuh.apps.googleusercontent.com</string>
 	<key>REVERSED_CLIENT_ID</key>
-	<string>com.googleusercontent.apps.731719697818-g985psnmkv32n4bb14q477capf1s316u</string>
+	<string>com.googleusercontent.apps.731719697818-l1okiq2d45hp9bkepcjb3c5tof6sdsuh</string>
 	<key>ANDROID_CLIENT_ID</key>
 	<string>731719697818-2rnmdr802j6ikntqmld9id0q6udcu2p6.apps.googleusercontent.com</string>
 	<key>API_KEY</key>
@@ -31,6 +31,8 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:731719697818:ios:c695ae0f15590c96bce623</string>
+	<string>1:731719697818:ios:650f05cd26c18c0cbce623</string>
+	<key>DATABASE_URL</key>
+	<string>https://trackmytrip-sync-2026-default-rtdb.asia-southeast1.firebasedatabase.app</string>
 </dict>
 </plist>

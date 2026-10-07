@@ -419,12 +419,12 @@ class FirestoreSyncService {
             case DocumentChangeType.modified:
               _ref
                   .read(allMemoriesProvider.notifier)
-                  .addMemory(memory, broadcast: false);
+                  .addMemory(memory, broadcast: false, pushRemote: false, enqueueSync: false);
               break;
             case DocumentChangeType.removed:
               _ref
                   .read(allMemoriesProvider.notifier)
-                  .deleteMemory(memory.id);
+                  .deleteMemory(memory.id, broadcast: false);
               break;
           }
         } catch (e) {

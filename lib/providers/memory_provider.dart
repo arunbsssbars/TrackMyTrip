@@ -45,31 +45,58 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
     state = [];
   }
 
-  Future<void> addMemory(Memory memory, {bool broadcast = true}) async {
+  Future<void> addMemory(
+    Memory memory, {
+    bool broadcast = true,
+    bool pushRemote = true,
+    bool enqueueSync = true,
+  }) async {
     if (TombstoneService.isMemoryTombstoned(memory.id)) return;
-    state = [memory, ...state.where((m) => m.id != memory.id)];
+
+    // Guard against remote status overwriting local cached photo status
+    final existingIndex = state.indexWhere((m) => m.id == memory.id);
+    Memory finalMemory = memory;
+    if (existingIndex != -1) {
+      final existing = state[existingIndex];
+      // If locally stored or already uploaded, do not regress to 'uploading' unless remoteUrl is explicitly updated
+      if ((existing.uploadStatus == MediaUploadStatus.local || existing.uploadStatus == MediaUploadStatus.uploaded) &&
+          memory.uploadStatus == MediaUploadStatus.uploading &&
+          (memory.remoteUrl == null || memory.remoteUrl!.isEmpty)) {
+        finalMemory = memory.copyWith(
+          uploadStatus: existing.uploadStatus,
+          localPath: existing.localPath ?? memory.localPath,
+          mediaPath: existing.mediaPath,
+          remoteUrl: existing.remoteUrl,
+        );
+      }
+    }
+
+    state = [finalMemory, ...state.where((m) => m.id != finalMemory.id)];
     await _storage.saveAllMemories(state);
-    _syncToCloud(memory.tripId);
-    try {
-      _ref.read(firestoreSyncServiceProvider).pushMemory(memory);
-    } catch (_) {}
+
+    if (pushRemote) {
+      _syncToCloud(finalMemory.tripId);
+      try {
+        _ref.read(firestoreSyncServiceProvider).pushMemory(finalMemory);
+      } catch (_) {}
+    }
 
     if (broadcast) {
       try {
-        _ref.read(realtimeSyncServiceProvider).broadcastNewMemory(memory);
+        _ref.read(realtimeSyncServiceProvider).broadcastNewMemory(finalMemory);
       } catch (_) {}
       try {
-        final currentTrip = _ref.read(tripListProvider).where((t) => t.id == memory.tripId).firstOrNull;
-        final uploaderName = currentTrip?.getMemberName(memory.uploadedByMemberId) ?? 'Companion';
+        final currentTrip = _ref.read(tripListProvider).where((t) => t.id == finalMemory.tripId).firstOrNull;
+        final uploaderName = currentTrip?.getMemberName(finalMemory.uploadedByMemberId) ?? 'Companion';
         _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
-          id: 'act_mem_${memory.id}',
-          tripId: memory.tripId,
+          id: 'act_mem_${finalMemory.id}',
+          tripId: finalMemory.tripId,
           type: AlertType.memoryAdded,
           title: 'Memory Added',
-          message: '$uploaderName shared a memory: "${memory.caption?.isNotEmpty == true ? memory.caption! : "Trip photo"}"',
-          senderMemberId: memory.uploadedByMemberId,
+          message: '$uploaderName shared a memory: "${finalMemory.caption?.isNotEmpty == true ? finalMemory.caption! : "Trip photo"}"',
+          senderMemberId: finalMemory.uploadedByMemberId,
           senderName: uploaderName,
-          itemId: memory.id,
+          itemId: finalMemory.id,
           itemType: 'memory',
           urgency: AlertUrgency.low,
           showLocalBanner: false,
@@ -77,32 +104,34 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
       } catch (_) {}
     }
 
-    try {
-      final currentTrip = _ref.read(tripListProvider).where((t) => t.id == memory.tripId).firstOrNull;
-      final uploaderName = currentTrip?.getMemberName(memory.uploadedByMemberId) ?? 'Companion';
-      _ref.read(allAuditLogsProvider.notifier).logAction(
-        TripAuditLog(
-          id: const Uuid().v4(),
-          tripId: memory.tripId,
-          actionType: 'add_memory',
-          itemTitle: memory.caption?.isNotEmpty == true ? memory.caption! : 'Photo Memory',
-          performedByMemberId: memory.uploadedByMemberId,
-          performedByName: uploaderName,
-          timestamp: DateTime.now(),
-          changeDetails: 'Uploaded a new photo memory',
-        ),
-      );
-    } catch (_) {}
+    if (enqueueSync) {
+      try {
+        final currentTrip = _ref.read(tripListProvider).where((t) => t.id == finalMemory.tripId).firstOrNull;
+        final uploaderName = currentTrip?.getMemberName(finalMemory.uploadedByMemberId) ?? 'Companion';
+        _ref.read(allAuditLogsProvider.notifier).logAction(
+          TripAuditLog(
+            id: const Uuid().v4(),
+            tripId: finalMemory.tripId,
+            actionType: 'add_memory',
+            itemTitle: finalMemory.caption?.isNotEmpty == true ? finalMemory.caption! : 'Photo Memory',
+            performedByMemberId: finalMemory.uploadedByMemberId,
+            performedByName: uploaderName,
+            timestamp: DateTime.now(),
+            changeDetails: 'Uploaded a new photo memory',
+          ),
+        );
+      } catch (_) {}
 
-    try {
-      _ref.read(offlineSyncEngineProvider).enqueueMutation(
-        action: MutationAction.addMemory,
-        entityType: 'memory',
-        entityId: memory.id,
-        tripId: memory.tripId,
-        payload: memory.toJson(),
-      );
-    } catch (_) {}
+      try {
+        _ref.read(offlineSyncEngineProvider).enqueueMutation(
+          action: MutationAction.addMemory,
+          entityType: 'memory',
+          entityId: finalMemory.id,
+          tripId: finalMemory.tripId,
+          payload: finalMemory.toJson(),
+        );
+      } catch (_) {}
+    }
   }
 
   Future<void> updateMemoryMediaUrl(String memoryId, String remoteUrl) async {
@@ -133,6 +162,22 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
         if (m.id == memoryId) updated else m
     ];
     await _storage.saveAllMemories(state);
+
+    // Keep pending mutation payloads in sync with upload status
+    try {
+      final pending = _storage.getPendingMutations();
+      for (final m in pending) {
+        if (m.entityId == memoryId && (m.action == MutationAction.addMemory || m.action == MutationAction.updateMemory)) {
+          final updatedPayload = Map<String, dynamic>.from(m.payload);
+          updatedPayload['uploadStatus'] = status.name;
+          if (updated.remoteUrl != null) {
+            updatedPayload['remoteUrl'] = updated.remoteUrl;
+            updatedPayload['mediaPath'] = updated.mediaPath;
+          }
+          await _storage.enqueueMutation(m.copyWith(payload: updatedPayload));
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> toggleLike(String memoryId, String memberId, {bool broadcast = true}) async {
@@ -247,6 +292,15 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
     state = state.where((m) => m.id != memoryId).toList();
     await _storage.deleteMemory(memoryId);
     await _storage.saveAllMemories(state);
+
+    // Cancel all pending mutations for this memory immediately to prevent resurrection upon reconnect/flush
+    final pendingMutations = _storage.getPendingMutations();
+    for (final m in pendingMutations) {
+      if (m.entityId == memoryId) {
+        await _storage.removeMutation(m.id);
+      }
+    }
+
     _syncToCloud(existing.tripId);
     await MediaCacheService.deleteMediaFile(existing.mediaPath);
     if (existing.localPath != null && existing.localPath != existing.mediaPath) {
@@ -299,7 +353,7 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
         trip: trip,
         stoppages: _storage.getAllStoppages().where((s) => s.tripId == tripId).toList(),
         expenses: _storage.getAllExpenses().where((e) => e.tripId == tripId).toList(),
-        memories: state.where((m) => m.tripId == tripId).toList(),
+        memories: state.where((m) => m.tripId == tripId && !TombstoneService.isMemoryTombstoned(m.id)).toList(),
         settlements: _storage.getAllSettlements().where((s) => s.tripId == tripId).toList(),
       );
       CloudTripSyncService.publishTrip(package);

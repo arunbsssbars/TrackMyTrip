@@ -8,6 +8,7 @@ import 'providers/trip_provider.dart';
 import 'providers/auth_provider.dart';
 import 'screens/main_scaffold.dart';
 import 'screens/auth/login_screen.dart';
+import 'providers/theme_provider.dart';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -109,7 +110,7 @@ class TripStopsApp extends ConsumerWidget {
       scrollBehavior: const AppScrollBehavior(),
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.system,
+      themeMode: ref.watch(themeModeProvider),
       home: authState.when(
         data: (user) {
           if (user == null) return const LoginScreen();

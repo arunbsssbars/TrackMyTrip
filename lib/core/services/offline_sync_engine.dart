@@ -273,7 +273,7 @@ class OfflineSyncEngine extends ChangeNotifier {
             trip: trip,
             stoppages: _storage.getAllStoppages().where((s) => s.tripId == tripId).toList(),
             expenses: _storage.getAllExpenses().where((e) => e.tripId == tripId).toList(),
-            memories: _storage.getAllMemories().where((m) => m.tripId == tripId).toList(),
+            memories: _storage.getAllMemories().where((m) => m.tripId == tripId && !TombstoneService.isMemoryTombstoned(m.id)).toList(),
             settlements: _storage.getAllSettlements().where((s) => s.tripId == tripId).toList(),
           );
           final success = await CloudTripSyncService.publishTrip(package);
@@ -331,7 +331,8 @@ class OfflineSyncEngine extends ChangeNotifier {
               mutation.action == MutationAction.deleteSettlement) {
             await docRef.delete();
           } else {
-            if (mutation.action == MutationAction.addMemory && TombstoneService.isMemoryTombstoned(mutation.entityId)) {
+            if ((mutation.action == MutationAction.addMemory || mutation.action == MutationAction.updateMemory) &&
+                TombstoneService.isMemoryTombstoned(mutation.entityId)) {
               await _storage.removeMutation(mutation.id);
               continue;
             }

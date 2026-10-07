@@ -12,6 +12,7 @@ import '../../models/auth_user.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/trip_provider.dart';
 import '../../providers/expense_provider.dart';
+import '../../providers/theme_provider.dart';
 import '../../core/utils/currency_formatter.dart';
 
 class ProfileTab extends ConsumerStatefulWidget {
@@ -697,7 +698,104 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
             ),
             const SizedBox(height: 14),
 
-            // Section 4 (Loop 126): Local SQLite Cache & Offline Sync Telemetry
+            // Section 4: Appearance & Theme Mode
+            Consumer(
+              builder: (context, ref, _) {
+                final currentThemeMode = ref.watch(themeModeProvider);
+
+                return Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(7),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primary.withAlpha(25),
+                              borderRadius: BorderRadius.circular(9),
+                            ),
+                            child: const Icon(
+                              Icons.palette_rounded,
+                              size: 18,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Appearance & Theme',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 14.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Choose how the app displays on this device',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          _buildThemeOption(
+                            context: context,
+                            ref: ref,
+                            mode: ThemeMode.system,
+                            currentMode: currentThemeMode,
+                            label: 'System',
+                            icon: Icons.brightness_auto_rounded,
+                            isDark: isDark,
+                          ),
+                          const SizedBox(width: 8),
+                          _buildThemeOption(
+                            context: context,
+                            ref: ref,
+                            mode: ThemeMode.light,
+                            currentMode: currentThemeMode,
+                            label: 'Light',
+                            icon: Icons.light_mode_rounded,
+                            isDark: isDark,
+                          ),
+                          const SizedBox(width: 8),
+                          _buildThemeOption(
+                            context: context,
+                            ref: ref,
+                            mode: ThemeMode.dark,
+                            currentMode: currentThemeMode,
+                            label: 'Dark',
+                            icon: Icons.dark_mode_rounded,
+                            isDark: isDark,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 14),
+
+            // Section 5 (Loop 126): Local SQLite Cache & Offline Sync Telemetry
             Builder(
               builder: (ctx) {
                 Map<String, int> telemetry = const {};
@@ -970,6 +1068,83 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildThemeOption({
+    required BuildContext context,
+    required WidgetRef ref,
+    required ThemeMode mode,
+    required ThemeMode currentMode,
+    required String label,
+    required IconData icon,
+    required bool isDark,
+  }) {
+    final isSelected = currentMode == mode;
+    return Expanded(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            ref.read(themeModeProvider.notifier).setThemeMode(mode);
+          },
+          borderRadius: BorderRadius.circular(12),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+            constraints: const BoxConstraints(minHeight: 44),
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? AppTheme.primary
+                  : (isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9)),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isSelected
+                    ? AppTheme.primary
+                    : (isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+                width: isSelected ? 1.5 : 1,
+              ),
+              boxShadow: isSelected
+                  ? [
+                      BoxShadow(
+                        color: AppTheme.primary.withAlpha(50),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: 20,
+                  color: isSelected
+                      ? Colors.white
+                      : (isDark ? Colors.grey[300] : const Color(0xFF334155)),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                    color: isSelected
+                        ? Colors.white
+                        : (isDark ? Colors.grey[300] : const Color(0xFF334155)),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
