@@ -68,18 +68,23 @@ class TripNotifier extends StateNotifier<List<Trip>> {
     for (final t in allTrips) {
       if (TombstoneService.isTombstoned(t.id)) continue;
       if (seenIds.contains(t.id)) continue;
-      final isCreator = t.createdByMemberId == userId;
+      final isCreator = userId.isNotEmpty && t.createdByMemberId.isNotEmpty && t.createdByMemberId == userId;
       final isMember = t.members.any((m) =>
-          m.id == userId ||
+          (userId.isNotEmpty && m.id == userId) ||
           (userEmail.isNotEmpty && m.email != null && m.email!.trim().toLowerCase() == userEmail));
 
       if (isCreator || isMember) {
         seenIds.add(t.id);
         // Dynamically align isCurrentUser strictly to the active authenticated session
+        // and normalize roles so only the authentic creator has role: 'creator'
         final remappedMembers = t.members.map((m) {
-          final isMe = m.id == userId ||
+          final isMe = (userId.isNotEmpty && m.id == userId) ||
               (userEmail.isNotEmpty && m.email != null && m.email!.trim().toLowerCase() == userEmail);
-          return m.copyWith(isCurrentUser: isMe);
+          final isActuallyCreator = t.isMemberCreator(m);
+          final cleanRole = isActuallyCreator
+              ? TripMember.roleCreator
+              : (m.role == TripMember.roleCreator ? TripMember.roleMember : m.role);
+          return m.copyWith(isCurrentUser: isMe, role: cleanRole);
         }).toList();
 
         // If user created the trip but isn't explicitly in the member list, add them as current user

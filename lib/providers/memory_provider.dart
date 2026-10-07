@@ -6,8 +6,6 @@ import '../models/memory.dart';
 import '../core/services/media_cache_service.dart';
 import 'trip_provider.dart';
 
-import 'package:uuid/uuid.dart';
-import '../models/trip_audit_log.dart';
 import '../models/sync_mutation.dart';
 import '../models/proximity_alert.dart';
 import '../core/services/offline_sync_engine.dart';
@@ -15,7 +13,6 @@ import '../core/services/realtime_sync_service.dart';
 import '../core/services/proximity_alert_service.dart';
 import '../core/services/firestore_sync_service.dart';
 import '../core/services/tombstone_service.dart';
-import 'audit_log_provider.dart';
 
 class MemoryNotifier extends StateNotifier<List<Memory>> {
   final LocalStorageService _storage;
@@ -105,22 +102,7 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
     }
 
     if (enqueueSync) {
-      try {
-        final currentTrip = _ref.read(tripListProvider).where((t) => t.id == finalMemory.tripId).firstOrNull;
-        final uploaderName = currentTrip?.getMemberName(finalMemory.uploadedByMemberId) ?? 'Companion';
-        _ref.read(allAuditLogsProvider.notifier).logAction(
-          TripAuditLog(
-            id: const Uuid().v4(),
-            tripId: finalMemory.tripId,
-            actionType: 'add_memory',
-            itemTitle: finalMemory.caption?.isNotEmpty == true ? finalMemory.caption! : 'Photo Memory',
-            performedByMemberId: finalMemory.uploadedByMemberId,
-            performedByName: uploaderName,
-            timestamp: DateTime.now(),
-            changeDetails: 'Uploaded a new photo memory',
-          ),
-        );
-      } catch (_) {}
+
 
       try {
         _ref.read(offlineSyncEngineProvider).enqueueMutation(
@@ -258,20 +240,7 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
       } catch (_) {}
     }
 
-    try {
-      _ref.read(allAuditLogsProvider.notifier).logAction(
-        TripAuditLog(
-          id: const Uuid().v4(),
-          tripId: updated.tripId,
-          actionType: 'update_memory',
-          itemTitle: updated.caption ?? 'Photo Memory',
-          performedByMemberId: 'me',
-          performedByName: 'Companion',
-          timestamp: DateTime.now(),
-          changeDetails: 'Updated caption to: "${updated.caption ?? ""}"',
-        ),
-      );
-    } catch (_) {}
+
 
     try {
       _ref.read(offlineSyncEngineProvider).enqueueMutation(
@@ -319,20 +288,7 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
       } catch (_) {}
     }
 
-    try {
-      _ref.read(allAuditLogsProvider.notifier).logAction(
-        TripAuditLog(
-          id: const Uuid().v4(),
-          tripId: existing.tripId,
-          actionType: 'delete_memory',
-          itemTitle: existing.caption ?? 'Photo Memory',
-          performedByMemberId: 'me',
-          performedByName: 'Companion',
-          timestamp: DateTime.now(),
-          changeDetails: 'Removed photo memory',
-        ),
-      );
-    } catch (_) {}
+
 
     try {
       _ref.read(offlineSyncEngineProvider).enqueueMutation(

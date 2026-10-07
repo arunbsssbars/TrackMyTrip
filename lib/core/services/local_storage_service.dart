@@ -720,7 +720,9 @@ class LocalStorageService {
     _cachedAuthUser = user;
     await _db.saveAuthSession(user);
     if (user.email.isNotEmpty) {
-      await saveRegisteredUser({
+      final existing = _cachedRegisteredUsers.where((u) => u['email'] == user.email || u['id'] == user.id).firstOrNull;
+      final merged = <String, dynamic>{
+        if (existing != null) ...existing,
         'id': user.id,
         'email': user.email,
         'username': user.username,
@@ -728,7 +730,8 @@ class LocalStorageService {
         'phone': user.phone,
         'bio': user.bio,
         'colorHex': user.colorHex,
-      });
+      };
+      await saveRegisteredUser(merged);
     }
   }
 

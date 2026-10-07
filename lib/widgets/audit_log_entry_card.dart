@@ -38,8 +38,12 @@ _ActionDescriptor _resolveAction(String actionType) {
     case 'edit_settlement':
       return const _ActionDescriptor(label: 'Edited Payment', icon: Icons.edit_note_rounded, color: Color(0xFFD97706));
     case 'create_settlement':
+    case 'record_payment':
     case 'settlement':
       return const _ActionDescriptor(label: 'Recorded Payment', icon: Icons.add_circle_outline_rounded, color: Color(0xFF10B981));
+    case 'advance':
+    case 'advance_payment':
+      return const _ActionDescriptor(label: 'Advance Payment', icon: Icons.payments_rounded, color: Color(0xFF6366F1));
     case 'set_budget':
     case 'update_budget':
     case 'trip_budget_allocated':

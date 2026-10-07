@@ -29,9 +29,13 @@ class TripMember {
   static const String roleMember = 'member';
 
   bool get hasLocation => latitude != null && longitude != null;
-  bool get isCreator => role == 'creator' || role == 'admin' || role == 'leader';
+  bool get isCreator => role == 'creator';
   bool get isLeader => isCreator;
-  String get displayRole => isCreator ? 'Creator' : 'Member';
+  String get displayRole {
+    if (isCreator) return 'Creator';
+    if (role == 'admin') return 'Admin';
+    return 'Member';
+  }
 
   String get initials => name.trim().isNotEmpty
       ? name.trim().split(' ').where((w) => w.isNotEmpty).map((w) => w[0]).take(2).join().toUpperCase()

@@ -178,9 +178,8 @@ class _AuditLogSheetState extends ConsumerState<AuditLogSheet> {
     final allCount = auditLogs.length;
     final billsCount = auditLogs.where((l) => l.category == 'expense').length;
     final paymentsCount = auditLogs.where((l) => l.category == 'settlement').length;
-    final stopsCount = auditLogs.where((l) => l.category == 'stoppage').length;
-    final memoriesCount = auditLogs.where((l) => l.category == 'memory').length;
-    final tripCount = auditLogs.where((l) => l.category == 'trip' || l.category == 'general').length;
+    final advanceCount = auditLogs.where((l) => l.category == 'advance').length;
+    final budgetCount = auditLogs.where((l) => l.category == 'budget').length;
 
     final query = _searchQuery.trim().toLowerCase();
 
@@ -362,22 +361,18 @@ class _AuditLogSheetState extends ConsumerState<AuditLogSheet> {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                _buildFilterChip('all', 'All ($allCount)'),
+                _buildFilterChip('all', 'All Financial ($allCount)'),
                 const SizedBox(width: 8),
                 _buildFilterChip('expense', 'Bills ($billsCount)'),
                 const SizedBox(width: 8),
                 _buildFilterChip('settlement', 'Payments ($paymentsCount)'),
-                if (stopsCount > 0) ...[
+                if (advanceCount > 0) ...[
                   const SizedBox(width: 8),
-                  _buildFilterChip('stoppage', 'Stops ($stopsCount)'),
+                  _buildFilterChip('advance', 'Advance ($advanceCount)'),
                 ],
-                if (memoriesCount > 0) ...[
+                if (budgetCount > 0) ...[
                   const SizedBox(width: 8),
-                  _buildFilterChip('memory', 'Photos ($memoriesCount)'),
-                ],
-                if (tripCount > 0) ...[
-                  const SizedBox(width: 8),
-                  _buildFilterChip('trip', 'Trip ($tripCount)'),
+                  _buildFilterChip('budget', 'Budget ($budgetCount)'),
                 ],
               ],
             ),

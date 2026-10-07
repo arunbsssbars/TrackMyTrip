@@ -140,8 +140,8 @@ class AuditLogNotifier extends StateNotifier<List<TripAuditLog>> {
   }
 
   Future<void> logAction(TripAuditLog log, {bool broadcast = true}) async {
-    // Stoppages are navigation waypoints, not financial audit records (User point 4)
-    if (log.actionType.contains('stop')) return;
+    // Strictly financial activities only: bill/expense creation, update, deletion, payments, settlements, advance payments, budget limits
+    if (!log.isFinancial) return;
     if (state.any((l) => l.id == log.id)) return;
     if (log.actionType.contains('settle') || log.actionType.contains('advance')) {
       if (state.any((l) =>
@@ -179,6 +179,7 @@ class AuditLogNotifier extends StateNotifier<List<TripAuditLog>> {
 
   /// Ingests an activity log received from a companion over WebSocket or Firestore
   Future<void> receiveRemoteLog(TripAuditLog log) async {
+    if (!log.isFinancial) return;
     if (state.any((l) => l.id == log.id)) return; // Avoid duplicates
     final updated = [log, ...state];
     updated.sort((a, b) => b.timestamp.compareTo(a.timestamp));

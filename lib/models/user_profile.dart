@@ -85,7 +85,7 @@ class UserProfile {
     return UserProfile(
       id: json['id'] as String,
       username: json['username'] as String,
-      displayName: json['displayName'] as String,
+      displayName: (json['displayName'] ?? json['name'] ?? json['username'] ?? 'Traveler') as String,
       email: json['email'] as String?,
       phone: (json['phone'] ?? json['phoneNumber'] ?? json['mobile'] ?? json['mobileNumber']) as String?,
       avatarUrl: json['avatarUrl'] as String?,

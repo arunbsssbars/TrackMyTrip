@@ -27,14 +27,23 @@ class TripAuditLog {
     this.targetItemId,
   });
 
+  bool get isFinancial =>
+      actionType.contains('expense') ||
+      actionType.contains('bill') ||
+      actionType.contains('settle') ||
+      actionType.contains('payment') ||
+      actionType.contains('advance') ||
+      actionType.contains('budget');
+
   String get category {
     if (actionType.contains('expense') || actionType.contains('bill')) return 'expense';
-    if (actionType.contains('settlement') || actionType.contains('payment')) return 'settlement';
-    if (actionType.contains('stoppage')) return 'stoppage';
+    if (actionType.contains('settlement') || actionType.contains('payment') || actionType.contains('settle')) return 'settlement';
+    if (actionType.contains('advance')) return 'advance';
+    if (actionType.contains('budget')) return 'budget';
+    if (actionType.contains('stoppage') || actionType.contains('stop')) return 'stoppage';
     if (actionType.contains('memory') || actionType.contains('photo')) return 'memory';
-    if (actionType.contains('budget') || actionType.contains('trip')) return 'trip';
-    if (actionType.contains('sos') || actionType.contains('emergency')) return 'emergency';
-    return 'general';
+    if (actionType.contains('trip')) return 'trip';
+    return 'expense';
   }
 
   /// Action-specific semantic color hex for unified UI styling across the app

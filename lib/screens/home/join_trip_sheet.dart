@@ -208,6 +208,7 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
         email: currentEmail.isNotEmpty ? currentEmail : null,
         colorHex: color,
         isCurrentUser: true,
+        role: TripMember.roleMember,
       );
       updatedMembers.add(newMember);
       activeMemberId = newMember.id;

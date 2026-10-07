@@ -557,7 +557,6 @@ class _MembersTabState extends ConsumerState<MembersTab> {
                   final phoneMatch = m.phoneNumber?.contains(_memberSearchQuery) ?? false;
                   return nameMatch || emailMatch || phoneMatch;
                 }).toList();
-          final hasExplicitCreator = filteredMembers.any((m) => currentTrip.isMemberCreator(m));
 
           if (filteredMembers.isEmpty) {
             return Container(
@@ -586,9 +585,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
               final isMe = (currentUid != null && member.id == currentUid) ||
                   (authUser?.email != null && member.email != null && authUser!.email.toLowerCase() == member.email!.toLowerCase());
 
-              final isMemberCreator = (currentTrip.createdByMemberId.isNotEmpty && member.id == currentTrip.createdByMemberId) ||
-                  (member.role == TripMember.roleCreator) ||
-                  (currentTrip.createdByMemberId.isEmpty && !hasExplicitCreator && index == 0);
+              final isMemberCreator = currentTrip.isMemberCreator(member);
 
               final memberPaid = tripExpenses
                   .where((e) => e.paidByMemberId == member.id || e.paidByMemberId == member.name)

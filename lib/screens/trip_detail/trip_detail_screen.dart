@@ -27,6 +27,8 @@ import 'tabs/memories_tab.dart';
 import 'tabs/settlement_tab.dart';
 import 'tabs/timeline_tab.dart';
 import 'tabs/members_tab.dart';
+import 'tabs/analytics_tab.dart';
+import 'tabs/audit_tab.dart';
 import '../../core/services/firestore_sync_service.dart';
 import '../notifications/notification_center_sheet.dart';
 import '../common/sos_badge_icon.dart';
@@ -60,7 +62,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
     final trips = ref.read(tripListProvider);
     Trip? trip = trips.where((t) => t.id == widget.tripId).firstOrNull;
     trip ??= ref.read(localStorageServiceProvider).getTrip(widget.tripId);
-    _tabCount = (trip != null && trip.isSolo) ? 5 : 6;
+    _tabCount = (trip != null && trip.isSolo) ? 7 : 8;
     _tabController = TabController(
       length: _tabCount,
       vsync: this,
@@ -209,7 +211,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final neededCount = trip.isSolo ? 5 : 6;
+    final neededCount = trip.isSolo ? 7 : 8;
     if (_tabCount != neededCount) {
       final oldIndex = _tabController.index;
       _tabCount = neededCount;
@@ -479,6 +481,34 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
                       ),
                     ),
                   ),
+                  const Tab(
+                    height: 34,
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.insights_rounded, size: 14),
+                          SizedBox(width: 4),
+                          Text('Analytics', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const Tab(
+                    height: 34,
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.shield_outlined, size: 14),
+                          SizedBox(width: 4),
+                          Text('Trip Audit', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -607,6 +637,8 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
                   if (!trip.isSolo)
                     SettlementTab(trip: trip),
                   MemoriesTab(trip: trip),
+                  AnalyticsTab(trip: trip),
+                  AuditTab(trip: trip),
                 ],
               ),
             ),
@@ -640,6 +672,8 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
           String label;
           VoidCallback onPressed;
 
+          final memoriesIndex = trip.isSolo ? 4 : 5;
+
           if (index == 0) {
             // Tab 0: Timeline tab
             icon = Icons.add_location_alt_rounded;
@@ -654,8 +688,8 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
             onPressed = () {
               QuickBillActionSheet.show(context, trip: trip);
             };
-          } else if (index == (_tabCount - 1)) {
-            // Last tab: Memories tab
+          } else if (index == memoriesIndex) {
+            // Memories tab
             icon = Icons.add_a_photo_rounded;
             label = 'Add Photo';
             onPressed = () {

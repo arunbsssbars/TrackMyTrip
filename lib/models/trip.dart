@@ -73,24 +73,33 @@ class Trip {
 
   bool isCreator(String? userId, [String? userEmail]) {
     if ((userId == null || userId.isEmpty) && (userEmail == null || userEmail.isEmpty)) return false;
-    if (userId != null && createdByMemberId == userId) return true;
-    final member = userId != null ? getMember(userId) : null;
-    if (member != null && (member.id == createdByMemberId || member.isCreator)) return true;
-    if (userEmail != null && userEmail.isNotEmpty) {
-      final clean = userEmail.trim().toLowerCase();
-      final creatorMember = members.where((m) => m.id == createdByMemberId || m.isCreator).firstOrNull;
-      if (creatorMember != null && creatorMember.email != null && creatorMember.email!.trim().toLowerCase() == clean) {
+    if (createdByMemberId.isNotEmpty && userId != null && createdByMemberId == userId) return true;
+    if (createdByMemberId.isNotEmpty) {
+      final creator = getMember(createdByMemberId);
+      if (creator != null && creator.email != null && userEmail != null &&
+          creator.email!.trim().toLowerCase() == userEmail.trim().toLowerCase()) {
+        return true;
+      }
+      return false;
+    }
+    // Fallback only if createdByMemberId was unassigned:
+    final creatorMember = members.where((m) => m.role == TripMember.roleCreator).firstOrNull;
+    if (creatorMember != null) {
+      if (userId != null && creatorMember.id == userId) return true;
+      if (userEmail != null && creatorMember.email != null &&
+          creatorMember.email!.trim().toLowerCase() == userEmail.trim().toLowerCase()) {
         return true;
       }
     }
     return false;
   }
 
-  /// Determines if a member has the Creator role for this trip
+  /// Determines if a member has the Creator role for this trip (Single Source of Truth)
   bool isMemberCreator(TripMember member) {
-    if (member.isCreator) return true;
-    if (createdByMemberId.isNotEmpty && member.id == createdByMemberId) return true;
-    return isCreator(member.id, member.email);
+    if (createdByMemberId.isNotEmpty) {
+      return member.id == createdByMemberId;
+    }
+    return member.role == TripMember.roleCreator;
   }
 
   bool hasMember(String? userId, [String? userEmail]) {

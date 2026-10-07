@@ -153,12 +153,6 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
     final settlements = ref.watch(currentTripSettlementsProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final hasExplicitCreator = currentTrip.members.any((m) =>
-        m.isCreator ||
-        m.role == 'creator' ||
-        currentTrip.isCreator(m.id, m.email) ||
-        (currentTrip.createdByMemberId.isNotEmpty && m.id == currentTrip.createdByMemberId));
-
     final screenWidth = MediaQuery.sizeOf(context).width;
     final hPad = screenWidth < 360
         ? 10.0
@@ -251,17 +245,11 @@ class _SettlementTabState extends ConsumerState<SettlementTab> {
           ],
         ),
         const SizedBox(height: 8),
-        ...currentTrip.members.asMap().entries.map((entry) {
-          final index = entry.key;
-          final member = entry.value;
+        ...currentTrip.members.map((member) {
           final isMe = (currentUid != null && member.id == currentUid) ||
               (authUser?.email != null && member.email != null && authUser!.email.toLowerCase() == member.email!.toLowerCase());
 
-          final isMemberCreator = member.isCreator ||
-              member.role == 'creator' ||
-              currentTrip.isCreator(member.id, member.email) ||
-              (currentTrip.createdByMemberId.isNotEmpty && member.id == currentTrip.createdByMemberId) ||
-              (!hasExplicitCreator && index == 0);
+          final isMemberCreator = currentTrip.isMemberCreator(member);
 
           final balance = netBalances[member.id] ?? 0.0;
           final isPositive = balance > 0.01;
