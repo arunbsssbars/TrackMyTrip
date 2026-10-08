@@ -27,7 +27,7 @@ import 'tabs/memories_tab.dart';
 import 'tabs/settlement_tab.dart';
 import 'tabs/timeline_tab.dart';
 import 'tabs/members_tab.dart';
-import 'tabs/analytics_tab.dart';
+import '../stats/trip_analytics_screen.dart';
 import 'tabs/audit_tab.dart';
 import '../../core/services/firestore_sync_service.dart';
 import '../notifications/notification_center_sheet.dart';
@@ -637,7 +637,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
                   if (!trip.isSolo)
                     SettlementTab(trip: trip),
                   MemoriesTab(trip: trip),
-                  AnalyticsTab(trip: trip),
+                  TripAnalyticsScreen(tripId: trip.id, isEmbedded: true),
                   AuditTab(trip: trip),
                 ],
               ),

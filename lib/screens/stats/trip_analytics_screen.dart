@@ -20,11 +20,13 @@ import '../common/universal_bottom_bar.dart';
 class TripAnalyticsScreen extends ConsumerStatefulWidget {
   final String? tripId;
   final int initialTabIndex;
+  final bool isEmbedded;
 
   const TripAnalyticsScreen({
     super.key,
     this.tripId,
     this.initialTabIndex = 0,
+    this.isEmbedded = false,
   });
 
   bool get isGlobal => tripId == null || tripId!.isEmpty;
@@ -670,6 +672,53 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
     List<Expense> expenses,
     bool isDark,
   ) {
+    const tabs = [
+      Tab(
+        icon: Icon(Icons.analytics_rounded, size: 18),
+        text: 'Visual Analytics',
+      ),
+      Tab(
+        icon: Icon(Icons.receipt_long_rounded, size: 18),
+        text: 'Expense Ledger',
+      ),
+    ];
+
+    final tabBarView = TabBarView(
+      controller: _tabController,
+      children: [
+        _buildTripVisualAnalyticsTab(context, trip, stoppages, expenses, isDark),
+        _buildTripScopedLedgerTab(context, trip, expenses, isDark),
+      ],
+    );
+
+    if (widget.isEmbedded) {
+      return Column(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              border: Border(
+                bottom: BorderSide(
+                  color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                  width: 1,
+                ),
+              ),
+            ),
+            child: TabBar(
+              controller: _tabController,
+              indicatorColor: AppTheme.primary,
+              indicatorWeight: 3,
+              labelColor: isDark ? Colors.tealAccent : AppTheme.primary,
+              unselectedLabelColor: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+              labelStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+              tabs: tabs,
+            ),
+          ),
+          Expanded(child: tabBarView),
+        ],
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -707,25 +756,10 @@ class _TripAnalyticsScreenState extends ConsumerState<TripAnalyticsScreen> with 
           labelColor: isDark ? Colors.tealAccent : AppTheme.primary,
           unselectedLabelColor: isDark ? Colors.grey[400] : const Color(0xFF64748B),
           labelStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-          tabs: const [
-            Tab(
-              icon: Icon(Icons.analytics_rounded, size: 18),
-              text: 'Visual Analytics',
-            ),
-            Tab(
-              icon: Icon(Icons.receipt_long_rounded, size: 18),
-              text: 'Expense Ledger',
-            ),
-          ],
+          tabs: tabs,
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildTripVisualAnalyticsTab(context, trip, stoppages, expenses, isDark),
-          _buildTripScopedLedgerTab(context, trip, expenses, isDark),
-        ],
-      ),
+      body: tabBarView,
       bottomNavigationBar: const UniversalBottomBar(),
     );
   }

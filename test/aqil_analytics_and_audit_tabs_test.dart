@@ -17,7 +17,7 @@ import 'package:trackmytrip/models/trip_audit_log.dart';
 import 'package:trackmytrip/models/user_profile.dart';
 import 'package:trackmytrip/providers/trip_provider.dart';
 
-import 'package:trackmytrip/screens/trip_detail/tabs/analytics_tab.dart';
+import 'package:trackmytrip/screens/stats/trip_analytics_screen.dart';
 import 'package:trackmytrip/screens/trip_detail/tabs/audit_tab.dart';
 
 import 'support/ui_glitch_inspector.dart';
@@ -326,7 +326,7 @@ void main() {
           tester.view.devicePixelRatio = 1.0;
 
           await tester.pumpWidget(buildTestBed(
-            AnalyticsTab(trip: chandratalTrip),
+            TripAnalyticsScreen(tripId: chandratalTrip.id, isEmbedded: true),
             size: vp,
             fontScale: fontScale,
           ));
