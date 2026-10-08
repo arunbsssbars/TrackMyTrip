@@ -109,6 +109,22 @@ class _EditTripDialogState extends ConsumerState<EditTripDialog> {
       currentMembers: _members,
       actionLabel: 'Invite',
       onUserSelected: (user) async {
+        if (user.id.startsWith('custom_') || user.id.startsWith('offline_') || user.id.startsWith('member_') || user.email == null || user.email!.isEmpty) {
+          final newMember = TripMember(
+            id: user.id.isNotEmpty ? user.id : 'custom_${DateTime.now().millisecondsSinceEpoch}',
+            name: user.displayName,
+            colorHex: user.colorHex ?? '0xFFF97316',
+            isCurrentUser: false,
+          );
+          if (!_members.any((m) => m.id == newMember.id)) {
+            setState(() => _members.add(newMember));
+            if (mounted) {
+              AppSnackBar.showSuccess(context, 'Added "${user.displayName}" to trip roster.');
+            }
+          }
+          return;
+        }
+
         final cleanEmail = (user.email != null && user.email!.trim().isNotEmpty) ? user.email!.trim().toLowerCase() : null;
         final username = user.username.isNotEmpty ? user.username.trim().toLowerCase() : (cleanEmail?.split('@').first ?? user.displayName);
         final inviteeId = user.id.isNotEmpty ? user.id : null;

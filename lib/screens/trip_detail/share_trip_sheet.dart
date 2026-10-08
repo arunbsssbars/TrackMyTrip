@@ -598,6 +598,20 @@ class _ShareTripSheetState extends ConsumerState<ShareTripSheet> {
       tripId: trip.id,
       currentMembers: trip.members,
       onCompanionSelected: (member) async {
+        if (member.id.startsWith('custom_') || member.id.startsWith('offline_') || member.id.startsWith('member_') || member.email == null || member.email!.isEmpty) {
+          await ref.read(tripListProvider.notifier).addMemberToTrip(trip.id, member);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Added "${member.name}" to trip roster!'),
+                backgroundColor: AppTheme.primary,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+          return;
+        }
+
         await ref.read(invitationProvider.notifier).sendInvitation(
           tripId: trip.id,
           tripTitle: trip.title,

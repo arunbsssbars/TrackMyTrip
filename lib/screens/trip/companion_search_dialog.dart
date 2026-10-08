@@ -36,6 +36,8 @@ class CompanionSearchDialog extends ConsumerStatefulWidget {
     return showModalBottomSheet<TripMember>(
       context: context,
       isScrollControlled: true,
+      enableDrag: false,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (context) => CompanionSearchDialog(
         tripId: tripId,
@@ -53,6 +55,7 @@ class CompanionSearchDialog extends ConsumerStatefulWidget {
 
 class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   String _query = '';
   final Set<String> _locallyInvitedIds = {};
   Timer? _debounceTimer;
@@ -62,6 +65,7 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
   void dispose() {
     _debounceTimer?.cancel();
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -97,17 +101,24 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final searchResultsAsync = ref.watch(userSearchProvider(_query));
 
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.78,
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        boxShadow: const [
-          BoxShadow(color: Colors.black38, blurRadius: 20, offset: Offset(0, -4)),
-        ],
-      ),
-      child: Column(
-        children: [
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    final screenHeight = MediaQuery.of(context).size.height;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: viewInsets.bottom),
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: screenHeight * 0.85,
+        ),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF0F172A) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          boxShadow: const [
+            BoxShadow(color: Colors.black38, blurRadius: 20, offset: Offset(0, -4)),
+          ],
+        ),
+        child: Column(
+          children: [
           // Drag Handle
           Center(
             child: Container(
@@ -172,7 +183,7 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
             padding: const EdgeInsets.fromLTRB(18, 4, 18, 8),
             child: TextField(
               controller: _searchController,
-              autofocus: true,
+              autofocus: false,
               onChanged: (val) {
                 _debounceTimer?.cancel();
                 setState(() => _isSearching = true);
@@ -333,7 +344,8 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
                 }
 
                 return ListView.separated(
-                  physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+                  controller: _scrollController,
+                  physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   itemCount: users.length + (isSuggested ? 1 : 0),
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
@@ -540,6 +552,7 @@ class _CompanionSearchDialogState extends ConsumerState<CompanionSearchDialog> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }

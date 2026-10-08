@@ -166,6 +166,14 @@ class UserService {
             final email = m.email?.toLowerCase().trim();
             final username = m.name.toLowerCase().replaceAll(' ', '_');
 
+            if (id.startsWith('custom_') ||
+                id.startsWith('offline_') ||
+                id.startsWith('member_') ||
+                email == null ||
+                email.isEmpty) {
+              continue;
+            }
+
             if (id == currentUserId ||
                 (fbUid != null && id == fbUid) ||
                 (currentUserEmail != null && email == currentUserEmail) ||
@@ -420,6 +428,14 @@ class UserService {
             final email = m.email?.toLowerCase().trim();
             final username = name.toLowerCase().replaceAll(' ', '_');
 
+            if (id.startsWith('custom_') ||
+                id.startsWith('offline_') ||
+                id.startsWith('member_') ||
+                email == null ||
+                email.isEmpty) {
+              continue;
+            }
+
             if (id == currentUserId ||
                 (currentUserEmail != null && email == currentUserEmail) ||
                 (currentUsername.isNotEmpty && username == currentUsername)) {
@@ -427,7 +443,7 @@ class UserService {
             }
 
             final matchName = name.toLowerCase().contains(cleanQuery);
-            final matchEmail = email != null && (email.contains(cleanQuery) || (isEmailQuery && email.contains(rawLower)));
+            final matchEmail = email.contains(cleanQuery) || (isEmailQuery && email.contains(rawLower));
             final matchUser = username.contains(cleanQuery);
 
             if (matchName || matchEmail || matchUser) {

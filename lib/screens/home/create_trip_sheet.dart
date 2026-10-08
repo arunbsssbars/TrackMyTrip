@@ -192,7 +192,13 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
 
     // Two-Phase Workflow: Only creator and offline manual companions are in initial trip.members.
     // Registered companions receive invitations and join once accepted.
-    final offlineCompanions = _companions.where((c) => c.id.startsWith('custom_') && (c.email == null || c.email!.isEmpty)).toList();
+    final offlineCompanions = _companions.where((c) =>
+      c.id.startsWith('custom_') ||
+      c.id.startsWith('offline_') ||
+      c.id.startsWith('member_') ||
+      c.email == null ||
+      c.email!.isEmpty
+    ).toList();
     final memberList = <TripMember>[myMember, ...offlineCompanions];
 
     final newTripId = const Uuid().v4();
@@ -234,7 +240,13 @@ class _CreateTripSheetState extends ConsumerState<CreateTripSheet> {
 
     // Two-Phase Workflow: Dispatch invitations in batch (creates exactly 1 consolidated notification for the creator)
     if (_tripType != 'solo' && _companions.isNotEmpty) {
-      final registerableCompanions = _companions.where((c) => c.email != null || !c.id.startsWith('custom_')).toList();
+      final registerableCompanions = _companions.where((c) =>
+        !c.id.startsWith('custom_') &&
+        !c.id.startsWith('offline_') &&
+        !c.id.startsWith('member_') &&
+        c.email != null &&
+        c.email!.trim().isNotEmpty
+      ).toList();
       if (registerableCompanions.isNotEmpty) {
         ref.read(invitationProvider.notifier).sendInvitationsBatch(
           tripId: newTrip.id,

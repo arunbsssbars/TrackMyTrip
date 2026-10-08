@@ -328,6 +328,20 @@ class InvitationNotifier extends StateNotifier<List<TripInvitation>> {
     final cleanInviteeEmail = inviteeEmail?.trim().toLowerCase();
     final cleanInviteeUsername = inviteeUsername.trim().toLowerCase();
 
+    // Guard: Custom/offline placeholder companions cannot receive app invitations
+    if (inviteeId != null && (inviteeId.startsWith('custom_') || inviteeId.startsWith('offline_') || inviteeId.startsWith('member_'))) {
+      if (kDebugMode) {
+        debugPrint('[InvitationNotifier] Suppressed sending invitation to custom/offline companion $inviteeId ($inviteeUsername)');
+      }
+      return;
+    }
+    if ((cleanInviteeEmail == null || cleanInviteeEmail.isEmpty) && (inviteeId == null || inviteeId.isEmpty)) {
+      if (kDebugMode) {
+        debugPrint('[InvitationNotifier] Cannot send invitation without email or registered user ID');
+      }
+      return;
+    }
+
     // Deduplication guard: Do not send duplicate pending invitation to same companion
     final existingInvitations = _storage.getSentInvitations();
     final alreadyPending = existingInvitations.any((inv) {
@@ -417,12 +431,13 @@ class InvitationNotifier extends StateNotifier<List<TripInvitation>> {
     if (invitees.isEmpty) return;
 
     for (final member in invitees) {
-      if (member.email != null || !member.id.startsWith('custom_')) {
-        final cleanEmail = member.email?.trim().toLowerCase();
-        final username = cleanEmail != null
-            ? cleanEmail.split('@').first
-            : member.name.replaceAll(' ', '_').toLowerCase();
-        final inviteeId = !member.id.startsWith('custom_') ? member.id : null;
+      if (member.id.startsWith('custom_') || member.id.startsWith('offline_') || member.id.startsWith('member_')) {
+        continue;
+      }
+      if (member.email != null && member.email!.trim().isNotEmpty) {
+        final cleanEmail = member.email!.trim().toLowerCase();
+        final username = cleanEmail.split('@').first;
+        final inviteeId = member.id;
 
         await sendInvitation(
           tripId: tripId,
