@@ -23,15 +23,6 @@ jobs:
         run: |
           pod --version
 
-      - name: Install Dependencies
-        run: flutter pub get
-
-      - name: Install CocoaPods
-        run: |
-          cd ios
-          pod install --repo-update
-          cd ..
-
       - name: Create fallback .env file for asset bundling
         run: |
           if [ -n "${{ secrets.ENV_FILE }}" ]; then
@@ -39,6 +30,17 @@ jobs:
           else
             touch .env
           fi
+
+      - name: Install Dependencies & Prepare iOS Config
+        run: |
+          flutter pub get
+          flutter build ios --config-only
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install --repo-update
+          cd ..
 
       - name: Build iOS App with Unsigned Signing Allowed
         run: |
