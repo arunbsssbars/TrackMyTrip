@@ -30,7 +30,9 @@ jobs:
           fi
 
       - name: Install Dependencies
-        run: flutter pub get
+        run: |
+          mkdir -p build/ios/SourcePackages
+          flutter pub get
 
       - name: Build iOS App with Unsigned Signing Allowed
         run: flutter build ios --release --no-codesign
