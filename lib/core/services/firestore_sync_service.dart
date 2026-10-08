@@ -871,15 +871,19 @@ class FirestoreSyncService {
   /// 1. Writes persistent 3-field tombstone record to `deleted_trips_tombstones`
   /// 2. Batch-purges all subcollections (expenses, stoppages, memories, etc.)
   /// 3. Removes live room docs and permanently deletes the main trip document from `trips`
-  Future<void> markTripDeleted(String tripId) async {
+  Future<bool> markTripDeleted(String tripId) async {
     try {
+      final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
       // 1. Write persistent cloud tombstone record
       try {
         await _db.collection('deleted_trips_tombstones').doc(tripId).set({
           'tripId': tripId,
           'status': 'deleted',
           'deletedAt': FieldValue.serverTimestamp(),
+          if (currentUid.isNotEmpty) 'deletedBy': currentUid,
         }, SetOptions(merge: true));
+        if (kDebugMode) debugPrint('[FirestoreSyncService] Cloud tombstone written for trip: $tripId');
       } catch (e) {
         if (kDebugMode) debugPrint('[FirestoreSyncService] Tombstone record error: $e');
       }
@@ -925,8 +929,10 @@ class FirestoreSyncService {
           if (kDebugMode) debugPrint('[FirestoreSyncService] trips.doc delete error: $e');
         }),
       ]);
+      return true;
     } catch (e) {
       if (kDebugMode) debugPrint('[FirestoreSyncService] markTripDeleted error: $e');
+      return false;
     }
   }
 

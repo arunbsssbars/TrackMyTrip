@@ -312,6 +312,11 @@ class OfflineSyncEngine extends ChangeNotifier {
         if (isTripEntity) {
           final tripDocRef = CloudTripSyncService.firestore.collection('trips').doc(mutation.tripId);
           if (mutation.action == MutationAction.deleteTrip) {
+            await CloudTripSyncService.firestore.collection('deleted_trips_tombstones').doc(mutation.tripId).set({
+              'tripId': mutation.tripId,
+              'status': 'deleted',
+              'deletedAt': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true)).catchError((_) {});
             await tripDocRef.delete();
             await CloudTripSyncService.deleteRoom(mutation.tripId);
           } else {

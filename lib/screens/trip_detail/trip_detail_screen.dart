@@ -567,7 +567,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> with Ticker
                         ),
                       );
                       if (confirm == true && context.mounted) {
-                        await ref.read(tripListProvider.notifier).deleteTripLocally(trip.id);
+                        await ref.read(tripListProvider.notifier).deleteTrip(trip.id);
                         if (context.mounted && Navigator.of(context).canPop()) {
                           Navigator.of(context).pop();
                         }

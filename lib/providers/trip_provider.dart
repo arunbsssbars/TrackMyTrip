@@ -23,6 +23,8 @@ import 'stoppage_provider.dart';
 import 'audit_log_provider.dart';
 import '../models/trip_audit_log.dart';
 import '../core/services/user_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../models/sync_mutation.dart';
 import 'package:uuid/uuid.dart';
 
 final currencyNotifierProvider = ChangeNotifierProvider<ValueNotifier<String>>((ref) {
@@ -307,8 +309,13 @@ class TripNotifier extends StateNotifier<List<Trip>> {
     final trip = state.where((t) => t.id == tripId).firstOrNull;
     final authUser = _ref.read(authNotifierProvider).valueOrNull;
     final currentUid = authUser?.id;
+    final firebaseUid = FirebaseAuth.instance.currentUser?.uid;
+    final effectiveUid = currentUid ?? firebaseUid;
 
-    final isLead = trip != null && (trip.isCreator(currentUid) || trip.isCreator(trip.currentUserMember?.id));
+    final isLead = trip == null ||
+        trip.isCreator(effectiveUid) ||
+        trip.isCreator(trip.currentUserMember?.id) ||
+        (effectiveUid != null && trip.createdByMemberId == effectiveUid);
 
     // 1. Instantly update Riverpod state so front-end reflects deletion with 0ms delay!
     state = state.where((t) => t.id != tripId).toList();
@@ -329,22 +336,38 @@ class TripNotifier extends StateNotifier<List<Trip>> {
       await _ref.read(proximityAlertServiceProvider).clearAlertsForTrip(tripId);
     } catch (_) {}
 
-    // 4. Cascade cloud sync and room cleanup in background
+    // 4. Cascade cloud sync, tombstone write, and room cleanup
     if (isLead) {
       try {
         _ref.read(realtimeSyncServiceProvider).broadcastTripDeleted(tripId);
       } catch (_) {}
 
-      unawaited(() async {
-        try {
-          await _ref.read(firestoreSyncServiceProvider).markTripDeleted(tripId);
-        } catch (_) {}
-        try {
-          await CloudTripSyncService.deleteRoom(tripId);
-        } catch (_) {}
-      }());
+      // Queue offline mutation as durable safety net
+      try {
+        await _storage.enqueueMutation(SyncMutation(
+          id: 'mut_${tripId}_del',
+          action: MutationAction.deleteTrip,
+          entityType: 'trip',
+          entityId: tripId,
+          tripId: tripId,
+          payload: {'status': 'deleted'},
+          createdAt: DateTime.now(),
+        ));
+      } catch (_) {}
+
+      try {
+        final success = await _ref.read(firestoreSyncServiceProvider).markTripDeleted(tripId);
+        if (success) {
+          await _storage.removeMutation('mut_${tripId}_del');
+        }
+      } catch (e) {
+        if (kDebugMode) debugPrint('[TripNotifier] markTripDeleted error: $e');
+      }
+      try {
+        await CloudTripSyncService.deleteRoom(tripId);
+      } catch (_) {}
     } else {
-      unawaited(leaveTrip(tripId));
+      await leaveTrip(tripId);
     }
 
     // 5. Clean up local media files in background
