@@ -39,22 +39,27 @@ class ImageCompressionService {
     }
   }
 
-  /// Downscales raw byte buffers if dimensions exceed maxWidth or maxHeight.
+  /// Downscales raw byte buffers safely without corrupting original pixel buffers.
   static Future<Uint8List> compressBytes(
     Uint8List bytes, {
     int maxWidth = 1920,
     int maxHeight = 1080,
   }) async {
+    // If bytes are already reasonably small (< 1.5 MB), do not re-encode
+    if (bytes.lengthInBytes <= 1536 * 1024) {
+      return bytes;
+    }
+
     try {
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
       final image = frame.image;
 
       if (image.width <= maxWidth && image.height <= maxHeight) {
-        return bytes; // Already compact
+        return bytes; // Already within target bounds
       }
 
-      // Calculate proportional dimensions
+      // Proportional dimensions
       final double ratio = image.width / image.height;
       int targetWidth = image.width;
       int targetHeight = image.height;
@@ -76,10 +81,12 @@ class ImageCompressionService {
       final resizedFrame = await resizedCodec.getNextFrame();
       final byteData = await resizedFrame.image.toByteData(format: ui.ImageByteFormat.png);
 
-      if (byteData != null) {
-        final resizedBytes = byteData.buffer.asUint8List();
-        // If resized is smaller, use it; otherwise fallback to original
-        return resizedBytes.lengthInBytes < bytes.lengthInBytes ? resizedBytes : bytes;
+      if (byteData != null && byteData.lengthInBytes > 1024) {
+        final resizedBytes = byteData.buffer.asUint8List(byteData.offsetInBytes, byteData.lengthInBytes);
+        // Only return if resized is smaller than original but not a suspicious zero-byte blank
+        if (resizedBytes.lengthInBytes < bytes.lengthInBytes && resizedBytes.lengthInBytes > 4096) {
+          return resizedBytes;
+        }
       }
       return bytes;
     } catch (_) {
@@ -87,7 +94,8 @@ class ImageCompressionService {
     }
   }
 
-  /// Compresses a file on disk if it exceeds 350 KB or FHD dimensions.
+  /// Compresses a file on disk. Protects against black texture corruption by preserving
+  /// high-quality native JPEG files produced by ImagePicker (typically 200-500 KB).
   static Future<File> compressFile(
     File sourceFile, {
     int maxWidth = 1920,
@@ -99,8 +107,8 @@ class ImageCompressionService {
       if (!await sourceFile.exists()) return sourceFile;
 
       final length = await sourceFile.length();
-      // Skip already small files (e.g. < 250 KB)
-      if (length <= 250 * 1024) {
+      // Skip files already under 2 MB (all ImagePicker FHD images are ~250-450 KB)
+      if (length <= 2 * 1024 * 1024) {
         return sourceFile;
       }
 
@@ -111,7 +119,8 @@ class ImageCompressionService {
         maxHeight: maxHeight,
       );
 
-      if (compressedBytes.lengthInBytes < bytes.lengthInBytes) {
+      // Only write back if genuinely smaller and verified non-empty (> 4 KB)
+      if (compressedBytes.lengthInBytes < bytes.lengthInBytes && compressedBytes.lengthInBytes > 4096) {
         await sourceFile.writeAsBytes(compressedBytes);
       }
       return sourceFile;

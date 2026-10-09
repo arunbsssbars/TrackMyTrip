@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:crypto/crypto.dart';
 import 'anti_abuse_rate_limiter_service.dart';
 import 'image_compression_service.dart';
 import 'secret_config_service.dart';
@@ -260,9 +261,8 @@ class CloudinaryService {
 
       final request = http.MultipartRequest('POST', _uploadEndpoint);
       request.fields['upload_preset'] = uploadPreset;
-      // Cloudinary cloud-side auto-quality & auto-format headers
-      request.fields['quality'] = 'auto:good';
-      request.fields['fetch_format'] = 'auto';
+      // Request client-side delete token from Cloudinary for instant deletion
+      request.fields['return_delete_token'] = 'true';
 
       if (folder != null && folder.isNotEmpty) {
         request.fields['folder'] = folder;
@@ -291,8 +291,23 @@ class CloudinaryService {
         final data = jsonDecode(responseBody) as Map<String, dynamic>;
         final secureUrl = data['secure_url'] as String?;
         final uploadedBytes = data['bytes'] as int? ?? (await optimizedFile.length());
+        final deleteToken = data['delete_token'] as String?;
+        final returnedPublicId = data['public_id'] as String?;
         await recordUploadBytes(uploadedBytes);
         AntiAbuseRateLimiterService.recordMediaUpload();
+
+        // Cache delete token for subsequent client-side deletion
+        if (deleteToken != null && deleteToken.isNotEmpty) {
+          try {
+            final sp = await SharedPreferences.getInstance();
+            if (publicId != null && publicId.isNotEmpty) {
+              await sp.setString('cld_del_token_$publicId', deleteToken);
+            }
+            if (returnedPublicId != null && returnedPublicId.isNotEmpty) {
+              await sp.setString('cld_del_token_$returnedPublicId', deleteToken);
+            }
+          } catch (_) {}
+        }
 
         onProgress?.call(1.0);
         if (kDebugMode) {
@@ -366,8 +381,7 @@ class CloudinaryService {
 
       final request = http.MultipartRequest('POST', _uploadEndpoint);
       request.fields['upload_preset'] = uploadPreset;
-      request.fields['quality'] = 'auto:good';
-      request.fields['fetch_format'] = 'auto';
+      request.fields['return_delete_token'] = 'true';
 
       if (folder != null && folder.isNotEmpty) {
         request.fields['folder'] = folder;
@@ -400,8 +414,22 @@ class CloudinaryService {
         final data = jsonDecode(responseBody) as Map<String, dynamic>;
         final secureUrl = data['secure_url'] as String?;
         final uploadedBytes = data['bytes'] as int? ?? optimizedBytes.lengthInBytes;
+        final deleteToken = data['delete_token'] as String?;
+        final returnedPublicId = data['public_id'] as String?;
         await recordUploadBytes(uploadedBytes);
         AntiAbuseRateLimiterService.recordMediaUpload();
+
+        if (deleteToken != null && deleteToken.isNotEmpty) {
+          try {
+            final sp = await SharedPreferences.getInstance();
+            if (publicId != null && publicId.isNotEmpty) {
+              await sp.setString('cld_del_token_$publicId', deleteToken);
+            }
+            if (returnedPublicId != null && returnedPublicId.isNotEmpty) {
+              await sp.setString('cld_del_token_$returnedPublicId', deleteToken);
+            }
+          } catch (_) {}
+        }
 
         onProgress?.call(1.0);
         if (kDebugMode) {
@@ -508,6 +536,129 @@ class CloudinaryService {
     }
 
     return rawUrl.replaceFirst('/upload/', '/upload/$transformString');
+  }
+
+  /// Extracts the Cloudinary asset public_id from a CDN delivery URL.
+  /// Example:
+  /// https://res.cloudinary.com/dcj4v7toh/image/upload/v12345/trackmytrip/trips/trip1/memories/mem_abc.jpg
+  /// -> 'trackmytrip/trips/trip1/memories/mem_abc'
+  static String? extractPublicId(String url) {
+    if (url.isEmpty || !url.contains('res.cloudinary.com') || !url.contains('/upload/')) {
+      return null;
+    }
+    try {
+      final uploadIndex = url.indexOf('/upload/');
+      var path = url.substring(uploadIndex + '/upload/'.length);
+
+      // Strip transformations (e.g. w_800,c_limit,q_auto,f_auto/)
+      while (path.contains('/') && !path.startsWith('v') && RegExp(r'^[a-z]_[^/]+/').hasMatch(path)) {
+        path = path.substring(path.indexOf('/') + 1);
+      }
+      // Strip version prefix if present (e.g. v1234567890/)
+      if (RegExp(r'^v[0-9]+/').hasMatch(path)) {
+        path = path.substring(path.indexOf('/') + 1);
+      }
+      // Strip extension (.jpg, .png, .webp)
+      final dotIndex = path.lastIndexOf('.');
+      if (dotIndex != -1) {
+        path = path.substring(0, dotIndex);
+      }
+      return path.isNotEmpty ? path : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Deletes an asset from Cloudinary:
+  /// 1. Tries `delete_by_token` using the cached client-side delete token (available for unsigned presets).
+  /// 2. Tries authenticated signed Upload API `destroy` if API Key & Secret are configured.
+  /// Returns `true` if deletion succeeded or was confirmed, `false` otherwise.
+  Future<bool> deleteAsset({
+    required String publicId,
+    String? deleteToken,
+  }) async {
+    if (!isConfigured) return false;
+
+    // 1. Check for delete_token (from parameter or cached SharedPreferences)
+    String? token = deleteToken;
+    if (token == null || token.isEmpty) {
+      try {
+        final sp = await SharedPreferences.getInstance();
+        token = sp.getString('cld_del_token_$publicId');
+      } catch (_) {}
+    }
+
+    if (token != null && token.isNotEmpty) {
+      try {
+        final tokenUri = Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/delete_by_token');
+        final response = await _httpClient.post(
+          tokenUri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'token': token}),
+        ).timeout(const Duration(seconds: 15));
+
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          if (data['result'] == 'ok') {
+            if (kDebugMode) {
+              debugPrint('[CloudinaryService] Successfully deleted asset via delete_token: $publicId');
+            }
+            try {
+              final sp = await SharedPreferences.getInstance();
+              await sp.remove('cld_del_token_$publicId');
+            } catch (_) {}
+            return true;
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[CloudinaryService] delete_by_token failed: $e');
+        }
+      }
+    }
+
+    // 2. Check for signed destroy API (if CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET are present)
+    final apiKey = SecretConfigService.cloudinaryApiKey;
+    final apiSecret = SecretConfigService.cloudinaryApiSecret;
+
+    if (apiKey.isNotEmpty && apiSecret.isNotEmpty) {
+      try {
+        final timestamp = (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
+        // Cloudinary signed destroy expects signature of 'public_id=...&timestamp=...<secret>'
+        final toSign = 'public_id=$publicId&timestamp=$timestamp$apiSecret';
+        final signature = sha1.convert(utf8.encode(toSign)).toString();
+
+        final destroyUri = Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/image/destroy');
+        final response = await _httpClient.post(
+          destroyUri,
+          body: {
+            'public_id': publicId,
+            'timestamp': timestamp,
+            'api_key': apiKey,
+            'signature': signature,
+          },
+        ).timeout(const Duration(seconds: 15));
+
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          if (data['result'] == 'ok' || data['result'] == 'not found') {
+            if (kDebugMode) {
+              debugPrint('[CloudinaryService] Successfully deleted asset via signed destroy: $publicId');
+            }
+            return true;
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[CloudinaryService] Signed destroy failed: $e');
+        }
+      }
+    }
+
+    if (kDebugMode) {
+      debugPrint('[CloudinaryService] Note: Asset $publicId was queued or delete_token expired.');
+    }
+    return false;
   }
 }
 

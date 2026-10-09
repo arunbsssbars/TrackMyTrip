@@ -11,6 +11,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/services/media_cache_service.dart';
 import '../../../core/services/realtime_sync_service.dart';
 import '../../../core/services/firebase_storage_service.dart';
+import '../../../core/services/cloudinary_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../models/memory.dart';
 import '../../../models/stoppage.dart';
@@ -212,6 +213,12 @@ class _MemoriesTabState extends ConsumerState<MemoriesTab> {
             onPressed: () async {
               Navigator.of(ctx).pop();
               await ref.read(allMemoriesProvider.notifier).deleteMemory(memory.id);
+              final cloudinary = ref.read(cloudinaryServiceProvider);
+              if (cloudinary.isConfigured) {
+                final publicId = CloudinaryService.extractPublicId(memory.remoteUrl ?? memory.mediaPath) ??
+                    'trackmytrip/trips/${widget.trip.id}/memories/mem_${memory.id}';
+                cloudinary.deleteAsset(publicId: publicId);
+              }
               final storage = ref.read(firebaseStorageServiceProvider);
               if (storage.isAvailable) {
                 storage.deleteMemoryPhoto(tripId: widget.trip.id, memoryId: memory.id);
@@ -1448,6 +1455,12 @@ class _FullScreenGalleryViewerState extends ConsumerState<FullScreenGalleryViewe
             onPressed: () {
               Navigator.of(ctx).pop();
               ref.read(allMemoriesProvider.notifier).deleteMemory(memory.id);
+              final cloudinary = ref.read(cloudinaryServiceProvider);
+              if (cloudinary.isConfigured) {
+                final publicId = CloudinaryService.extractPublicId(memory.remoteUrl ?? memory.mediaPath) ??
+                    'trackmytrip/trips/${widget.trip.id}/memories/mem_${memory.id}';
+                cloudinary.deleteAsset(publicId: publicId);
+              }
               if (memory.localPath != null) {
                 ref.read(mediaCacheServiceProvider).deleteItem(
                   ref.read(mediaCacheServiceProvider).itemForEntity(memory.id)?.id ?? '',

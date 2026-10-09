@@ -13,6 +13,7 @@ import '../core/services/realtime_sync_service.dart';
 import '../core/services/proximity_alert_service.dart';
 import '../core/services/firestore_sync_service.dart';
 import '../core/services/tombstone_service.dart';
+import '../core/services/cloudinary_service.dart';
 
 class MemoryNotifier extends StateNotifier<List<Memory>> {
   final LocalStorageService _storage;
@@ -55,8 +56,16 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
     Memory finalMemory = memory;
     if (existingIndex != -1) {
       final existing = state[existingIndex];
-      // If locally stored or already uploaded, do not regress to 'uploading' unless remoteUrl is explicitly updated
-      if ((existing.uploadStatus == MediaUploadStatus.local || existing.uploadStatus == MediaUploadStatus.uploaded) &&
+      // If already uploaded, preserve uploaded status and remoteUrl
+      if (existing.uploadStatus == MediaUploadStatus.uploaded ||
+          (existing.remoteUrl != null && existing.remoteUrl!.isNotEmpty)) {
+        finalMemory = memory.copyWith(
+          uploadStatus: MediaUploadStatus.uploaded,
+          remoteUrl: existing.remoteUrl,
+          mediaPath: existing.remoteUrl ?? memory.mediaPath,
+          localPath: existing.localPath ?? memory.localPath,
+        );
+      } else if (existing.uploadStatus == MediaUploadStatus.local &&
           memory.uploadStatus == MediaUploadStatus.uploading &&
           (memory.remoteUrl == null || memory.remoteUrl!.isEmpty)) {
         finalMemory = memory.copyWith(
@@ -118,7 +127,26 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
 
   Future<void> updateMemoryMediaUrl(String memoryId, String remoteUrl) async {
     final index = state.indexWhere((m) => m.id == memoryId);
-    if (index == -1) return;
+    if (index == -1) {
+      // Defensive fallback: check persistent storage in case memory was written or rehydrated
+      final all = _storage.getAllMemories();
+      final storageIdx = all.indexWhere((m) => m.id == memoryId);
+      if (storageIdx != -1) {
+        final updated = all[storageIdx].copyWith(
+          mediaPath: remoteUrl,
+          remoteUrl: remoteUrl,
+          uploadStatus: MediaUploadStatus.uploaded,
+        );
+        all[storageIdx] = updated;
+        await _storage.saveAllMemories(all);
+        state = all;
+        _syncToCloud(updated.tripId);
+        try {
+          _ref.read(firestoreSyncServiceProvider).pushMemory(updated);
+        } catch (_) {}
+      }
+      return;
+    }
     final updated = state[index].copyWith(
       mediaPath: remoteUrl,
       remoteUrl: remoteUrl,
@@ -280,6 +308,19 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
     } catch (_) {}
     try {
       _ref.read(firestoreSyncServiceProvider).deleteMemory(existing.tripId, memoryId);
+    } catch (_) {}
+
+    // Delete remote Cloudinary media asset
+    try {
+      final cloudinary = _ref.read(cloudinaryServiceProvider);
+      String? publicId;
+      if (existing.remoteUrl != null && existing.remoteUrl!.contains('cloudinary.com')) {
+        publicId = CloudinaryService.extractPublicId(existing.remoteUrl!);
+      } else if (existing.mediaPath.contains('cloudinary.com')) {
+        publicId = CloudinaryService.extractPublicId(existing.mediaPath);
+      }
+      publicId ??= 'trackmytrip/trips/${existing.tripId}/memories/mem_$memoryId';
+      cloudinary.deleteAsset(publicId: publicId);
     } catch (_) {}
 
     if (broadcast) {

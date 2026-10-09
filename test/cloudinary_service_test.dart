@@ -208,5 +208,75 @@ void main() {
       expect(ping['presetConfigured'], isTrue);
       expect(ping['latencyMs'], isNonNegative);
     });
+
+    test('extractPublicId accurately parses public_id from raw and transformed Cloudinary URLs', () {
+      const standardUrl = 'https://res.cloudinary.com/mycloud/image/upload/v12345/trackmytrip/trips/trip1/memories/mem_abc.jpg';
+      expect(
+        CloudinaryService.extractPublicId(standardUrl),
+        equals('trackmytrip/trips/trip1/memories/mem_abc'),
+      );
+
+      const transformedUrl = 'https://res.cloudinary.com/mycloud/image/upload/w_800,c_limit,q_auto,f_auto/v12345/trackmytrip/trips/trip1/memories/mem_abc.jpg';
+      expect(
+        CloudinaryService.extractPublicId(transformedUrl),
+        equals('trackmytrip/trips/trip1/memories/mem_abc'),
+      );
+
+      const nonVersionedUrl = 'https://res.cloudinary.com/mycloud/image/upload/trackmytrip/trips/trip1/memories/mem_abc.png';
+      expect(
+        CloudinaryService.extractPublicId(nonVersionedUrl),
+        equals('trackmytrip/trips/trip1/memories/mem_abc'),
+      );
+
+      const nonCloudUrl = 'https://example.com/photos/mem.jpg';
+      expect(CloudinaryService.extractPublicId(nonCloudUrl), isNull);
+    });
+
+    test('deleteAsset succeeds via delete_by_token', () async {
+      SecretConfigService.setMockVariables({
+        'CLOUDINARY_CLOUD_NAME': 'mycloud',
+        'CLOUDINARY_UPLOAD_PRESET': 'preset',
+      });
+
+      final mockClient = MockClient((request) async {
+        expect(request.url.toString(), equals('https://api.cloudinary.com/v1_1/mycloud/delete_by_token'));
+        expect(request.method, equals('POST'));
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(body['token'], equals('token_12345'));
+        return http.Response(jsonEncode({'result': 'ok'}), 200);
+      });
+
+      final service = CloudinaryService(httpClient: mockClient);
+      final success = await service.deleteAsset(
+        publicId: 'trackmytrip/trips/trip1/memories/mem_1',
+        deleteToken: 'token_12345',
+      );
+      expect(success, isTrue);
+    });
+
+    test('deleteAsset succeeds via signed destroy when API key and secret are configured', () async {
+      SecretConfigService.setMockVariables({
+        'CLOUDINARY_CLOUD_NAME': 'mycloud',
+        'CLOUDINARY_UPLOAD_PRESET': 'preset',
+        'CLOUDINARY_API_KEY': '123456789',
+        'CLOUDINARY_API_SECRET': 'secret_abc_xyz',
+      });
+
+      final mockClient = MockClient((request) async {
+        expect(request.url.toString(), equals('https://api.cloudinary.com/v1_1/mycloud/image/destroy'));
+        expect(request.method, equals('POST'));
+        expect(request.bodyFields['public_id'], equals('trackmytrip/trips/trip1/memories/mem_1'));
+        expect(request.bodyFields['api_key'], equals('123456789'));
+        expect(request.bodyFields['signature'], isNotEmpty);
+        expect(request.bodyFields['timestamp'], isNotEmpty);
+        return http.Response(jsonEncode({'result': 'ok'}), 200);
+      });
+
+      final service = CloudinaryService(httpClient: mockClient);
+      final success = await service.deleteAsset(
+        publicId: 'trackmytrip/trips/trip1/memories/mem_1',
+      );
+      expect(success, isTrue);
+    });
   });
 }

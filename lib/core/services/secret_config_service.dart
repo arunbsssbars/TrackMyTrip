@@ -31,6 +31,7 @@ class SecretConfigService {
   static const String keyCloudinaryCloudName = 'CLOUDINARY_CLOUD_NAME';
   static const String keyCloudinaryUploadPreset = 'CLOUDINARY_UPLOAD_PRESET';
   static const String keyCloudinaryApiKey = 'CLOUDINARY_API_KEY';
+  static const String keyCloudinaryApiSecret = 'CLOUDINARY_API_SECRET';
 
   /// Initializes configuration from all available standard layers.
   static Future<void> initialize({Map<String, String>? overrides}) async {
@@ -79,6 +80,7 @@ class SecretConfigService {
       keyCloudinaryCloudName,
       keyCloudinaryUploadPreset,
       keyCloudinaryApiKey,
+      keyCloudinaryApiSecret,
     ];
 
     for (final key in knownKeys) {
@@ -268,6 +270,7 @@ class SecretConfigService {
   static String get cloudinaryCloudName => get(keyCloudinaryCloudName);
   static String get cloudinaryUploadPreset => get(keyCloudinaryUploadPreset);
   static String get cloudinaryApiKey => get(keyCloudinaryApiKey);
+  static String get cloudinaryApiSecret => get(keyCloudinaryApiSecret);
   static bool get isCloudinaryConfigured =>
       isConfigured(keyCloudinaryCloudName) && isConfigured(keyCloudinaryUploadPreset);
 

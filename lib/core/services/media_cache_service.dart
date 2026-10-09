@@ -81,6 +81,17 @@ class MediaCacheService extends ChangeNotifier {
         final thumbFile = ImageCompressionService.getThumbnailFile(file);
         if (await thumbFile.exists()) await thumbFile.delete();
       } catch (_) {}
+
+      // Delete from Cloudinary if hosted remotely
+      if (item.remoteUrl != null && item.remoteUrl!.contains('cloudinary.com')) {
+        final publicId = CloudinaryService.extractPublicId(item.remoteUrl!) ??
+            (item.tripId != null ? 'trackmytrip/trips/${item.tripId}/memories/mem_$entityId' : null);
+        if (publicId != null) {
+          try {
+            await _cloudinaryService.deleteAsset(publicId: publicId);
+          } catch (_) {}
+        }
+      }
     }
     notifyListeners();
   }
@@ -363,6 +374,7 @@ class MediaCacheService extends ChangeNotifier {
 
   /// Retry failed or pending local uploads (call when connectivity is restored or on manual sync)
   Future<void> retryFailed({String? tripId}) async {
+    // 1. Process in-memory queued items
     final pending = _items.values.where((i) {
       final isPending = i.status == MediaUploadStatus.failed || i.status == MediaUploadStatus.local;
       if (tripId != null && i.tripId != null) {
@@ -372,6 +384,44 @@ class MediaCacheService extends ChangeNotifier {
     }).toList();
     for (final item in pending) {
       await _uploadItem(item, tripId: item.tripId);
+    }
+
+    // 2. Scan allMemoriesProvider for memories whose uploadStatus is local/failed but file exists
+    if (_ref != null) {
+      try {
+        final memories = _ref.read(allMemoriesProvider);
+        final unUploaded = memories.where((m) {
+          final isTargetTrip = tripId == null || m.tripId == tripId;
+          final isPending = m.uploadStatus == MediaUploadStatus.local || m.uploadStatus == MediaUploadStatus.failed;
+          return isTargetTrip && isPending;
+        }).toList();
+
+        for (final m in unUploaded) {
+          final path = m.localPath ?? m.mediaPath;
+          if (path.isNotEmpty && !path.startsWith('http://') && !path.startsWith('https://')) {
+            final file = File(path);
+            if (await file.exists()) {
+              final existingItem = itemForEntity(m.id);
+              if (existingItem != null) {
+                existingItem.status = MediaUploadStatus.local;
+                await _uploadItem(existingItem, tripId: m.tripId);
+              } else {
+                final newItem = register(
+                  localPath: path,
+                  entityType: 'memory',
+                  entityId: m.id,
+                  status: MediaUploadStatus.local,
+                );
+                await _uploadItem(newItem, tripId: m.tripId);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[MediaCacheService] retryFailed scanning allMemoriesProvider error: $e');
+        }
+      }
     }
   }
 
