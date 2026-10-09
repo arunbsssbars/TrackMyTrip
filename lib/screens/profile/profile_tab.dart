@@ -14,6 +14,8 @@ import '../../providers/trip_provider.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../core/utils/currency_formatter.dart';
+import '../../providers/admin_provider.dart';
+import '../admin/super_admin_screen.dart';
 
 class ProfileTab extends ConsumerStatefulWidget {
   const ProfileTab({super.key});
@@ -283,6 +285,7 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final currentUser = ref.watch(currentUserProvider);
     final authService = ref.watch(authServiceProvider);
+    final isSuperAdmin = ref.watch(isSuperAdminProvider);
     final userTrips = ref.watch(tripListProvider);
     final userExpenses = ref.watch(allExpensesProvider);
     final totalExpenseAmount = userExpenses.fold<double>(0.0, (acc, e) => acc + e.totalAmount);
@@ -418,6 +421,39 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                                   fontSize: 10.5,
                                   fontWeight: FontWeight.bold,
                                   color: Color(0xFF10B981),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (isSuperAdmin)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFFF59E0B).withAlpha(60),
+                                blurRadius: 4,
+                                offset: const Offset(0, 1),
+                              ),
+                            ],
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.shield_rounded, size: 12, color: Colors.white),
+                              SizedBox(width: 3.5),
+                              Text(
+                                'SUPER ADMIN',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0.3,
+                                  color: Colors.white,
                                 ),
                               ),
                             ],
@@ -794,6 +830,89 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
               },
             ),
             const SizedBox(height: 14),
+
+            if (isSuperAdmin) ...[
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: isDark
+                        ? [const Color(0xFF1E293B), const Color(0xFF292524)]
+                        : [const Color(0xFFFFFBEB), Colors.white],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFF59E0B).withAlpha(140), width: 1.2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFF59E0B).withAlpha(isDark ? 30 : 20),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF59E0B).withAlpha(40),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.admin_panel_settings_rounded, color: Color(0xFFD97706), size: 24),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    'Super Admin Console',
+                                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+                                  ),
+                                  SizedBox(width: 6),
+                                  Icon(Icons.verified_rounded, size: 14, color: Color(0xFFD97706)),
+                                ],
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'Free-Tier Quota Monitor & Cloud Telemetry',
+                                style: TextStyle(fontSize: 11.5, color: Colors.grey),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        FilledButton.tonalIcon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFFF59E0B).withAlpha(40),
+                            foregroundColor: const Color(0xFFB45309),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            minimumSize: const Size(40, 32),
+                          ),
+                          icon: const Icon(Icons.arrow_forward_rounded, size: 14),
+                          label: const Text('Open', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          onPressed: () {
+                            HapticFeedback.lightImpact();
+                            Navigator.of(context).push(
+                              MaterialPageRoute(builder: (context) => const SuperAdminScreen()),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+            ],
 
             // Section 5 (Loop 126): Local SQLite Cache & Offline Sync Telemetry
             Builder(

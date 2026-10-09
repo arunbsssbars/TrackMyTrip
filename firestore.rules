@@ -12,6 +12,12 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isSuperAdmin() {
+      return isAuthenticated() &&
+        request.auth.token.email != null &&
+        request.auth.token.email.lower() == 'arunbsssbars@gmail.com';
+    }
+
     function isTripMember(tripData) {
       return isAuthenticated() && (
         tripData.creatorId == request.auth.uid ||
@@ -45,7 +51,7 @@ service cloud.firestore {
     // 2. Users collection (user profiles)
     match /users/{userId} {
       allow read: if true;
-      allow write: if isOwner(userId);
+      allow write: if isOwner(userId) || isSuperAdmin();
     }
 
     // 3. Trips collection & Subcollections (Strict RBAC)
