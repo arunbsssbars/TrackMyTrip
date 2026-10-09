@@ -11,9 +11,15 @@ void main() {
     setUp(() {
       SecretConfigService.setMockVariables({
         SecretConfigService.keyAppEnv: 'production',
+        SecretConfigService.keyAppName: 'TrackMyTrip',
+        SecretConfigService.keyAppBaseUrl: 'https://trackmytrip.app',
         SecretConfigService.keyGoogleMapsApiKey: 'AIzaSyD123456789012345678901234567890',
         SecretConfigService.keyFirebaseAppId: '1:123456789012:web:abcdef123456',
         SecretConfigService.keyVaultPepper: 'my_production_salt_2026',
+        SecretConfigService.keyEnableCrashReporting: 'true',
+        SecretConfigService.keyEnableAnalytics: 'false',
+        'CUSTOM_PORT': '8080',
+        'CUSTOM_RATIO': '3.14159',
       });
     });
 
@@ -43,12 +49,38 @@ void main() {
       expect(SecretConfigService.isConfigured(SecretConfigService.keyGoogleMapsApiKey), isTrue);
     });
 
+    test('Typed accessors return accurate parsed values with fallbacks', () {
+      expect(SecretConfigService.getBool(SecretConfigService.keyEnableCrashReporting), isTrue);
+      expect(SecretConfigService.getBool(SecretConfigService.keyEnableAnalytics), isFalse);
+      expect(SecretConfigService.getBool('NON_EXISTENT_FLAG', fallback: true), isTrue);
+
+      expect(SecretConfigService.getInt('CUSTOM_PORT'), equals(8080));
+      expect(SecretConfigService.getInt('MISSING_PORT', fallback: 3000), equals(3000));
+
+      expect(SecretConfigService.getDouble('CUSTOM_RATIO'), closeTo(3.14, 0.01));
+      expect(SecretConfigService.getDouble('MISSING_RATIO', fallback: 1.0), equals(1.0));
+
+      expect(SecretConfigService.has('CUSTOM_PORT'), isTrue);
+      expect(SecretConfigService.has('UNKNOWN_KEY'), isFalse);
+    });
+
+    test('Standard named getters return strongly typed configuration', () {
+      expect(SecretConfigService.appEnv, equals('production'));
+      expect(SecretConfigService.isProduction, isTrue);
+      expect(SecretConfigService.isDevelopment, isFalse);
+      expect(SecretConfigService.appName, equals('TrackMyTrip'));
+      expect(SecretConfigService.appBaseUrl, equals('https://trackmytrip.app'));
+      expect(SecretConfigService.isCrashReportingEnabled, isTrue);
+      expect(SecretConfigService.isAnalyticsEnabled, isFalse);
+    });
+
     test('getMaskedSecretsAuditReport produces sanitized diagnostic map', () {
       final report = SecretConfigService.getMaskedSecretsAuditReport();
       expect(report['isProduction'], isTrue);
       expect(report['googleMapsConfigured'], isTrue);
       expect(report['googleMapsApiKeyMasked'], contains('••••'));
       expect(report['firebaseAppIdMasked'], contains('••••'));
+      expect(report['totalKeysRegistered'], greaterThan(5));
     });
   });
 
@@ -80,7 +112,7 @@ void main() {
       const template = 'AIzaSy_YOUR_GOOGLE_MAPS_API_KEY_HERE';
 
       expect(googleKeyRegex.hasMatch(realKey), isTrue);
-      // Ensure scanner flag identifies the real key
+      expect(googleKeyRegex.hasMatch(template), isFalse);
       expect(realKey.length, equals(39));
     });
 

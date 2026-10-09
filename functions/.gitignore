@@ -1,0 +1,7 @@
+# Cloud Functions for Firebase Git Ignore
+node_modules/
+.runtimeconfig.json
+.env
+.env.*
+npm-debug.log
+yarn-error.log

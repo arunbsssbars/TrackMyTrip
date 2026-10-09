@@ -24,6 +24,7 @@ import 'core/utils/app_logger.dart';
 import 'core/database/app_database.dart';
 import 'core/services/crash_reporting_service.dart';
 import 'core/services/live_currency_service.dart';
+import 'core/services/secret_config_service.dart';
 import 'screens/common/app_error_boundary.dart';
 
 @pragma('vm:entry-point')
@@ -34,6 +35,9 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize multi-tier environment secrets configuration (.env / --dart-define)
+  await SecretConfigService.initialize();
 
   // Lock application strictly to portrait orientation (Point 4)
   await SystemChrome.setPreferredOrientations([

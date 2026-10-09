@@ -38,14 +38,14 @@ jobs:
           if [ -n "${{ secrets.ENV_FILE }}" ]; then
             echo "${{ secrets.ENV_FILE }}" > .env
           else
-            touch .env
+            cp .env.example .env
           fi
 
       - name: Install Dependencies
         run: flutter pub get
 
       - name: Build Android Release APK
-        run: flutter build apk --release
+        run: flutter build apk --release --dart-define-from-file=.env
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4

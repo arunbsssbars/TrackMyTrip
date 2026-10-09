@@ -1,49 +1,61 @@
-# Miscellaneous
+# =================================================================
+# TrackMyTrip - Standard Git Ignore Configuration
+# =================================================================
+
+# Operating System & Editors
+.DS_Store
+*.swp
 *.class
 *.log
 *.pyc
-*.swp
-.DS_Store
 .atom/
 .buildlog/
 .history
 .svn/
 migrate_working_dir/
 
-# IntelliJ related
+# IDE & Editor Configurations
 *.iml
 *.ipr
 *.iws
 .idea/
+.antigravity/
+# .vscode/ (launch configs intentionally managed for team productivity)
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+# Node & Cloud Functions
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
+# Flutter / Dart / Pub Generated Artifacts
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
 /build/
+**/doc/api/
+**/ios/Flutter/.last_build_id
+build/ios_derived
 
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Android Studio will place build artifacts here
+# Android Build Artifacts & Local Files
 /android/app/debug
 /android/app/profile
 /android/app/release
 .kotlin/
+android/local.properties
+android/.gradle/
 
-# Secrets, Keystores & Production Credentials
+# iOS Generated Files
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+
+# Symbolication & Obfuscation
+app.*.symbols
+app.*.map.json
+
+# Secrets, Keystores & Environment Credentials
 **/key.properties
 *.jks
 *.keystore
@@ -51,9 +63,3 @@ app.*.map.json
 !.env.example
 google-services.json.secret
 GoogleService-Info.plist.secret
-
-build/ios_derived
-
-
-build/ios_derived
-

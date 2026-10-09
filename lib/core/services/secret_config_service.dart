@@ -1,20 +1,35 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
-/// Centralized, enterprise-grade secret and environment configuration manager.
-/// Safely manages environment secrets with zero plain-text leaks in logs or diagnostics.
+/// Industry-standard, multi-tier environment secrets manager for Flutter.
+/// 
+/// Resolution Hierarchy:
+/// 1. Compile-Time Definitions (`String.fromEnvironment`) via `--dart-define` / `--dart-define-from-file=.env`
+/// 2. Programmatic in-memory overrides (e.g. for testing)
+/// 3. Local disk `.env` file (Desktop, CLI, Unit Tests)
+/// 4. Flutter Asset Bundle `rootBundle.loadString('.env')` (if bundled as an asset)
+/// 5. Operating System platform environment (`Platform.environment`, guarded for non-web)
+/// 6. Default fallback values
 class SecretConfigService {
   static final Map<String, String> _envVars = {};
   static bool _initialized = false;
 
-  /// Default keys managed by the service
+  // Standard Configuration Keys
   static const String keyAppEnv = 'APP_ENV';
+  static const String keyAppName = 'APP_NAME';
+  static const String keyAppBaseUrl = 'APP_BASE_URL';
   static const String keyGoogleMapsApiKey = 'GOOGLE_MAPS_API_KEY';
   static const String keyFirebaseAppId = 'FIREBASE_APP_ID';
   static const String keyFirebaseProjectId = 'FIREBASE_PROJECT_ID';
+  static const String keyFirebaseApiKey = 'FIREBASE_API_KEY';
   static const String keyVaultPepper = 'APP_VAULT_PEPPER';
+  static const String keyLogLevel = 'LOG_LEVEL';
+  static const String keyEnableCrashReporting = 'ENABLE_CRASH_REPORTING';
+  static const String keyEnableAnalytics = 'ENABLE_ANALYTICS';
+  static const String keyCiRunnerId = 'CI_RUNNER_ID';
 
-  /// Initializes the secret configuration from an in-memory map or local .env file
+  /// Initializes configuration from all available standard layers.
   static Future<void> initialize({Map<String, String>? overrides}) async {
     _envVars.clear();
 
@@ -24,56 +39,150 @@ class SecretConfigService {
       return;
     }
 
-    // Attempt to load from local .env file safely
-    try {
-      final envFile = File('.env');
-      if (await envFile.exists()) {
-        final lines = await envFile.readAsLines();
-        for (final line in lines) {
-          final trimmed = line.trim();
-          if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
-          final separatorIndex = trimmed.indexOf('=');
-          if (separatorIndex > 0) {
-            final key = trimmed.substring(0, separatorIndex).trim();
-            final value = trimmed.substring(separatorIndex + 1).trim();
-            // Strip outer quotes if present
-            final sanitizedValue = _stripOuterQuotes(value);
-            _envVars[key] = sanitizedValue;
-          }
-        }
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[SecretConfigService] Fallback: No .env loaded: $e');
-      }
+    // Layer 1: Check compile-time environment variables
+    _loadCompileTimeDefaults();
+
+    // Layer 2: Load from local disk `.env` file (if accessible on Desktop/CLI/Tests)
+    if (!kIsWeb) {
+      await _loadFromLocalFile();
     }
 
-    // Fallback: Populate platform environment variables if available
-    try {
-      for (final key in [keyAppEnv, keyGoogleMapsApiKey, keyFirebaseAppId, keyFirebaseProjectId, keyVaultPepper]) {
-        if (!_envVars.containsKey(key)) {
-          final fromPlatform = Platform.environment[key];
-          if (fromPlatform != null && fromPlatform.isNotEmpty) {
-            _envVars[key] = fromPlatform;
-          }
-        }
-      }
-    } catch (_) {}
+    // Layer 3: Attempt to load from bundled assets if configured
+    await _loadFromAssetBundle();
+
+    // Layer 4: Populate from Platform.environment where available
+    if (!kIsWeb) {
+      _loadFromPlatformEnvironment();
+    }
 
     _initialized = true;
   }
 
-  static String _stripOuterQuotes(String value) {
-    if ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))) {
-      if (value.length >= 2) {
-        return value.substring(1, value.length - 1);
+  /// Ingests compile-time definitions passed via `--dart-define` or `--dart-define-from-file=.env`
+  static void _loadCompileTimeDefaults() {
+    const knownKeys = [
+      keyAppEnv,
+      keyAppName,
+      keyAppBaseUrl,
+      keyGoogleMapsApiKey,
+      keyFirebaseAppId,
+      keyFirebaseProjectId,
+      keyFirebaseApiKey,
+      keyVaultPepper,
+      keyLogLevel,
+      keyEnableCrashReporting,
+      keyEnableAnalytics,
+      keyCiRunnerId,
+    ];
+
+    for (final key in knownKeys) {
+      final val = String.fromEnvironment(key, defaultValue: '');
+      if (val.isNotEmpty) {
+        _envVars[key] = val;
       }
     }
+  }
+
+  /// Attempts to read `.env` from local file system
+  static Future<void> _loadFromLocalFile() async {
+    try {
+      final file = File('.env');
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        _parseAndMerge(content);
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[SecretConfigService] Notice: Local .env file lookup skipped: $e');
+      }
+    }
+  }
+
+  /// Attempts to read `.env` from Flutter rootBundle assets if present
+  static Future<void> _loadFromAssetBundle() async {
+    try {
+      final assetContent = await rootBundle.loadString('.env');
+      if (assetContent.isNotEmpty) {
+        _parseAndMerge(assetContent);
+      }
+    } catch (_) {
+      // Gracefully expected when .env is not included in pubspec assets
+    }
+  }
+
+  /// Reads from OS environment variables on supported desktop/server platforms
+  static void _loadFromPlatformEnvironment() {
+    try {
+      final env = Platform.environment;
+      for (final entry in env.entries) {
+        // Do not overwrite existing higher-priority keys
+        if (!_envVars.containsKey(entry.key) && entry.value.isNotEmpty) {
+          _envVars[entry.key] = entry.value;
+        }
+      }
+    } catch (_) {
+      // Ignored on platforms where Platform.environment is unsupported
+    }
+  }
+
+  /// Parses raw dotenv content according to standard dotenv specifications
+  static void _parseAndMerge(String rawContent) {
+    final lines = rawContent.split(RegExp(r'\r?\n'));
+    for (final line in lines) {
+      final trimmed = line.trim();
+      // Skip empty lines or pure comment lines
+      if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
+
+      // Strip optional 'export ' prefix
+      var processed = trimmed;
+      if (processed.startsWith('export ') && processed.length > 7) {
+        processed = processed.substring(7).trim();
+      }
+
+      final eqIdx = processed.indexOf('=');
+      if (eqIdx <= 0) continue;
+
+      final key = processed.substring(0, eqIdx).trim();
+      var value = processed.substring(eqIdx + 1).trim();
+
+      // Handle comments and quote stripping
+      value = _cleanValue(value);
+
+      // Do not overwrite keys if compile-time define already took precedence
+      if (!_envVars.containsKey(key) || _envVars[key]!.isEmpty) {
+        _envVars[key] = value;
+      }
+    }
+  }
+
+  /// Cleans and extracts dotenv value stripping quotes and trailing inline comments
+  static String _cleanValue(String value) {
+    if (value.isEmpty) return '';
+
+    // If enclosed in double quotes: "hello # world"
+    if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
+      return value.substring(1, value.length - 1).replaceAll(r'\"', '"');
+    }
+
+    // If enclosed in single quotes: 'hello # world'
+    if (value.startsWith("'") && value.endsWith("'") && value.length >= 2) {
+      return value.substring(1, value.length - 1).replaceAll(r"\'", "'");
+    }
+
+    // If unquoted, strip trailing inline comments starting with '#'
+    final commentIdx = value.indexOf('#');
+    if (commentIdx >= 0) {
+      value = value.substring(0, commentIdx).trim();
+    }
+
     return value;
   }
 
-  /// Retrieves a secret or environment variable by key with fallback
+  // =================================================================
+  // Type-Safe Value Accessors
+  // =================================================================
+
+  /// Retrieves a string configuration value by key with optional fallback
   static String get(String key, {String fallback = ''}) {
     final val = _envVars[key];
     if (val != null && val.isNotEmpty) {
@@ -82,22 +191,79 @@ class SecretConfigService {
     return fallback;
   }
 
-  /// Whether a specific secret key is configured and non-empty
+  /// Retrieves a boolean configuration value
+  static bool getBool(String key, {bool fallback = false}) {
+    final val = _envVars[key]?.trim().toLowerCase();
+    if (val == null || val.isEmpty) return fallback;
+    if (val == 'true' || val == '1' || val == 'yes' || val == 'enabled') return true;
+    if (val == 'false' || val == '0' || val == 'no' || val == 'disabled') return false;
+    return fallback;
+  }
+
+  /// Retrieves an integer configuration value
+  static int getInt(String key, {int fallback = 0}) {
+    final val = _envVars[key]?.trim();
+    if (val == null || val.isEmpty) return fallback;
+    return int.tryParse(val) ?? fallback;
+  }
+
+  /// Retrieves a double configuration value
+  static double getDouble(String key, {double fallback = 0.0}) {
+    final val = _envVars[key]?.trim();
+    if (val == null || val.isEmpty) return fallback;
+    return double.tryParse(val) ?? fallback;
+  }
+
+  /// Checks if a key exists and is non-empty
+  static bool has(String key) {
+    final val = _envVars[key];
+    return val != null && val.trim().isNotEmpty;
+  }
+
+  /// Checks if a key is configured with a real value (not an unreplaced template placeholder)
   static bool isConfigured(String key) {
     final val = _envVars[key];
-    return val != null && val.trim().isNotEmpty && !val.contains('YOUR_') && !val.contains('placeholder');
+    if (val == null || val.trim().isEmpty) return false;
+    final lower = val.toLowerCase();
+    if (lower.contains('your_') ||
+        lower.contains('placeholder') ||
+        lower.contains('example') ||
+        lower.contains('change_in_production')) {
+      return false;
+    }
+    return true;
   }
+
+  // =================================================================
+  // Strongly-Typed Standard App Properties
+  // =================================================================
 
   static String get appEnv => get(keyAppEnv, fallback: kReleaseMode ? 'production' : 'development');
   static bool get isProduction => appEnv.toLowerCase() == 'production';
+  static bool get isStaging => appEnv.toLowerCase() == 'staging';
+  static bool get isDevelopment => appEnv.toLowerCase() == 'development';
+
+  static String get appName => get(keyAppName, fallback: 'TrackMyTrip');
+  static String get appBaseUrl => get(keyAppBaseUrl, fallback: 'https://trackmytrip.app');
 
   static String get googleMapsApiKey => get(keyGoogleMapsApiKey);
   static String get firebaseAppId => get(keyFirebaseAppId);
-  static String get firebaseProjectId => get(keyFirebaseProjectId, fallback: 'trackmytrip-app');
-  static String get vaultPepper => get(keyVaultPepper, fallback: 'trackmytrip_default_salt_2026');
+  static String get firebaseProjectId => get(keyFirebaseProjectId, fallback: 'trackmytrip-sync-2026');
+  static String get firebaseApiKey => get(keyFirebaseApiKey);
+
+  static String get vaultPepper => get(keyVaultPepper, fallback: 'trackmytrip_default_pepper_salt_2026');
+  static String get logLevel => get(keyLogLevel, fallback: kDebugMode ? 'debug' : 'info');
+
+  static bool get isCrashReportingEnabled => getBool(keyEnableCrashReporting, fallback: true);
+  static bool get isAnalyticsEnabled => getBool(keyEnableAnalytics, fallback: true);
+  static String get ciRunnerId => get(keyCiRunnerId, fallback: 'local_env');
+
+  // =================================================================
+  // Zero-Leak Secret Masking & Security Audit
+  // =================================================================
 
   /// Masks a sensitive secret for safe logging, UI display, or diagnostic reporting.
-  /// Example: 'AIzaSyD12345678901234567890' -> 'AIza...7890'
+  /// Example: 'AIzaSyD12345678901234567890' -> 'AIza••••7890'
   static String maskSecret(String? secret, {int visibleLeading = 4, int visibleTrailing = 4}) {
     if (secret == null || secret.trim().isEmpty) {
       return '[NOT CONFIGURED]';
@@ -116,11 +282,15 @@ class SecretConfigService {
     return {
       'appEnv': appEnv,
       'isProduction': isProduction,
+      'appName': appName,
       'googleMapsConfigured': isConfigured(keyGoogleMapsApiKey),
       'googleMapsApiKeyMasked': maskSecret(get(keyGoogleMapsApiKey)),
       'firebaseAppIdConfigured': isConfigured(keyFirebaseAppId),
       'firebaseAppIdMasked': maskSecret(get(keyFirebaseAppId)),
+      'firebaseProjectId': firebaseProjectId,
       'vaultPepperConfigured': isConfigured(keyVaultPepper),
+      'crashReportingEnabled': isCrashReportingEnabled,
+      'analyticsEnabled': isAnalyticsEnabled,
       'totalKeysRegistered': _envVars.length,
       'isInitialized': _initialized,
     };
@@ -132,5 +302,12 @@ class SecretConfigService {
     _envVars.clear();
     _envVars.addAll(mockVars);
     _initialized = true;
+  }
+
+  /// Clears in-memory variables and unsets initialization flag
+  @visibleForTesting
+  static void reset() {
+    _envVars.clear();
+    _initialized = false;
   }
 }
