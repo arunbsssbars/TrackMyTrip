@@ -11,6 +11,10 @@ on:
       - '.github/workflows/build_android.yml'
   workflow_dispatch:
 
+concurrency:
+  group: build-android-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-apk:
     name: Build Android Release APK
@@ -20,6 +24,16 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Cache Gradle Packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
 
       - name: Set up Java JDK
         uses: actions/setup-java@v4
@@ -49,6 +63,11 @@ jobs:
 
       - name: Build Android Release APK
         run: flutter build apk --release --dart-define-from-file=.env
+
+      - name: Validate Release APK Size Budget (< 50MB)
+        run: |
+          chmod +x scripts/measure_bundle_size.sh
+          ./scripts/measure_bundle_size.sh build/app/outputs/flutter-apk/app-release.apk 50.0
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4

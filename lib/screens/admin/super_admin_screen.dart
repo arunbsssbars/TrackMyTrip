@@ -7,6 +7,8 @@ import '../../core/services/admin_service.dart';
 import '../../core/services/offline_sync_engine.dart';
 import '../../core/services/security_service.dart';
 import '../../core/services/secret_config_service.dart';
+import '../../core/services/build_info_service.dart';
+import '../../core/services/canary_health_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/admin_provider.dart';
 
@@ -64,6 +66,82 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _runCanaryProbe() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 14),
+                Text('Probing live endpoints & canary services...'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final result = await CanaryHealthService.runCanaryHealthProbe();
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(
+              result.isHealthy ? Icons.check_circle_rounded : Icons.warning_amber_rounded,
+              color: result.isHealthy ? const Color(0xFF10B981) : Colors.red,
+            ),
+            const SizedBox(width: 8),
+            Text('Canary Health: ${result.healthScore}%', style: const TextStyle(fontSize: 16)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Verdict: ${result.shouldRollback ? "ROLLBACK RECOMMENDED" : "HEALTHY (PRODUCTION READY)"}',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 12.5,
+                color: result.shouldRollback ? Colors.red : const Color(0xFF10B981),
+              ),
+            ),
+            const SizedBox(height: 12),
+            ...result.serviceStatuses.entries.map((e) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.circle, size: 6, color: Colors.grey),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          '${e.key}: ${e.value}',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                )),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Dismiss')),
         ],
       ),
     );
@@ -716,7 +794,7 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                     ),
                     Text(
-                      'Version: ${AdminService.appVersion} • ${AdminService.runtimeEnvironment}',
+                      'Build: ${BuildInfoService.formattedVersion} • ${AdminService.runtimeEnvironment}',
                       style: TextStyle(fontSize: 12, color: isDark ? Colors.white60 : const Color(0xFF64748B)),
                     ),
                   ],
@@ -729,11 +807,15 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
             spacing: 8,
             runSpacing: 8,
             children: [
+              _buildPipelineStatusBadge('Commit', BuildInfoService.commitHash.length > 7 ? BuildInfoService.commitHash.substring(0, 7) : BuildInfoService.commitHash, Colors.indigo, isDark),
               _buildPipelineStatusBadge('CI Quality Gate', 'Automated', Colors.green, isDark),
               _buildPipelineStatusBadge('Android APK Build', 'Automated', Colors.blue, isDark),
               _buildPipelineStatusBadge('iOS Unsigned IPA', 'Automated', Colors.orange, isDark),
               _buildPipelineStatusBadge('DevSecOps Scanner', 'Automated', Colors.purple, isDark),
               _buildPipelineStatusBadge('Firebase IaC Rules', 'Automated', Colors.teal, isDark),
+              _buildPipelineStatusBadge('LCOV Coverage', 'Enforced', Colors.cyan, isDark),
+              _buildPipelineStatusBadge('Bundle Budget', '< 50 MB', Colors.amber, isDark),
+              _buildPipelineStatusBadge('CI Concurrency', 'Auto-Cancel', Colors.deepPurple, isDark),
             ],
           ),
           const SizedBox(height: 16),
@@ -765,6 +847,15 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.tonalIcon(
+              onPressed: _runCanaryProbe,
+              icon: const Icon(Icons.health_and_safety_rounded, size: 16),
+              label: const Text('Execute Live Canary Health Probe', style: TextStyle(fontSize: 12)),
+            ),
           ),
         ],
       ),

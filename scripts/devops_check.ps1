@@ -19,8 +19,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "[PASS] Core unit tests passed." -ForegroundColor Green
 
-Write-Host "`n[3/4] Running DevOps Telemetry, Secrets and Vault Tests..." -ForegroundColor Yellow
-flutter test test/devops_pipeline_and_admin_telemetry_test.dart test/devops_secrets_and_vault_test.dart
+Write-Host "`n[3/4] Running DevOps Telemetry, Secrets, CI/CD Loops and Vault Tests..." -ForegroundColor Yellow
+flutter test test/devops_pipeline_and_admin_telemetry_test.dart test/devops_secrets_and_vault_test.dart test/live_currency_and_crash_reporting_test.dart test/ci_cd_five_loops_test.dart
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[FAIL] DevOps telemetry tests failed!" -ForegroundColor Red
     exit 1

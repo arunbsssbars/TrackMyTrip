@@ -7,6 +7,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+concurrency:
+  group: ci-quality-gate-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   analyze-and-test:
     name: Lint, Test & AQIL Verification
@@ -40,13 +44,22 @@ jobs:
       - name: Static Analysis
         run: flutter analyze lib --fatal-infos
 
-      - name: Unit, Super Admin, DevOps & Secrets Tests
+      - name: Unit, Super Admin, DevOps & Secrets Tests (with Coverage)
         run: |
-          flutter test test/super_admin_test.dart
-          flutter test test/twenty_loop_features_resilience_test.dart
-          flutter test test/devops_pipeline_and_admin_telemetry_test.dart
-          flutter test test/devops_secrets_and_vault_test.dart
-          flutter test test/live_currency_and_crash_reporting_test.dart
+          flutter test --coverage test/super_admin_test.dart test/twenty_loop_features_resilience_test.dart test/devops_pipeline_and_admin_telemetry_test.dart test/devops_secrets_and_vault_test.dart test/live_currency_and_crash_reporting_test.dart test/ci_cd_five_loops_test.dart
+
+      - name: Evaluate Code Coverage
+        run: |
+          chmod +x scripts/parse_coverage.sh
+          ./scripts/parse_coverage.sh 40.0 coverage/lcov.info
 
       - name: Comprehensive AQIL Multi-Viewport Tests
         run: flutter test test/aqil_all_screens_comprehensive_test.dart
+
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-coverage-report
+          path: coverage/lcov.info
+          retention-days: 14

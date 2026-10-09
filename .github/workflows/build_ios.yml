@@ -11,6 +11,10 @@ on:
       - 'pubspec.yaml'
       - '.github/workflows/build_ios.yml'
 
+concurrency:
+  group: build-ios-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-ios:
     name: Build iOS IPA (Unsigned)

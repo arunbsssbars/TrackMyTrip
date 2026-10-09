@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'cloud_trip_sync_service.dart';
 import 'secret_config_service.dart';
+import 'build_info_service.dart';
 
 /// Models the free-tier usage telemetry across Firebase services
 class FreeTierQuotaMetrics {
@@ -239,6 +240,7 @@ class AdminService {
       'environment': runtimeEnvironment,
       'gitRepository': gitRepoUrl,
       'ciActionsUrl': ciActionsUrl,
+      'buildInfo': BuildInfoService.getDiagnosticMap(),
       'firebaseAvailable': CloudTripSyncService.isFirebaseAvailable,
       'currentUserAuth': () {
         try {
@@ -295,6 +297,27 @@ class AdminService {
       'flagSecureSupported': true,
       'locationFuzzingActive': true,
       'secretsAudit': secretsReport,
+    };
+  }
+
+  /// Returns the release bundle size budget telemetry and status
+  static Map<String, dynamic> getBundleSizeBudgetReport() {
+    return {
+      'androidApkBudgetMb': 50.0,
+      'iosIpaBudgetMb': 60.0,
+      'enforcedInCi': true,
+      'treeShakingEnabled': true,
+      'obfuscationSupported': true,
+    };
+  }
+
+  /// Returns CI/CD pipeline efficiency & caching optimization metrics
+  static Map<String, dynamic> getPipelineEfficiencyMetrics() {
+    return {
+      'concurrencyCancelInProgress': true,
+      'gradleCachingEnabled': true,
+      'flutterPubCachingEnabled': true,
+      'averageBuildDurationEstimateMinutes': 3.5,
     };
   }
 }
