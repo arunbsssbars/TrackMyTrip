@@ -153,8 +153,19 @@ class TombstoneService {
   /// Returns an immutable set of all tombstoned memory IDs
   static Set<String> getAllTombstonedMemoryIds() => Set.unmodifiable(_tombstonedMemoryIds);
 
+  /// Removes a trip tombstone if explicitly requested (e.g. undo delete or recreation)
+  static Future<void> removeTripTombstone(String tripId) async {
+    final cleanId = tripId.trim();
+    if (cleanId.isEmpty) return;
+    _tombstonedTripIds.remove(cleanId);
+    try {
+      await _prefs?.setStringList(_prefsKey, _tombstonedTripIds.toList());
+      await _db?.removeTombstonedTrip(cleanId);
+    } catch (_) {}
+  }
+
   /// Normalises a tombstone set in place: trims whitespace and drops blank or
-  /// placeholder entries ("null"). Returns the number of entries removed.
+  /// placeholder entries ("null", "undefined"). Returns the number of entries removed.
   ///
   /// Valid tombstones are never expired — removing them could allow a stale
   /// cloud snapshot to resurrect a deleted trip.
@@ -163,7 +174,7 @@ class TombstoneService {
     final before = ids.length;
     final normalised = ids
         .map((id) => id.trim())
-        .where((id) => id.isNotEmpty && id.toLowerCase() != 'null')
+        .where((id) => id.isNotEmpty && id.toLowerCase() != 'null' && id.toLowerCase() != 'undefined')
         .toSet();
     ids
       ..clear()

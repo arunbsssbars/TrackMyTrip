@@ -163,9 +163,14 @@ class AuditLogNotifier extends StateNotifier<List<TripAuditLog>> {
       }
     }
     final updated = [log, ...state];
-    updated.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-    state = updated;
-    await _storage.saveAllAuditLogs(updated);
+    updated.sort((a, b) {
+      final cmp = b.timestamp.compareTo(a.timestamp);
+      if (cmp != 0) return cmp;
+      return b.id.compareTo(a.id);
+    });
+    final capped = updated.length > 1000 ? updated.sublist(0, 1000) : updated;
+    state = capped;
+    await _storage.saveAllAuditLogs(capped);
     _triggerCloudSync(log.tripId);
     if (broadcast) {
       try {

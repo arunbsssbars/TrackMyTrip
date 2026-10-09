@@ -23,13 +23,20 @@ class ImageCompressionService {
     int imageQuality = standardQuality,
     CameraDevice preferredCameraDevice = CameraDevice.rear,
   }) async {
-    return await picker.pickImage(
-      source: source,
-      maxWidth: maxWidth,
-      maxHeight: maxHeight,
-      imageQuality: imageQuality,
-      preferredCameraDevice: preferredCameraDevice,
-    );
+    try {
+      return await picker.pickImage(
+        source: source,
+        maxWidth: maxWidth,
+        maxHeight: maxHeight,
+        imageQuality: imageQuality,
+        preferredCameraDevice: preferredCameraDevice,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[ImageCompressionService] Failed to pick image: $e');
+      }
+      return null;
+    }
   }
 
   /// Downscales raw byte buffers if dimensions exceed maxWidth or maxHeight.
@@ -122,7 +129,8 @@ class ImageCompressionService {
       final thumbBytes = await compressBytes(bytes, maxWidth: size, maxHeight: size);
 
       final ext = p.extension(sourceFile.path);
-      final thumbPath = sourceFile.path.replaceAll(ext, '_thumb$ext');
+      final basePath = p.withoutExtension(sourceFile.path);
+      final thumbPath = '${basePath}_thumb$ext';
       final thumbFile = File(thumbPath);
       await thumbFile.writeAsBytes(thumbBytes);
       return thumbFile;
@@ -134,7 +142,8 @@ class ImageCompressionService {
   /// Returns the corresponding thumbnail file path for a given image file
   static File getThumbnailFile(File sourceFile) {
     final ext = p.extension(sourceFile.path);
-    final thumbPath = sourceFile.path.replaceAll(ext, '_thumb$ext');
+    final basePath = p.withoutExtension(sourceFile.path);
+    final thumbPath = '${basePath}_thumb$ext';
     return File(thumbPath);
   }
 }

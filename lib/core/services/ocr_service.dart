@@ -57,28 +57,47 @@ class OcrService {
         }
       }
 
-      // 2. Extract Max Amount (Look for currency patterns)
-      final amountRegex = RegExp(r'(?:total|amount|amt|net|inr|rs|usd|\$|€|£)?\s*[:=]?\s*([0-9]{1,5}(?:[.,][0-9]{2}))', caseSensitive: false);
+      // 2. Extract Max Amount (Prioritize labeled Total/Grand Total/Net Amount)
+      final totalLabeledRegex = RegExp(
+        r'(?:grand\s*total|net\s*payable|total\s*amount|final\s*amount|total|net|paid)\s*[:=]?\s*(?:rs\.?|inr|\$|€|£|₹)?\s*([0-9]{1,7}(?:[.,][0-9]{1,2})?)',
+        caseSensitive: false,
+      );
       for (final line in lines) {
-        final matches = amountRegex.allMatches(line);
-        for (final match in matches) {
+        final match = totalLabeledRegex.firstMatch(line);
+        if (match != null) {
           final amtStr = match.group(1)?.replaceAll(',', '.') ?? '0';
           final val = double.tryParse(amtStr) ?? 0.0;
-          if (val > maxAmount && val < 50000) {
+          if (val > 0 && val < 10000000) {
             maxAmount = val;
+            break;
           }
         }
       }
 
-      // Fallback amount check if standard total label wasn't matched
+      // Fallback 1: Look for currency patterns
       if (maxAmount == 0.0) {
-        final fallbackRegex = RegExp(r'(\d{1,5}[.,]\d{2})');
+        final amountRegex = RegExp(r'(?:inr|rs\.?|\$|€|£|₹)\s*[:=]?\s*([0-9]{1,6}(?:[.,][0-9]{2})?)', caseSensitive: false);
+        for (final line in lines) {
+          final matches = amountRegex.allMatches(line);
+          for (final match in matches) {
+            final amtStr = match.group(1)?.replaceAll(',', '.') ?? '0';
+            final val = double.tryParse(amtStr) ?? 0.0;
+            if (val > maxAmount && val < 1000000) {
+              maxAmount = val;
+            }
+          }
+        }
+      }
+
+      // Fallback 2: General decimal amount check
+      if (maxAmount == 0.0) {
+        final fallbackRegex = RegExp(r'(\d{1,6}[.,]\d{2})');
         for (final line in lines) {
           final matches = fallbackRegex.allMatches(line);
           for (final match in matches) {
             final amtStr = match.group(1)?.replaceAll(',', '.') ?? '0';
             final val = double.tryParse(amtStr) ?? 0.0;
-            if (val > maxAmount && val < 50000) {
+            if (val > maxAmount && val < 1000000) {
               maxAmount = val;
             }
           }

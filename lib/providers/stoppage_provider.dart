@@ -119,7 +119,8 @@ class StoppageNotifier extends StateNotifier<List<Stoppage>> {
   }
 
   Future<void> deleteStoppage(String stoppageId, {bool broadcast = true}) async {
-    final existing = state.firstWhere((s) => s.id == stoppageId, orElse: () => state.first);
+    final existing = state.where((s) => s.id == stoppageId).firstOrNull;
+    if (existing == null) return;
     state = state.where((s) => s.id != stoppageId).toList();
     await _storage.saveAllStoppages(state);
 
@@ -160,6 +161,15 @@ class StoppageNotifier extends StateNotifier<List<Stoppage>> {
       try {
         _ref.read(firestoreSyncServiceProvider).pushStoppage(stop);
       } catch (_) {}
+      try {
+        _ref.read(offlineSyncEngineProvider).enqueueMutation(
+          action: MutationAction.updateStoppage,
+          entityType: 'stoppage',
+          entityId: stop.id,
+          tripId: stop.tripId,
+          payload: stop.toJson(),
+        );
+      } catch (_) {}
     }
   }
 }
@@ -175,7 +185,13 @@ final currentTripStoppagesProvider = Provider<List<Stoppage>>((ref) {
 
   final allStoppages = ref.watch(allStoppagesProvider);
   final tripStoppages = allStoppages.where((s) => s.tripId == currentTrip.id).toList();
-  tripStoppages.sort((a, b) => a.arrivedAt.compareTo(b.arrivedAt));
+  tripStoppages.sort((a, b) {
+    final cmp = a.arrivedAt.compareTo(b.arrivedAt);
+    if (cmp != 0) return cmp;
+    final orderCmp = a.orderIndex.compareTo(b.orderIndex);
+    if (orderCmp != 0) return orderCmp;
+    return a.id.compareTo(b.id);
+  });
   return tripStoppages;
 });
 
@@ -199,7 +215,13 @@ final tripStoppagesProvider = Provider.family<List<Stoppage>, String?>((ref, tri
   if (tripId == null) return [];
   final allStoppages = ref.watch(allStoppagesProvider);
   final tripStoppages = allStoppages.where((s) => s.tripId == tripId).toList();
-  tripStoppages.sort((a, b) => a.arrivedAt.compareTo(b.arrivedAt));
+  tripStoppages.sort((a, b) {
+    final cmp = a.arrivedAt.compareTo(b.arrivedAt);
+    if (cmp != 0) return cmp;
+    final orderCmp = a.orderIndex.compareTo(b.orderIndex);
+    if (orderCmp != 0) return orderCmp;
+    return a.id.compareTo(b.id);
+  });
   return tripStoppages;
 });
 

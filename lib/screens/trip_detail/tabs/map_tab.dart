@@ -312,12 +312,21 @@ class _MapTabState extends ConsumerState<MapTab> with TickerProviderStateMixin {
 
     if (points.isEmpty) return;
 
-    double minLat = points.first.latitude;
-    double maxLat = points.first.latitude;
-    double minLng = points.first.longitude;
-    double maxLng = points.first.longitude;
+    final validPoints = points.where((p) =>
+        !p.latitude.isNaN && !p.latitude.isInfinite &&
+        !p.longitude.isNaN && !p.longitude.isInfinite &&
+        (p.latitude != 0.0 || p.longitude != 0.0) &&
+        p.latitude >= -90.0 && p.latitude <= 90.0 &&
+        p.longitude >= -180.0 && p.longitude <= 180.0).toList();
 
-    for (final p in points) {
+    if (validPoints.isEmpty) return;
+
+    double minLat = validPoints.first.latitude;
+    double maxLat = validPoints.first.latitude;
+    double minLng = validPoints.first.longitude;
+    double maxLng = validPoints.first.longitude;
+
+    for (final p in validPoints) {
       if (p.latitude < minLat) minLat = p.latitude;
       if (p.latitude > maxLat) maxLat = p.latitude;
       if (p.longitude < minLng) minLng = p.longitude;

@@ -122,12 +122,19 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
     // Normalize spacing and hyphens: "trip - 7482" -> "TRIP-7482"
     clean = clean.replaceAll(RegExp(r'\s*-\s*'), '-');
 
-    // Auto-extract room code from rich invite messages if pasted
-    final match = RegExp(r'TRIP-[A-Z0-9]{4,8}', caseSensitive: false).firstMatch(clean);
-    if (match != null) {
-      clean = match.group(0)!.toUpperCase();
-    } else if (RegExp(r'^[A-Za-z0-9]{4,8}$').hasMatch(clean)) {
-      clean = 'TRIP-${clean.toUpperCase()}';
+    // Deep-link URL parameter extraction (e.g. https://.../?code=9K2M or /join/9K2M)
+    final urlMatch = RegExp(r'(?:code=|join\/)([A-Za-z0-9-]{4,10})', caseSensitive: false).firstMatch(clean);
+    if (urlMatch != null) {
+      final codeParam = urlMatch.group(1)!.toUpperCase();
+      clean = codeParam.startsWith('TRIP-') ? codeParam : 'TRIP-$codeParam';
+    } else {
+      // Auto-extract room code from rich invite messages if pasted
+      final match = RegExp(r'TRIP-[A-Z0-9]{4,8}', caseSensitive: false).firstMatch(clean);
+      if (match != null) {
+        clean = match.group(0)!.toUpperCase();
+      } else if (RegExp(r'^[A-Za-z0-9]{4,8}$').hasMatch(clean)) {
+        clean = 'TRIP-${clean.toUpperCase()}';
+      }
     }
 
     // 1. Try local snapshot decoder

@@ -656,7 +656,13 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     final expenses = ref.watch(currentTripExpensesProvider);
     final memories = ref.watch(currentTripMemoriesProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final chronologicalStoppages = [...stoppages]..sort((a, b) => a.arrivedAt.compareTo(b.arrivedAt));
+    final chronologicalStoppages = [...stoppages]..sort((a, b) {
+      final cmp = a.arrivedAt.compareTo(b.arrivedAt);
+      if (cmp != 0) return cmp;
+      final orderCmp = a.orderIndex.compareTo(b.orderIndex);
+      if (orderCmp != 0) return orderCmp;
+      return a.id.compareTo(b.id);
+    });
     final activeStoppage = chronologicalStoppages.where((s) => s.isOngoing).lastOrNull;
 
     final availableCategories = stoppages.map((s) => s.category).toSet().toList()..sort();

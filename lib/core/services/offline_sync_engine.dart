@@ -30,7 +30,10 @@ class OfflineSyncEngine extends ChangeNotifier {
     _lastSyncError = null;
     notifyListeners();
   }
-  int get pendingCount => _storage.getPendingMutations().where((m) => m.status == SyncStatus.pending || m.status == SyncStatus.failed).length;
+  int get pendingCount => _storage
+      .getPendingMutations()
+      .where((m) => (m.status == SyncStatus.pending || m.status == SyncStatus.failed) && m.retryCount < 8)
+      .length;
   List<SyncMutation> get pendingMutations => _storage.getPendingMutations();
 
   Timer? _autoSyncTimer;
@@ -45,6 +48,18 @@ class OfflineSyncEngine extends ChangeNotifier {
         syncPendingMutationsNow();
       }
     });
+  }
+
+  /// Reset retry count for failed mutations so user can manually re-trigger sync
+  Future<void> retryFailedMutations() async {
+    final all = _storage.getPendingMutations();
+    for (final m in all) {
+      if (m.status == SyncStatus.failed && m.retryCount >= 8) {
+        await _storage.enqueueMutation(m.copyWith(retryCount: 0, status: SyncStatus.pending));
+      }
+    }
+    notifyListeners();
+    await syncPendingMutationsNow();
   }
 
   /// Consolidates and deduplicates mutations for the same entity:
@@ -224,7 +239,10 @@ class OfflineSyncEngine extends ChangeNotifier {
     notifyListeners();
 
     bool allSuccess = true;
-    final tripIdsToSync = pending.map((m) => m.tripId).toSet();
+    final tripIdsToSync = pending
+        .map((m) => m.tripId.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet();
 
     for (final tripId in tripIdsToSync) {
       try {
@@ -303,6 +321,11 @@ class OfflineSyncEngine extends ChangeNotifier {
 
     // Process individual pending mutations with per-item resilience
     for (final mutation in pending) {
+      if (mutation.tripId.trim().isEmpty || mutation.entityId.trim().isEmpty) {
+        // Defensive prune: malformed mutation with blank ID cannot map to Firestore paths
+        await _storage.removeMutation(mutation.id);
+        continue;
+      }
       if (mutation.retryCount >= 8) {
         // Skip mutations that repeatedly failed to prevent hammering network
         continue;

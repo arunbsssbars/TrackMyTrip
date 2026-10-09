@@ -23,11 +23,13 @@ class UserAvatar extends StatelessWidget {
   });
 
   static Color parseColor(String? hexString, {String? seedName}) {
-    if (hexString != null && hexString.isNotEmpty) {
+    if (hexString != null && hexString.trim().isNotEmpty) {
       try {
-        String clean = hexString.replaceAll('#', '');
+        String clean = hexString.trim().replaceAll('#', '');
         if (!clean.startsWith('0x') && !clean.startsWith('0X')) {
-          if (clean.length == 6) {
+          if (clean.length == 3) {
+            clean = 'FF${clean[0]}${clean[0]}${clean[1]}${clean[1]}${clean[2]}${clean[2]}';
+          } else if (clean.length == 6) {
             clean = 'FF$clean';
           }
           clean = '0x$clean';
@@ -36,7 +38,7 @@ class UserAvatar extends StatelessWidget {
       } catch (_) {}
     }
 
-    if (seedName != null && seedName.isNotEmpty) {
+    if (seedName != null && seedName.trim().isNotEmpty) {
       final colors = [
         const Color(0xFF0F766E), // Teal
         const Color(0xFFF97316), // Orange
@@ -59,9 +61,11 @@ class UserAvatar extends StatelessWidget {
     if (clean.isEmpty) return '?';
     final parts = clean.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
     if (parts.length >= 2) {
-      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+      final first = parts[0].characters.firstOrNull ?? '';
+      final second = parts[1].characters.firstOrNull ?? '';
+      return '$first$second'.toUpperCase();
     }
-    return clean[0].toUpperCase();
+    return (clean.characters.firstOrNull ?? '?').toUpperCase();
   }
 
   @override

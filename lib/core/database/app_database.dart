@@ -477,6 +477,12 @@ class AppDatabase {
     }
   }
 
+  Future<void> removeTombstonedTrip(String tripId) async {
+    try {
+      await _db.delete('tombstoned_trips', where: 'tripId = ?', whereArgs: [tripId]);
+    } catch (_) {}
+  }
+
   // --- STOPPAGES ---
   Future<List<Stoppage>> getStoppages(String tripId) async {
     final rows = await _db.query(

@@ -169,11 +169,12 @@ class CurrencyFormatter {
 
   /// Converts an amount between currencies using estimated benchmark rates
   static double convertEstimated(double amount, String fromCurrency, String toCurrency) {
-    if (fromCurrency.toUpperCase() == toCurrency.toUpperCase()) return amount;
+    if (amount.isNaN || amount.isInfinite) return 0.0;
+    if (fromCurrency.trim().toUpperCase() == toCurrency.trim().toUpperCase()) return roundTo2Decimals(amount);
     final inrRateFrom = getEstimatedRateToInr(fromCurrency);
     final inrRateTo = getEstimatedRateToInr(toCurrency);
-    if (inrRateTo <= 0) return amount;
+    if (inrRateTo <= 0) return roundTo2Decimals(amount);
     final inrAmount = amount * inrRateFrom;
-    return inrAmount / inrRateTo;
+    return roundTo2Decimals(inrAmount / inrRateTo);
   }
 }

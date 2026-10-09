@@ -233,6 +233,13 @@ class ProximityAlertService extends ChangeNotifier {
     notifyListeners();
   }
 
+  static bool isValidCoordinate(double? lat, double? lng) {
+    if (lat == null || lng == null) return false;
+    if (lat.isNaN || lng.isNaN || lat.isInfinite || lng.isInfinite) return false;
+    if (lat == 0.0 && lng == 0.0) return false; // Null Island GPS initialization glitch
+    return lat >= -90.0 && lat <= 90.0 && lng >= -180.0 && lng <= 180.0;
+  }
+
   /// Calculates distances to all companions and triggers separation alerts if exceeding threshold
   void evaluateCompanionProximities({
     required String tripId,
@@ -242,11 +249,12 @@ class ProximityAlertService extends ChangeNotifier {
     required String myName,
   }) {
     if (!_strayAlertsEnabled) return;
+    if (!isValidCoordinate(myLat, myLng)) return;
     final trip = _storage.getTrips().where((t) => t.id == tripId).firstOrNull;
     if (trip != null && trip.isEnded) return;
 
     for (final companion in companions) {
-      if (companion.isCurrentUser || companion.latitude == null || companion.longitude == null) {
+      if (companion.isCurrentUser || !isValidCoordinate(companion.latitude, companion.longitude)) {
         continue;
       }
 
@@ -304,10 +312,12 @@ class ProximityAlertService extends ChangeNotifier {
     required String myName,
   }) {
     if (!_stoppageAlertsEnabled) return;
+    if (!isValidCoordinate(myLat, myLng)) return;
     final trip = _storage.getTrips().where((t) => t.id == tripId).firstOrNull;
     if (trip != null && trip.isEnded) return;
 
     for (final stop in activeStoppages) {
+      if (!isValidCoordinate(stop.latitude, stop.longitude)) continue;
       final distance = Geolocator.distanceBetween(
         myLat,
         myLng,

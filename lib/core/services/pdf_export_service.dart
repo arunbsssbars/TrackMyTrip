@@ -82,64 +82,62 @@ class PdfExportService {
             if (stoppages.isEmpty)
               pw.Text('No stoppages recorded.', style: const pw.TextStyle(color: PdfColors.grey700))
             else
-              pw.ListView.builder(
-                itemCount: stoppages.length,
-                itemBuilder: (context, index) {
-                  final stop = stoppages[index];
-                  final stopExpenses = expenses.where((e) => e.stoppageId == stop.id).toList();
-                  final stopTotal = stopExpenses.fold<double>(0, (sum, e) => sum + e.totalAmount);
+              ...stoppages.asMap().entries.map((entry) {
+                final index = entry.key;
+                final stop = entry.value;
+                final stopExpenses = expenses.where((e) => e.stoppageId == stop.id).toList();
+                final stopTotal = stopExpenses.fold<double>(0, (sum, e) => sum + (e.totalAmount.isNaN ? 0.0 : e.totalAmount));
 
-                  return pw.Container(
-                    margin: const pw.EdgeInsets.only(bottom: 8),
-                    padding: const pw.EdgeInsets.all(10),
-                    decoration: pw.BoxDecoration(
-                      border: pw.Border.all(color: PdfColors.grey300),
-                      borderRadius: pw.BorderRadius.circular(6),
-                    ),
-                    child: pw.Row(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        pw.Container(
-                          width: 24,
-                          height: 24,
-                          decoration: const pw.BoxDecoration(
-                            color: PdfColors.teal700,
-                            shape: pw.BoxShape.circle,
-                          ),
-                          child: pw.Center(
-                            child: pw.Text('${index + 1}',
-                                style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 10)),
-                          ),
+                return pw.Container(
+                  margin: const pw.EdgeInsets.only(bottom: 8),
+                  padding: const pw.EdgeInsets.all(10),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.grey300),
+                    borderRadius: pw.BorderRadius.circular(6),
+                  ),
+                  child: pw.Row(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Container(
+                        width: 24,
+                        height: 24,
+                        decoration: const pw.BoxDecoration(
+                          color: PdfColors.teal700,
+                          shape: pw.BoxShape.circle,
                         ),
-                        pw.SizedBox(width: 12),
-                        pw.Expanded(
-                          child: pw.Column(
-                            crossAxisAlignment: pw.CrossAxisAlignment.start,
-                            children: [
-                              pw.Text(stop.name, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
-                              if (stop.address != null)
-                                pw.Text(stop.address!, style: const pw.TextStyle(color: PdfColors.grey600, fontSize: 9)),
-                              pw.SizedBox(height: 2),
-                              pw.Text(
-                                'Category: ${stop.category}  |  Arrived: ${DateFormatter.formatDateTime(stop.arrivedAt)}',
-                                style: const pw.TextStyle(color: PdfColors.grey700, fontSize: 9),
-                              ),
-                              if (stop.notes != null)
-                                pw.Text('Note: ${stop.notes!}',
-                                    style: pw.TextStyle(color: PdfColors.grey800, fontStyle: pw.FontStyle.italic, fontSize: 9)),
-                            ],
-                          ),
+                        child: pw.Center(
+                          child: pw.Text('${index + 1}',
+                              style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 10)),
                         ),
-                        if (stopTotal > 0)
-                          pw.Text(
-                            _formatPdfCurrency(stopTotal, currency: trip.defaultCurrency),
-                            style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.teal800, fontSize: 11),
-                          ),
-                      ],
-                    ),
-                  );
-                },
-              ),
+                      ),
+                      pw.SizedBox(width: 12),
+                      pw.Expanded(
+                        child: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text(stop.name, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
+                            if (stop.address != null)
+                              pw.Text(stop.address!, style: const pw.TextStyle(color: PdfColors.grey600, fontSize: 9)),
+                            pw.SizedBox(height: 2),
+                            pw.Text(
+                              'Category: ${stop.category}  |  Arrived: ${DateFormatter.formatDateTime(stop.arrivedAt)}',
+                              style: const pw.TextStyle(color: PdfColors.grey700, fontSize: 9),
+                            ),
+                            if (stop.notes != null)
+                              pw.Text('Note: ${stop.notes!}',
+                                  style: pw.TextStyle(color: PdfColors.grey800, fontStyle: pw.FontStyle.italic, fontSize: 9)),
+                          ],
+                        ),
+                      ),
+                      if (stopTotal > 0)
+                        pw.Text(
+                          _formatPdfCurrency(stopTotal, currency: trip.defaultCurrency),
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.teal800, fontSize: 11),
+                        ),
+                    ],
+                  ),
+                );
+              }),
 
             pw.SizedBox(height: 20),
 
@@ -260,7 +258,8 @@ class PdfExportService {
 
   static String _formatPdfCurrency(double amount, {String? currency}) {
     final cur = (currency ?? 'INR').trim();
-    final formattedNum = NumberFormat('#,##,##0.00').format(amount);
+    final safeAmount = (amount.isNaN || amount.isInfinite) ? 0.0 : amount;
+    final formattedNum = NumberFormat('#,##,##0.00').format(safeAmount);
     if (cur.toUpperCase() == 'INR' || cur.contains('₹')) {
       return 'INR $formattedNum';
     }

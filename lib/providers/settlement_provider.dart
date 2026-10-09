@@ -55,7 +55,10 @@ class SettlementNotifier extends StateNotifier<List<Settlement>> {
   }
 
   Future<void> addSettlement(Settlement settlement) async {
-    if (settlement.amount <= 0 || settlement.payerMemberId == settlement.receiverMemberId) {
+    if (settlement.amount.isNaN ||
+        settlement.amount.isInfinite ||
+        settlement.amount <= 0 ||
+        settlement.payerMemberId == settlement.receiverMemberId) {
       return;
     }
     state = [settlement, ...state.where((s) => s.id != settlement.id)];
@@ -113,6 +116,12 @@ class SettlementNotifier extends StateNotifier<List<Settlement>> {
   }
 
   Future<void> updateSettlement(Settlement updated) async {
+    if (updated.amount.isNaN ||
+        updated.amount.isInfinite ||
+        updated.amount <= 0 ||
+        updated.payerMemberId == updated.receiverMemberId) {
+      return;
+    }
     state = state.map((s) => s.id == updated.id ? updated : s).toList();
     await _storage.saveAllSettlements(state);
 
@@ -149,7 +158,8 @@ class SettlementNotifier extends StateNotifier<List<Settlement>> {
   }
 
   Future<void> deleteSettlement(String settlementId) async {
-    final existing = state.firstWhere((s) => s.id == settlementId, orElse: () => state.first);
+    final existing = state.where((s) => s.id == settlementId).firstOrNull;
+    if (existing == null) return;
     state = state.where((s) => s.id != settlementId).toList();
     await _storage.saveAllSettlements(state);
 

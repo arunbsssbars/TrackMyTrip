@@ -38,6 +38,12 @@ class UserService {
     return _cachedUsers[id] ?? _registeredUsers.where((u) => u.id == id).firstOrNull;
   }
 
+  static String? _safeString(dynamic value) {
+    if (value == null) return null;
+    final s = value.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+
   static Future<UserProfile?> fetchUserProfile(String id, {bool forceRefresh = false}) async {
     final local = getUserById(id);
     if (!forceRefresh) {
@@ -49,17 +55,17 @@ class UserService {
         final doc = await fs.collection('users').doc(id).get();
         if (doc.exists && doc.data() != null) {
           final data = doc.data()!;
-          final username = (data['username'] as String? ?? 'user').trim();
-          final displayName = (data['displayName'] as String? ?? data['name'] as String? ?? username).trim();
+          final username = _safeString(data['username']) ?? 'user';
+          final displayName = _safeString(data['displayName']) ?? _safeString(data['name']) ?? username;
           final profile = UserProfile(
             id: id,
-            username: username.isNotEmpty ? username : 'user',
-            displayName: displayName.isNotEmpty ? displayName : 'Traveler',
-            email: data['email'] as String?,
-            phone: data['phone'] as String?,
-            colorHex: data['colorHex'] as String? ?? '0xFF3B82F6',
-            bio: (data['bio'] as String?)?.trim().isNotEmpty == true ? (data['bio'] as String).trim() : null,
-            avatarUrl: data['avatarUrl'] as String?,
+            username: username,
+            displayName: displayName,
+            email: _safeString(data['email']),
+            phone: _safeString(data['phone']),
+            colorHex: _safeString(data['colorHex']) ?? '0xFF3B82F6',
+            bio: _safeString(data['bio']),
+            avatarUrl: _safeString(data['avatarUrl']),
           );
           _cachedUsers[id] = profile;
           return profile;

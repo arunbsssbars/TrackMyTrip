@@ -74,7 +74,7 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
         final doc = await FirebaseFirestore.instance.collection('users').doc(senderId).get();
         if (doc.exists && doc.data() != null) {
           final data = doc.data()!;
-          phone = (data['phone'] as String? ?? data['phoneNumber'] as String? ?? data['mobile'] as String?)?.trim();
+          phone = (data['phone']?.toString() ?? data['phoneNumber']?.toString() ?? data['mobile']?.toString())?.trim();
         }
       } catch (_) {}
     }

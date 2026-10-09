@@ -213,10 +213,19 @@ class _EditTripDialogState extends ConsumerState<EditTripDialog> {
       return;
     }
 
-    final budgetVal = double.tryParse(_budgetController.text.trim());
-    if (budgetVal != null && budgetVal < 0) {
-      AppSnackBar.showError(context, 'Trip budget cannot be negative.');
-      return;
+    double? budgetVal;
+    final budgetText = _budgetController.text.trim();
+    if (budgetText.isNotEmpty) {
+      budgetVal = double.tryParse(budgetText);
+      if (budgetVal == null || budgetVal.isNaN || budgetVal.isInfinite || budgetVal < 0) {
+        AppSnackBar.showError(context, 'Please enter a valid positive budget amount.');
+        return;
+      }
+      if (budgetVal > 1000000000000.0) {
+        AppSnackBar.showError(context, 'Budget amount exceeds maximum supported limit.');
+        return;
+      }
+      budgetVal = CurrencyFormatter.roundTo2Decimals(budgetVal);
     }
 
     final canProceed = await TripGuardHelper.ensureTripOpenForEdit(

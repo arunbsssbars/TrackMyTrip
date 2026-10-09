@@ -33,7 +33,8 @@ class Stoppage {
 
   Duration? get duration {
     if (departedAt == null) return null;
-    return departedAt!.difference(arrivedAt);
+    final diff = departedAt!.difference(arrivedAt);
+    return diff.isNegative ? Duration.zero : diff;
   }
 
   String get formattedDuration {
@@ -46,6 +47,7 @@ class Stoppage {
       return 'Ongoing: ${diff.inMinutes}m';
     }
     final d = departedAt!.difference(arrivedAt);
+    if (d.isNegative) return '0m';
     if (d.inHours >= 1) {
       return '${d.inHours}h ${d.inMinutes % 60}m';
     }

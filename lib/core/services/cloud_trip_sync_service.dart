@@ -101,16 +101,17 @@ class CloudTripSyncService {
   /// Fetches a live trip package from the cloud by room code
   static Future<TripPackage?> fetchTripByCode(String inputCode) async {
     String cleanCode = inputCode.trim().toUpperCase();
+    if (cleanCode.isEmpty) return null;
     if (!cleanCode.startsWith('TRIP-') && cleanCode.length == 4) {
       cleanCode = 'TRIP-$cleanCode';
     }
 
     try {
       final docSnapshot = await _firestore.collection('rooms').doc(cleanCode).get();
-      if (docSnapshot.exists) {
+      if (docSnapshot.exists && docSnapshot.data() != null) {
         final data = docSnapshot.data()!;
-        if (data.containsKey('package')) {
-          final pkgMap = data['package'] as Map<String, dynamic>;
+        if (data['package'] is Map) {
+          final pkgMap = Map<String, dynamic>.from(data['package'] as Map);
           final pkg = TripPackage.fromJson(pkgMap);
           registerRoomCode(pkg.trip.id, cleanCode);
           return pkg;
@@ -142,10 +143,10 @@ class CloudTripSyncService {
           .doc(roomCode)
           .snapshots()
           .listen((docSnapshot) {
-      if (docSnapshot.exists) {
+      if (docSnapshot.exists && docSnapshot.data() != null) {
         final data = docSnapshot.data()!;
-        if (data.containsKey('package')) {
-          final pkgMap = data['package'] as Map<String, dynamic>;
+        if (data['package'] is Map) {
+          final pkgMap = Map<String, dynamic>.from(data['package'] as Map);
           final remotePkg = TripPackage.fromJson(pkgMap);
           final safeMemories = remotePkg.memories.where((m) => !TombstoneService.isMemoryTombstoned(m.id)).toList();
           final filteredPkg = TripPackage(

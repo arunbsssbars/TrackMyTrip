@@ -24,6 +24,9 @@ class UniversalBottomBar extends ConsumerWidget {
     final unreadAlerts = ref.watch(proximityAlertServiceProvider).unreadCount;
     final pendingInvites = ref.watch(invitationProvider).length;
     final totalActivityUnread = unreadAlerts + pendingInvites;
+    final textScaler = MediaQuery.textScalerOf(context);
+    final scale = textScaler.scale(1.0);
+    final barHeight = (60.0 + (scale > 1.0 ? (scale - 1.0) * 14.0 : 0.0)).clamp(60.0, 78.0);
 
     return Container(
       decoration: BoxDecoration(
@@ -45,7 +48,7 @@ class UniversalBottomBar extends ConsumerWidget {
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 60,
+          height: barHeight,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
