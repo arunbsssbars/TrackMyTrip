@@ -265,18 +265,24 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
     final metricsAsync = ref.watch(adminMetricsProvider);
     final offlineEngine = ref.watch(offlineSyncEngineProvider);
     final screenWidth = MediaQuery.sizeOf(context).width;
-    final contentPadding = screenWidth > 800 ? (screenWidth - 700) / 2 : 16.0;
+    final contentPadding = screenWidth > 800
+        ? (screenWidth - 700) / 2
+        : (screenWidth < 340 ? 10.0 : 16.0);
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: const Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.shield_rounded, color: Color(0xFF6366F1), size: 22),
             SizedBox(width: 8),
-            Text(
-              'Super Admin Console',
-              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+            Flexible(
+              child: Text(
+                'Super Admin Console',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
@@ -430,7 +436,10 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 4,
                   children: [
                     Text(
                       'SUPER ADMIN',
@@ -441,7 +450,6 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
                         color: isDark ? const Color(0xFF818CF8) : const Color(0xFF4F46E5),
                       ),
                     ),
-                    const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
@@ -474,62 +482,96 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
 
   Widget _buildExecutiveKpiBar(bool isDark, FreeTierQuotaMetrics metrics) {
     final readsPct = metrics.firestoreReadsPercent;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _buildKpiChip(
-              icon: Icons.local_fire_department_rounded,
-              iconColor: const Color(0xFFF97316),
-              label: 'Firestore',
-              value: '${readsPct.toStringAsFixed(0)}%',
-              sub: '${metrics.firestoreEstimatedReads} reads',
-              isDark: isDark,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 340;
+        final chipFirestore = _buildKpiChip(
+          icon: Icons.local_fire_department_rounded,
+          iconColor: const Color(0xFFF97316),
+          label: 'Firestore',
+          value: '${readsPct.toStringAsFixed(0)}%',
+          sub: '${metrics.firestoreEstimatedReads} reads',
+          isDark: isDark,
+        );
+        final chipRtdb = _buildKpiChip(
+          icon: Icons.bolt_rounded,
+          iconColor: const Color(0xFF38BDF8),
+          label: 'RTDB',
+          value: '${metrics.rtdbActiveConnections}',
+          sub: '${metrics.rtdbStorageMb.toStringAsFixed(1)} MB',
+          isDark: isDark,
+        );
+        final chipStorage = _buildKpiChip(
+          icon: Icons.cloud_done_rounded,
+          iconColor: const Color(0xFF0284C7),
+          label: metrics.isCloudinaryActive ? 'Cloudinary' : 'Storage',
+          value: metrics.isCloudinaryActive
+              ? '${metrics.cloudinaryStorageMb.toStringAsFixed(1)} MB'
+              : '${metrics.storageUsedMb.toStringAsFixed(1)} MB',
+          sub: metrics.isCloudinaryActive ? '25 GB cap' : '5 GB free',
+          isDark: isDark,
+        );
+        final chipLatency = _buildKpiChip(
+          icon: Icons.speed_rounded,
+          iconColor: const Color(0xFF10B981),
+          label: 'Latency',
+          value: metrics.firestoreLatencyMs != null ? '${metrics.firestoreLatencyMs} ms' : 'Online',
+          sub: 'Spark Plan',
+          isDark: isDark,
+        );
+
+        if (isNarrow) {
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
             ),
-          ),
-          Container(width: 1, height: 34, color: isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
-          Expanded(
-            child: _buildKpiChip(
-              icon: Icons.bolt_rounded,
-              iconColor: const Color(0xFF38BDF8),
-              label: 'RTDB',
-              value: '${metrics.rtdbActiveConnections}',
-              sub: '${metrics.rtdbStorageMb.toStringAsFixed(1)} MB',
-              isDark: isDark,
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(child: chipFirestore),
+                    Container(width: 1, height: 34, color: isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+                    Expanded(child: chipRtdb),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Divider(height: 1, color: isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(child: chipStorage),
+                    Container(width: 1, height: 34, color: isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+                    Expanded(child: chipLatency),
+                  ],
+                ),
+              ],
             ),
+          );
+        }
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
           ),
-          Container(width: 1, height: 34, color: isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
-          Expanded(
-            child: _buildKpiChip(
-              icon: Icons.cloud_done_rounded,
-              iconColor: const Color(0xFF0284C7),
-              label: metrics.isCloudinaryActive ? 'Cloudinary' : 'Storage',
-              value: metrics.isCloudinaryActive
-                  ? '${metrics.cloudinaryStorageMb.toStringAsFixed(1)} MB'
-                  : '${metrics.storageUsedMb.toStringAsFixed(1)} MB',
-              sub: metrics.isCloudinaryActive ? '25 GB cap' : '5 GB free',
-              isDark: isDark,
-            ),
+          child: Row(
+            children: [
+              Expanded(child: chipFirestore),
+              Container(width: 1, height: 34, color: isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+              Expanded(child: chipRtdb),
+              Container(width: 1, height: 34, color: isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+              Expanded(child: chipStorage),
+              Container(width: 1, height: 34, color: isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+              Expanded(child: chipLatency),
+            ],
           ),
-          Container(width: 1, height: 34, color: isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
-          Expanded(
-            child: _buildKpiChip(
-              icon: Icons.speed_rounded,
-              iconColor: const Color(0xFF10B981),
-              label: 'Latency',
-              value: metrics.firestoreLatencyMs != null ? '${metrics.firestoreLatencyMs} ms' : 'Online',
-              sub: 'Spark Plan',
-              isDark: isDark,
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -547,13 +589,14 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(icon, size: 12, color: iconColor),
               const SizedBox(width: 3),
-              Flexible(
+              Expanded(
                 child: Text(
                   label,
+                  textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.w600),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -579,19 +622,24 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
   }
 
   Widget _buildSegmentSwitcher(bool isDark) {
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      padding: const EdgeInsets.all(3),
-      child: Row(
-        children: [
-          _buildSegmentButton(0, 'Quotas & Cloud', Icons.cloud_done_rounded, isDark),
-          _buildSegmentButton(1, 'Diagnostics', Icons.speed_rounded, isDark),
-          _buildSegmentButton(2, 'DevOps & Security', Icons.security_rounded, isDark),
-        ],
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 340;
+        return Container(
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.all(3),
+          child: Row(
+            children: [
+              _buildSegmentButton(0, isNarrow ? 'Quotas' : 'Quotas & Cloud', Icons.cloud_done_rounded, isDark),
+              _buildSegmentButton(1, 'Diagnostics', Icons.speed_rounded, isDark),
+              _buildSegmentButton(2, isNarrow ? 'DevOps' : 'DevOps & Security', Icons.security_rounded, isDark),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -631,11 +679,12 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
                     : (isDark ? Colors.grey[400] : const Color(0xFF64748B)),
               ),
               const SizedBox(width: 4),
-              Flexible(
+              Expanded(
                 child: Text(
                   label,
+                  textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 10.5,
                     fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
                     color: isSelected
                         ? (isDark ? Colors.white : AppTheme.primary)
@@ -743,13 +792,16 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Row(
-                children: [
-                  Icon(Icons.local_fire_department_rounded, color: Color(0xFFF97316), size: 20),
-                  SizedBox(width: 6),
-                  Text('Cloud Firestore', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-                ],
+              const Icon(Icons.local_fire_department_rounded, color: Color(0xFFF97316), size: 20),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text(
+                  'Cloud Firestore',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
@@ -759,7 +811,7 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
                 child: Text(
                   readsPct > 80 ? 'QUOTA WARNING' : 'HEALTHY • SAFE',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 10,
                     fontWeight: FontWeight.bold,
                     color: readsPct > 80 ? Colors.red : const Color(0xFF10B981),
                   ),
@@ -834,7 +886,13 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
             children: [
               Icon(Icons.bolt_rounded, color: Color(0xFFEAB308), size: 20),
               SizedBox(width: 6),
-              Text('Firebase Realtime Database', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              Expanded(
+                child: Text(
+                  'Firebase Realtime Database',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 14),
@@ -894,6 +952,7 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
         children: [
           // Header Row
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
                 padding: const EdgeInsets.all(8),
@@ -908,15 +967,17 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 6,
+                      runSpacing: 4,
                       children: [
                         const Text(
                           'Cloudinary Media Storage',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                         ),
-                        const SizedBox(width: 6),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                           decoration: BoxDecoration(
                             color: statusColor.withAlpha(25),
                             borderRadius: BorderRadius.circular(6),
@@ -924,7 +985,7 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
                           child: Text(
                             metrics.isCloudinaryActive ? '25 GB CAP' : 'INACTIVE',
                             style: TextStyle(
-                              fontSize: 9.5,
+                              fontSize: 9,
                               fontWeight: FontWeight.w900,
                               color: statusColor,
                             ),
@@ -935,18 +996,20 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
                     const SizedBox(height: 2),
                     Text(
                       'Cloud: ${metrics.cloudinaryCloudName} • Preset: Active • FHD Opt: ON',
-                      style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                      style: TextStyle(fontSize: 10.5, color: isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
               ),
+              const SizedBox(width: 4),
               OutlinedButton.icon(
                 onPressed: _runCloudinaryProbe,
-                icon: const Icon(Icons.radar_rounded, size: 14),
-                label: const Text('Ping', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                icon: const Icon(Icons.radar_rounded, size: 13),
+                label: const Text('Ping', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold)),
                 style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
@@ -968,18 +1031,49 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
           const SizedBox(height: 8),
 
           // Storage Telemetry Row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                '${metrics.cloudinaryStorageMb.toStringAsFixed(1)} MB / 25,600 MB',
-                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-              ),
-              Text(
-                '${storagePct.toStringAsFixed(1)}% Used (25 GB Cap)',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: statusColor),
-              ),
-            ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isNarrow = constraints.maxWidth < 280;
+              if (isNarrow) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${metrics.cloudinaryStorageMb.toStringAsFixed(1)} MB / 25,600 MB',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${storagePct.toStringAsFixed(1)}% Used (25 GB Cap)',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: statusColor),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                );
+              }
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${metrics.cloudinaryStorageMb.toStringAsFixed(1)} MB / 25,600 MB',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      '${storagePct.toStringAsFixed(1)}% Used (25 GB Cap)',
+                      textAlign: TextAlign.end,
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: statusColor),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 10),
 
@@ -996,42 +1090,46 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Photos Stored', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                      const Text('Photos Stored', style: TextStyle(fontSize: 9.5, color: Colors.grey)),
                       const SizedBox(height: 2),
                       Text(
                         '${metrics.cloudinaryEstimatedPhotoCount}',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(width: 1, height: 26, color: isDark ? Colors.white12 : const Color(0xFFCBD5E1)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Remaining Cap', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                      const SizedBox(height: 2),
-                      Text(
-                        '~$remainingPhotosEstimate photos',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF10B981)),
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
                 ),
-                Container(width: 1, height: 26, color: isDark ? Colors.white12 : const Color(0xFFCBD5E1)),
-                const SizedBox(width: 12),
+                Container(width: 1, height: 24, color: isDark ? Colors.white12 : const Color(0xFFCBD5E1)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Remaining Cap', style: TextStyle(fontSize: 9.5, color: Colors.grey)),
+                      const SizedBox(height: 2),
+                      Text(
+                        '~$remainingPhotosEstimate photos',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF10B981)),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                Container(width: 1, height: 24, color: isDark ? Colors.white12 : const Color(0xFFCBD5E1)),
+                const SizedBox(width: 8),
                 const Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Optimization', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                      Text('Optimization', style: TextStyle(fontSize: 9.5, color: Colors.grey)),
                       SizedBox(height: 2),
                       Text(
                         '1080p (75%)',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF0284C7)),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: Color(0xFF0284C7)),
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
@@ -1080,71 +1178,109 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
   }
 
   Widget _buildAuthAndSecurityRow(bool isDark, FreeTierQuotaMetrics metrics) {
-    return Row(
-      children: [
-        // Auth
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.people_alt_rounded, color: Color(0xFF8B5CF6), size: 18),
-                    SizedBox(width: 6),
-                    Text('Authentication', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '${metrics.authTotalUsers} / 50K',
-                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-                ),
-                const SizedBox(height: 4),
-                const Text('Free Quota: 50,000 MAUs', style: TextStyle(fontSize: 10.5, color: Colors.grey)),
-              ],
-            ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 340;
+        final authCard = Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
           ),
-        ),
-        const SizedBox(width: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.people_alt_rounded, color: Color(0xFF8B5CF6), size: 18),
+                  SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Authentication',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${metrics.authTotalUsers} / 50K',
+                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Free Quota: 50K MAUs',
+                style: TextStyle(fontSize: 10.5, color: Colors.grey),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        );
 
-        // Security Vault
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
-            ),
-            child: const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.shield_moon_rounded, color: Color(0xFF10B981), size: 18),
-                    SizedBox(width: 6),
-                    Text('Hardware Vault', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  ],
-                ),
-                SizedBox(height: 8),
-                Text(
-                  'AES-256 GCM',
-                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-                ),
-                SizedBox(height: 4),
-                Text('Keystore: Enforced', style: TextStyle(fontSize: 10.5, color: Color(0xFF10B981))),
-              ],
-            ),
+        final vaultCard = Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
           ),
-        ),
-      ],
+          child: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.shield_moon_rounded, color: Color(0xFF10B981), size: 18),
+                  SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Hardware Vault',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 8),
+              Text(
+                'AES-256 GCM',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              SizedBox(height: 4),
+              Text(
+                'Keystore: Enforced',
+                style: TextStyle(fontSize: 10.5, color: Color(0xFF10B981)),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        );
+
+        if (isNarrow) {
+          return Column(
+            children: [
+              authCard,
+              const SizedBox(height: 10),
+              vaultCard,
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(child: authCard),
+            const SizedBox(width: 10),
+            Expanded(child: vaultCard),
+          ],
+        );
+      },
     );
   }
 
@@ -1161,24 +1297,30 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildLatencyItem(
-                'Firestore RTT',
-                metrics.firestoreLatencyMs != null ? '${metrics.firestoreLatencyMs} ms' : 'Offline',
-                metrics.firestoreLatencyMs != null && metrics.firestoreLatencyMs! < 300
-                    ? const Color(0xFF10B981)
-                    : Colors.amber,
+              Expanded(
+                child: _buildLatencyItem(
+                  'Firestore RTT',
+                  metrics.firestoreLatencyMs != null ? '${metrics.firestoreLatencyMs} ms' : 'Offline',
+                  metrics.firestoreLatencyMs != null && metrics.firestoreLatencyMs! < 300
+                      ? const Color(0xFF10B981)
+                      : Colors.amber,
+                ),
               ),
               Container(height: 30, width: 1, color: isDark ? Colors.white12 : Colors.black12),
-              _buildLatencyItem(
-                'Gateway RTT',
-                metrics.rtdbLatencyMs != null ? '${metrics.rtdbLatencyMs} ms' : 'Healthy',
-                const Color(0xFF10B981),
+              Expanded(
+                child: _buildLatencyItem(
+                  'Gateway RTT',
+                  metrics.rtdbLatencyMs != null ? '${metrics.rtdbLatencyMs} ms' : 'Healthy',
+                  const Color(0xFF10B981),
+                ),
               ),
               Container(height: 30, width: 1, color: isDark ? Colors.white12 : Colors.black12),
-              _buildLatencyItem(
-                'Outbox Queue',
-                '${engine.pendingCount} pending',
-                engine.pendingCount == 0 ? const Color(0xFF10B981) : Colors.orange,
+              Expanded(
+                child: _buildLatencyItem(
+                  'Outbox Queue',
+                  '${engine.pendingCount} pending',
+                  engine.pendingCount == 0 ? const Color(0xFF10B981) : Colors.orange,
+                ),
               ),
             ],
           ),
@@ -1190,9 +1332,19 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
   Widget _buildLatencyItem(String label, String value, Color color) {
     return Column(
       children: [
-        Text(value, style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: color)),
+        Text(
+          value,
+          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: color),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         const SizedBox(height: 2),
-        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 10.5, color: Colors.grey),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
       ],
     );
   }
@@ -1211,15 +1363,24 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Active Live Rooms: ${metrics.firestoreRoomsCount}',
-                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
-              ),
-              if (_lastCleanedCount != null)
-                Text(
-                  'Last cleaned: $_lastCleanedCount',
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
+              Flexible(
+                child: Text(
+                  'Active Live Rooms: ${metrics.firestoreRoomsCount}',
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                  overflow: TextOverflow.ellipsis,
                 ),
+              ),
+              if (_lastCleanedCount != null) ...[
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    'Last cleaned: $_lastCleanedCount',
+                    textAlign: TextAlign.end,
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 6),
@@ -1238,8 +1399,10 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
                 ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.cleaning_services_rounded, size: 16, color: Color(0xFFF97316)),
             label: Text(
-              _isCleaningRooms ? 'Scanning & Purging...' : 'Clean Stale Rooms (> 30 Days)',
-              style: const TextStyle(color: Color(0xFFF97316), fontWeight: FontWeight.bold, fontSize: 12.5),
+              _isCleaningRooms ? 'Scanning...' : 'Clean Stale Rooms (> 30 Days)',
+              style: const TextStyle(color: Color(0xFFF97316), fontWeight: FontWeight.bold, fontSize: 11.5),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -1262,15 +1425,49 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-            Text(
-              '${current.toStringAsFixed(0)} / ${limit.toStringAsFixed(0)} $unit (${percent.toStringAsFixed(1)}%)',
-              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: progressColor),
-            ),
-          ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isNarrow = constraints.maxWidth < 280;
+            if (isNarrow) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${current.toStringAsFixed(0)} / ${limit.toStringAsFixed(0)} $unit (${percent.toStringAsFixed(1)}%)',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: progressColor),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              );
+            }
+            return Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    label,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    '${current.toStringAsFixed(0)} / ${limit.toStringAsFixed(0)} $unit (${percent.toStringAsFixed(1)}%)',
+                    textAlign: TextAlign.end,
+                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: progressColor),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 5),
         ClipRRect(
