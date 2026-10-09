@@ -153,13 +153,13 @@ void main() {
       expect(await CloudinaryService.isQuotaExceeded(), isFalse);
 
       // Simulate 21 GB consumed (warning threshold >= 20 GB)
-      const int twentyOneGb = (21 * 1024 * 1024 * 1024);
+      const int twentyOneGb = 21 * 1024 * 1024 * 1024;
       await CloudinaryService.setSimulatedConsumedBytes(twentyOneGb);
       expect(await CloudinaryService.isQuotaWarning(), isTrue);
       expect(await CloudinaryService.isQuotaExceeded(), isFalse);
 
       // Simulate 25 GB consumed (exceeded threshold)
-      const int twentyFiveGb = (25 * 1024 * 1024 * 1024);
+      const int twentyFiveGb = 25 * 1024 * 1024 * 1024;
       await CloudinaryService.setSimulatedConsumedBytes(twentyFiveGb);
       expect(await CloudinaryService.isQuotaExceeded(), isTrue);
       expect(await CloudinaryService.getConsumedStoragePercent(), equals(100.0));
@@ -172,7 +172,7 @@ void main() {
       });
 
       // Simulate 26 GB consumed (strictly exceeds 25 GB limit)
-      const int overLimit = (26 * 1024 * 1024 * 1024);
+      const int overLimit = 26 * 1024 * 1024 * 1024;
       await CloudinaryService.setSimulatedConsumedBytes(overLimit);
 
       // Verify that no HTTP network call is even attempted

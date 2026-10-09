@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/services/user_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/design_system/design_system.dart';
@@ -1167,10 +1168,200 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
               ),
             ),
             ],
+            const SizedBox(height: 20),
+            const Divider(),
+            const SizedBox(height: 12),
+
+            // Store Compliance: Legal & Privacy Disclosures
+            Center(
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 12,
+                runSpacing: 8,
+                children: [
+                  TextButton.icon(
+                    onPressed: () => _showPrivacyPolicyDialog(context, isDark),
+                    icon: const Icon(Icons.shield_outlined, size: 16),
+                    label: const Text(
+                      'Privacy Policy',
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => _showTermsDialog(context, isDark),
+                    icon: const Icon(Icons.description_outlined, size: 16),
+                    label: const Text(
+                      'Terms of Service',
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: Text(
+                'TrackMyTrip v1.0.0 (Build 1) • Production Release',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.grey[500] : const Color(0xFF94A3B8),
+                ),
+              ),
+            ),
             const SizedBox(height: 24),
           ],
         ),
       ),
+    );
+  }
+
+  void _showPrivacyPolicyDialog(BuildContext context, bool isDark) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.shield_rounded, color: AppTheme.primary, size: 22),
+            SizedBox(width: 8),
+            Text('Privacy & Data Security', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'TrackMyTrip is engineered with privacy-by-design architecture adhering to OWASP Mobile MASVS principles.',
+                  style: TextStyle(fontSize: 12.5, height: 1.4),
+                ),
+                const SizedBox(height: 12),
+                _buildPrivacyPillar(
+                  '🛰️ Precise & Background GPS',
+                  'Location is used strictly during active trips for live convoy tracking and companion safety alerts. Optional coordinate fuzzing is available. Tracking terminates immediately when trips conclude.',
+                  isDark,
+                ),
+                const SizedBox(height: 10),
+                _buildPrivacyPillar(
+                  '📷 Memories & Media Storage',
+                  'Photos and receipts are compressed on-device and stored in dedicated cloud buckets with binary magic byte validation. They are visible only to verified trip members.',
+                  isDark,
+                ),
+                const SizedBox(height: 10),
+                _buildPrivacyPillar(
+                  '🔐 Hardware Keystore Vault',
+                  'Sensitive credentials and tokens are encrypted with platform hardware keystores (Android Keystore / iOS Keychain AES-256 GCM).',
+                  isDark,
+                ),
+                const SizedBox(height: 10),
+                _buildPrivacyPillar(
+                  '🚫 Zero Ad SDKs & Tracking',
+                  'TrackMyTrip contains zero advertising networks, zero third-party brokers, and never sells user data.',
+                  isDark,
+                ),
+                const SizedBox(height: 10),
+                _buildPrivacyPillar(
+                  '🗑️ Permanent Right to Erasure',
+                  'You may permanently purge your account and all associated trips, expenses, and records at any time.',
+                  isDark,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              final uri = Uri.parse('https://github.com/arunbsssbars/TrackMyTrip/blob/main/PRIVACY_POLICY.md');
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+            },
+            child: const Text('View Online Policy'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTermsDialog(BuildContext context, bool isDark) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.description_rounded, color: AppTheme.primary, size: 22),
+            SizedBox(width: 8),
+            Text('Terms of Service', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'By using TrackMyTrip, you agree to collaborative travel planning under the following terms:',
+                  style: TextStyle(fontSize: 12.5, height: 1.4),
+                ),
+                const SizedBox(height: 12),
+                _buildPrivacyPillar(
+                  '1. Safe Driving & Navigation',
+                  'TrackMyTrip is a collaborative trip companion. Never interact with the application while operating a motor vehicle. Always adhere to local traffic safety laws.',
+                  isDark,
+                ),
+                const SizedBox(height: 10),
+                _buildPrivacyPillar(
+                  '2. Companion Responsibility',
+                  'Room join codes allow co-travelers to view shared itineraries and expenses. Only share 6-character room codes with trusted travel companions.',
+                  isDark,
+                ),
+                const SizedBox(height: 10),
+                _buildPrivacyPillar(
+                  '3. Fair Resource Usage',
+                  'Free cloud storage and synchronization are provided for legitimate personal trip planning. Automated abuse or quota spamming is strictly prohibited.',
+                  isDark,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Agree & Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPrivacyPillar(String title, String description, bool isDark) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+        const SizedBox(height: 2),
+        Text(
+          description,
+          style: TextStyle(
+            fontSize: 11.5,
+            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+            height: 1.35,
+          ),
+        ),
+      ],
     );
   }
 

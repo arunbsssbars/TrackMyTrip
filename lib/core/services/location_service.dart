@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
@@ -209,6 +210,50 @@ class LocationService {
     }
 
     return permission == LocationPermission.always || permission == LocationPermission.whileInUse;
+  }
+
+  /// Displays Google Play required prominent in-app disclosure before requesting location permissions
+  static Future<bool> showProminentLocationDisclosureDialog(BuildContext context) async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.location_on_rounded, color: AppTheme.primary, size: 24),
+            SizedBox(width: 8),
+            Text('Location Disclosure', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'TrackMyTrip collects location data to enable real-time convoy tracking with travel companions, proximity safety alerts, and automatic trip milestone logging even when the app is closed or running in the background during an active journey.',
+              style: TextStyle(fontSize: 13.5, height: 1.4),
+            ),
+            SizedBox(height: 12),
+            Text(
+              '• Your location is only broadcast during active trips you join or create.\n• Location is never used for advertising or sold to third parties.\n• You can pause tracking or enable privacy coordinate fuzzing at any time.',
+              style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B), height: 1.35),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Deny'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
   }
 
   static Future<Position?> getCurrentPosition({bool promptIfDenied = false}) async {
