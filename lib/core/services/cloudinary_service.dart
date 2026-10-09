@@ -4,15 +4,37 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'image_compression_service.dart';
 import 'secret_config_service.dart';
 
-/// Cloudinary media service providing free, card-free cloud media uploads
-/// and responsive dynamic URL image optimizations.
+/// Cloudinary media service providing free, zero-card cloud media uploads,
+/// strict 25 GB free quota enforcement, pre-upload image optimizations,
+/// and responsive dynamic URL image transformations.
 class CloudinaryService {
   final http.Client _httpClient;
 
   CloudinaryService({http.Client? httpClient})
       : _httpClient = httpClient ?? http.Client();
+
+  // =================================================================
+  // 25 GB Quota Bounds & Protection Limits
+  // =================================================================
+  /// 25 GB maximum free-tier quota in Megabytes (MB)
+  static const double maxQuotaMb = 25600.0;
+
+  /// 25 GB maximum free-tier quota in Bytes (26,843,545,600)
+  static const double maxQuotaBytes = 25.0 * 1024 * 1024 * 1024;
+
+  /// Warning threshold at 80% (20,480 MB)
+  static const double warningQuotaMb = 20480.0;
+
+  /// Critical threshold at 95% (24,320 MB)
+  static const double criticalQuotaMb = 24320.0;
+
+  static const String _keyConsumedBytes = 'cloudinary_consumed_bytes';
+  static int _inMemoryBytes = 0;
+  static bool _initializedFromPrefs = false;
 
   /// Whether Cloudinary cloud credentials (cloud_name + unsigned preset) are configured
   bool get isConfigured => SecretConfigService.isCloudinaryConfigured;
@@ -27,7 +49,86 @@ class CloudinaryService {
   Uri get _uploadEndpoint =>
       Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/image/upload');
 
+  // =================================================================
+  // Quota Telemetry & Enforcement Methods
+  // =================================================================
+
+  /// Retrieves consumed storage in Megabytes (MB)
+  static Future<double> getConsumedStorageMb({SharedPreferences? prefs}) async {
+    final bytes = await getConsumedBytes(prefs: prefs);
+    return bytes / (1024.0 * 1024.0);
+  }
+
+  /// Retrieves consumed storage in raw Bytes
+  static Future<int> getConsumedBytes({SharedPreferences? prefs}) async {
+    if (!_initializedFromPrefs) {
+      try {
+        final sp = prefs ?? await SharedPreferences.getInstance();
+        _inMemoryBytes = sp.getInt(_keyConsumedBytes) ?? 0;
+        _initializedFromPrefs = true;
+      } catch (_) {
+        // Fallback to in-memory bytes if SharedPreferences unavailable in test harness
+      }
+    }
+    return _inMemoryBytes;
+  }
+
+  /// Records uploaded bytes to persistent storage
+  static Future<void> recordUploadBytes(int bytes, {SharedPreferences? prefs}) async {
+    if (bytes <= 0) return;
+    _inMemoryBytes += bytes;
+    try {
+      final sp = prefs ?? await SharedPreferences.getInstance();
+      await sp.setInt(_keyConsumedBytes, _inMemoryBytes);
+      _initializedFromPrefs = true;
+    } catch (_) {}
+  }
+
+  /// Checks if the 25 GB quota limit has been reached or exceeded
+  static Future<bool> isQuotaExceeded({SharedPreferences? prefs}) async {
+    final bytes = await getConsumedBytes(prefs: prefs);
+    return bytes >= maxQuotaBytes;
+  }
+
+  /// Percentage of the 25 GB quota consumed (0.0% – 100.0%)
+  static Future<double> getConsumedStoragePercent({SharedPreferences? prefs}) async {
+    final bytes = await getConsumedBytes(prefs: prefs);
+    final pct = (bytes / maxQuotaBytes) * 100.0;
+    return pct.clamp(0.0, 100.0);
+  }
+
+  /// Warning condition: storage >= 80% (20 GB)
+  static Future<bool> isQuotaWarning({SharedPreferences? prefs}) async {
+    final mb = await getConsumedStorageMb(prefs: prefs);
+    return mb >= warningQuotaMb;
+  }
+
+  /// Critical condition: storage >= 95% (23.75 GB)
+  static Future<bool> isQuotaCritical({SharedPreferences? prefs}) async {
+    final mb = await getConsumedStorageMb(prefs: prefs);
+    return mb >= criticalQuotaMb;
+  }
+
+  /// Manually injects consumed bytes (useful for tests or syncing from cloud telemetry)
+  @visibleForTesting
+  static Future<void> setSimulatedConsumedBytes(int bytes, {SharedPreferences? prefs}) async {
+    _inMemoryBytes = bytes;
+    _initializedFromPrefs = true;
+    try {
+      final sp = prefs ?? await SharedPreferences.getInstance();
+      await sp.setInt(_keyConsumedBytes, bytes);
+    } catch (_) {}
+  }
+
+  // =================================================================
+  // Upload Pipeline (Guaranteed Image Optimization)
+  // =================================================================
+
   /// Uploads a local image [File] to Cloudinary using an unsigned upload preset.
+  /// Enforces:
+  /// 1. 25 GB quota cap guard (blocks upload if 25 GB reached to prevent billing).
+  /// 2. Guaranteed pre-upload compression down to FHD 1080p and 75-80% quality.
+  /// 3. In-flight Cloudinary auto format and quality parameters.
   /// Returns the secure HTTPS URL of the uploaded asset, or `null` on failure.
   Future<String?> uploadImageFile({
     required File file,
@@ -43,6 +144,14 @@ class CloudinaryService {
       return null;
     }
 
+    // 25 GB Quota guard: prevent charges by halting remote upload
+    if (await isQuotaExceeded()) {
+      if (kDebugMode) {
+        debugPrint('[CloudinaryService] Upload blocked: 25 GB free quota reached to prevent charges.');
+      }
+      return null;
+    }
+
     try {
       if (!await file.exists()) {
         if (kDebugMode) {
@@ -51,10 +160,17 @@ class CloudinaryService {
         return null;
       }
 
+      // Mandatory Pre-Upload Optimization: ensure file is compressed before transmitting
+      final optimizedFile = await ImageCompressionService.compressFile(file);
+
       onProgress?.call(0.1);
 
       final request = http.MultipartRequest('POST', _uploadEndpoint);
       request.fields['upload_preset'] = uploadPreset;
+      // Cloudinary cloud-side auto-quality & auto-format headers
+      request.fields['quality'] = 'auto:good';
+      request.fields['fetch_format'] = 'auto';
+
       if (folder != null && folder.isNotEmpty) {
         request.fields['folder'] = folder;
       }
@@ -65,7 +181,7 @@ class CloudinaryService {
         request.fields['tags'] = tags.values.join(',');
       }
 
-      final multipartFile = await http.MultipartFile.fromPath('file', file.path);
+      final multipartFile = await http.MultipartFile.fromPath('file', optimizedFile.path);
       request.files.add(multipartFile);
 
       onProgress?.call(0.3);
@@ -81,9 +197,12 @@ class CloudinaryService {
       if (streamedResponse.statusCode >= 200 && streamedResponse.statusCode < 300) {
         final data = jsonDecode(responseBody) as Map<String, dynamic>;
         final secureUrl = data['secure_url'] as String?;
+        final uploadedBytes = data['bytes'] as int? ?? (await optimizedFile.length());
+        await recordUploadBytes(uploadedBytes);
+
         onProgress?.call(1.0);
         if (kDebugMode) {
-          debugPrint('[CloudinaryService] Upload succeeded: $secureUrl');
+          debugPrint('[CloudinaryService] Upload succeeded ($uploadedBytes bytes): $secureUrl');
         }
         return secureUrl;
       } else {
@@ -103,6 +222,7 @@ class CloudinaryService {
   }
 
   /// Uploads raw image [Uint8List] bytes directly to Cloudinary (useful for Web or memory buffers).
+  /// Enforces 25 GB limit and pre-upload compression.
   /// Returns the secure HTTPS URL or `null` on failure.
   Future<String?> uploadImageBytes({
     required Uint8List bytes,
@@ -119,11 +239,25 @@ class CloudinaryService {
       return null;
     }
 
+    // 25 GB Quota guard
+    if (await isQuotaExceeded()) {
+      if (kDebugMode) {
+        debugPrint('[CloudinaryService] Byte upload blocked: 25 GB free quota reached.');
+      }
+      return null;
+    }
+
     try {
+      // Mandatory Pre-Upload Optimization: downscale & compress byte buffer
+      final optimizedBytes = await ImageCompressionService.compressBytes(bytes);
+
       onProgress?.call(0.1);
 
       final request = http.MultipartRequest('POST', _uploadEndpoint);
       request.fields['upload_preset'] = uploadPreset;
+      request.fields['quality'] = 'auto:good';
+      request.fields['fetch_format'] = 'auto';
+
       if (folder != null && folder.isNotEmpty) {
         request.fields['folder'] = folder;
       }
@@ -136,7 +270,7 @@ class CloudinaryService {
 
       final multipartFile = http.MultipartFile.fromBytes(
         'file',
-        bytes,
+        optimizedBytes,
         filename: filename,
       );
       request.files.add(multipartFile);
@@ -154,9 +288,12 @@ class CloudinaryService {
       if (streamedResponse.statusCode >= 200 && streamedResponse.statusCode < 300) {
         final data = jsonDecode(responseBody) as Map<String, dynamic>;
         final secureUrl = data['secure_url'] as String?;
+        final uploadedBytes = data['bytes'] as int? ?? optimizedBytes.lengthInBytes;
+        await recordUploadBytes(uploadedBytes);
+
         onProgress?.call(1.0);
         if (kDebugMode) {
-          debugPrint('[CloudinaryService] Byte upload succeeded: $secureUrl');
+          debugPrint('[CloudinaryService] Byte upload succeeded ($uploadedBytes bytes): $secureUrl');
         }
         return secureUrl;
       } else {
@@ -172,6 +309,46 @@ class CloudinaryService {
         debugPrint('[CloudinaryService] Byte upload exception: $e\n$stack');
       }
       return null;
+    }
+  }
+
+  /// Pings Cloudinary to check credential health, endpoint accessibility, and round-trip latency
+  Future<Map<String, dynamic>> pingCloudinary() async {
+    if (!isConfigured) {
+      return {
+        'status': 'Unconfigured',
+        'isHealthy': false,
+        'cloudName': cloudName.isNotEmpty ? cloudName : '[MISSING]',
+        'presetConfigured': uploadPreset.isNotEmpty,
+        'latencyMs': -1,
+        'message': 'Cloudinary cloud name or upload preset is not set in .env',
+      };
+    }
+
+    final sw = Stopwatch()..start();
+    try {
+      final pingUri = Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/ping');
+      final res = await _httpClient.get(pingUri).timeout(const Duration(seconds: 6));
+      sw.stop();
+      return {
+        'status': res.statusCode < 500 ? 'Online' : 'Degraded',
+        'isHealthy': res.statusCode < 500,
+        'cloudName': cloudName,
+        'presetConfigured': uploadPreset.isNotEmpty,
+        'latencyMs': sw.elapsedMilliseconds,
+        'statusCode': res.statusCode,
+        'message': 'Cloudinary endpoint responded in ${sw.elapsedMilliseconds} ms',
+      };
+    } catch (e) {
+      sw.stop();
+      return {
+        'status': 'Offline / Unreachable',
+        'isHealthy': false,
+        'cloudName': cloudName,
+        'presetConfigured': uploadPreset.isNotEmpty,
+        'latencyMs': sw.elapsedMilliseconds,
+        'message': 'Connection error: $e',
+      };
     }
   }
 

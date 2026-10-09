@@ -5,8 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'cloud_trip_sync_service.dart';
 import 'secret_config_service.dart';
 import 'build_info_service.dart';
+import 'cloudinary_service.dart';
 
-/// Models the free-tier usage telemetry across Firebase services
+/// Models the free-tier usage telemetry across Firebase and Cloudinary services
 class FreeTierQuotaMetrics {
   // Cloud Firestore (Daily limits)
   final int firestoreDocCount;
@@ -27,6 +28,16 @@ class FreeTierQuotaMetrics {
   // Firebase Storage
   final int storageFileCount;
   final double storageUsedMb;
+
+  // Cloudinary Zero-Card Cloud Storage (25 GB Free Limit)
+  final bool isCloudinaryActive;
+  final String cloudinaryCloudName;
+  final double cloudinaryStorageMb;
+  final double cloudinaryMaxStorageMb;
+  final double cloudinaryStoragePercent;
+  final int cloudinaryEstimatedPhotoCount;
+  final bool isCloudinaryWarning;
+  final bool isCloudinaryCritical;
 
   // Firebase Authentication
   final int authTotalUsers;
@@ -51,6 +62,14 @@ class FreeTierQuotaMetrics {
     required this.rtdbBandwidthMb,
     required this.storageFileCount,
     required this.storageUsedMb,
+    this.isCloudinaryActive = false,
+    this.cloudinaryCloudName = 'Unconfigured',
+    this.cloudinaryStorageMb = 0.0,
+    this.cloudinaryMaxStorageMb = 25600.0,
+    this.cloudinaryStoragePercent = 0.0,
+    this.cloudinaryEstimatedPhotoCount = 0,
+    this.isCloudinaryWarning = false,
+    this.isCloudinaryCritical = false,
     required this.authTotalUsers,
     this.firestoreLatencyMs,
     this.rtdbLatencyMs,
@@ -65,6 +84,7 @@ class FreeTierQuotaMetrics {
   static const double rtdbMaxStorageMb = 1024.0; // 1 GB
   static const double rtdbMaxBandwidthMb = 10240.0; // 10 GB
   static const double storageMaxStorageMb = 5120.0; // 5 GB
+  static const double cloudinaryMaxFreeStorageMb = 25600.0; // 25 GB Free
   static const int authMaxMau = 50000; // 50K Monthly Active Users
 
   // Percentage calculations with zero-division safety
@@ -72,7 +92,7 @@ class FreeTierQuotaMetrics {
   double get firestoreWritesPercent => (firestoreEstimatedWrites / firestoreMaxDailyWrites * 100).clamp(0.0, 100.0);
   double get firestoreStoragePercent => (firestoreStorageMb / firestoreMaxStorageMb * 100).clamp(0.0, 100.0);
   double get rtdbConnectionsPercent => (rtdbActiveConnections / rtdbMaxSimultaneousConnections * 100).clamp(0.0, 100.0);
-  double get storagePercent => (storageUsedMb / storageMaxStorageMb * 100).clamp(0.0, 100.0);
+  double get storagePercent => isCloudinaryActive ? cloudinaryStoragePercent : (storageUsedMb / storageMaxStorageMb * 100).clamp(0.0, 100.0);
   double get authMauPercent => (authTotalUsers / authMaxMau * 100).clamp(0.0, 100.0);
 
   bool get isAnyQuotaWarning =>
@@ -80,14 +100,16 @@ class FreeTierQuotaMetrics {
       firestoreWritesPercent >= 75.0 ||
       firestoreStoragePercent >= 75.0 ||
       rtdbConnectionsPercent >= 75.0 ||
-      storagePercent >= 75.0;
+      storagePercent >= 75.0 ||
+      isCloudinaryWarning;
 
   bool get isAnyQuotaCritical =>
       firestoreReadsPercent >= 90.0 ||
       firestoreWritesPercent >= 90.0 ||
       firestoreStoragePercent >= 90.0 ||
       rtdbConnectionsPercent >= 90.0 ||
-      storagePercent >= 90.0;
+      storagePercent >= 90.0 ||
+      isCloudinaryCritical;
 }
 
 class AdminService {
@@ -178,6 +200,22 @@ class AdminService {
     final fsLatency = await measureFirestoreLatency();
     final rtdbLatency = await measureRealtimeDbLatency();
 
+    // Query Cloudinary live storage & 25 GB quota telemetry
+    final isCloudinary = SecretConfigService.isCloudinaryConfigured;
+    final cloudName = SecretConfigService.cloudinaryCloudName;
+    final cloudinaryStorageMb = await CloudinaryService.getConsumedStorageMb();
+    final cloudinaryStoragePct = await CloudinaryService.getConsumedStoragePercent();
+    final isCloudinaryWarn = await CloudinaryService.isQuotaWarning();
+    final isCloudinaryCrit = await CloudinaryService.isQuotaCritical();
+
+    int memoriesCount = 0;
+    try {
+      final memoriesSnap = await fs.collectionGroup('memories').get();
+      memoriesCount = memoriesSnap.docs.length;
+    } catch (_) {
+      memoriesCount = tripsCount * 2;
+    }
+
     return FreeTierQuotaMetrics(
       firestoreDocCount: totalDocCount,
       firestoreTripsCount: tripsCount,
@@ -191,8 +229,16 @@ class AdminService {
       rtdbActiveConnections: 1, // Current active client connection
       rtdbStorageMb: (roomsCount * 0.05).clamp(0.01, 50.0),
       rtdbBandwidthMb: (totalDocCount * 0.08).clamp(0.05, 500.0),
-      storageFileCount: 0,
-      storageUsedMb: 0.0,
+      storageFileCount: memoriesCount,
+      storageUsedMb: isCloudinary ? cloudinaryStorageMb : 0.0,
+      isCloudinaryActive: isCloudinary,
+      cloudinaryCloudName: cloudName.isNotEmpty ? cloudName : 'Unconfigured',
+      cloudinaryStorageMb: cloudinaryStorageMb,
+      cloudinaryMaxStorageMb: FreeTierQuotaMetrics.cloudinaryMaxFreeStorageMb,
+      cloudinaryStoragePercent: cloudinaryStoragePct,
+      cloudinaryEstimatedPhotoCount: memoriesCount,
+      isCloudinaryWarning: isCloudinaryWarn,
+      isCloudinaryCritical: isCloudinaryCrit,
       authTotalUsers: usersCount > 0 ? usersCount : 1,
       firestoreLatencyMs: fsLatency,
       rtdbLatencyMs: rtdbLatency,
@@ -275,6 +321,16 @@ class AdminService {
         'authentication': {
           'registeredUsers': metrics.authTotalUsers,
           'mauLimit': FreeTierQuotaMetrics.authMaxMau,
+        },
+        'cloudinaryMediaStorage': {
+          'active': metrics.isCloudinaryActive,
+          'cloudName': metrics.cloudinaryCloudName,
+          'storageUsedMb': metrics.cloudinaryStorageMb,
+          'quotaLimitMb': metrics.cloudinaryMaxStorageMb,
+          'quotaUsedPercent': '${metrics.cloudinaryStoragePercent.toStringAsFixed(1)}%',
+          'estimatedPhotos': metrics.cloudinaryEstimatedPhotoCount,
+          'isQuotaWarning': metrics.isCloudinaryWarning,
+          'isQuotaCritical': metrics.isCloudinaryCritical,
         },
       },
       'securityPosture': generateSecurityAuditSummary(),

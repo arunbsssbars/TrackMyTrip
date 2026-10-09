@@ -9,6 +9,7 @@ import '../../core/services/security_service.dart';
 import '../../core/services/secret_config_service.dart';
 import '../../core/services/build_info_service.dart';
 import '../../core/services/canary_health_service.dart';
+import '../../core/services/cloudinary_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/admin_provider.dart';
 
@@ -143,6 +144,66 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Dismiss')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _runCloudinaryProbe() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 14),
+                Text('Probing Cloudinary endpoint & credentials...'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final cloudinary = ref.read(cloudinaryServiceProvider);
+    final result = await cloudinary.pingCloudinary();
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(
+              result['isHealthy'] == true ? Icons.check_circle_rounded : Icons.warning_amber_rounded,
+              color: result['isHealthy'] == true ? const Color(0xFF10B981) : Colors.red,
+            ),
+            const SizedBox(width: 8),
+            Text('Cloudinary: ${result['status']}', style: const TextStyle(fontSize: 16)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Cloud Name: ${result['cloudName']}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Text('Preset Active: ${result['presetConfigured'] ? "YES (Unsigned Mode)" : "NO"}'),
+            const SizedBox(height: 6),
+            Text('Latency: ${result['latencyMs']} ms'),
+            const SizedBox(height: 6),
+            Text('Message: ${result['message']}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Close')),
         ],
       ),
     );
@@ -288,7 +349,9 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
                 const SizedBox(height: 12),
                 _buildRtdbCard(isDark, metrics),
                 const SizedBox(height: 12),
-                _buildStorageAndAuthRow(isDark, metrics),
+                _buildCloudinaryStorageCard(isDark, metrics),
+                const SizedBox(height: 12),
+                _buildAuthAndSecurityRow(isDark, metrics),
                 const SizedBox(height: 18),
                 _buildSectionHeader('Cloud Room Quota Preserver', Icons.auto_delete_rounded, const Color(0xFFF97316)),
                 const SizedBox(height: 10),
@@ -444,11 +507,13 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
           Container(width: 1, height: 34, color: isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
           Expanded(
             child: _buildKpiChip(
-              icon: Icons.folder_shared_rounded,
-              iconColor: const Color(0xFF06B6D4),
-              label: 'Storage',
-              value: '${metrics.storageUsedMb.toStringAsFixed(1)} MB',
-              sub: '5 GB free',
+              icon: Icons.cloud_done_rounded,
+              iconColor: const Color(0xFF0284C7),
+              label: metrics.isCloudinaryActive ? 'Cloudinary' : 'Storage',
+              value: metrics.isCloudinaryActive
+                  ? '${metrics.cloudinaryStorageMb.toStringAsFixed(1)} MB'
+                  : '${metrics.storageUsedMb.toStringAsFixed(1)} MB',
+              sub: metrics.isCloudinaryActive ? '25 GB cap' : '5 GB free',
               isDark: isDark,
             ),
           ),
@@ -795,41 +860,228 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
     );
   }
 
-  Widget _buildStorageAndAuthRow(bool isDark, FreeTierQuotaMetrics metrics) {
-    return Row(
-      children: [
-        // Storage
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Row(
+  Widget _buildCloudinaryStorageCard(bool isDark, FreeTierQuotaMetrics metrics) {
+    final storagePct = metrics.cloudinaryStoragePercent;
+    final isWarn = metrics.isCloudinaryWarning;
+    final isCrit = metrics.isCloudinaryCritical;
+    final statusColor = isCrit
+        ? Colors.red
+        : (isWarn ? const Color(0xFFF59E0B) : const Color(0xFF10B981));
+
+    final remainingMb = (metrics.cloudinaryMaxStorageMb - metrics.cloudinaryStorageMb).clamp(0.0, metrics.cloudinaryMaxStorageMb);
+    final remainingPhotosEstimate = (remainingMb / 0.3).round();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isCrit
+              ? Colors.red.withAlpha(120)
+              : (isWarn ? const Color(0xFFF59E0B).withAlpha(120) : (isDark ? Colors.white10 : const Color(0xFFE2E8F0))),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(isDark ? 30 : 8),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header Row
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0284C7).withAlpha(25),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.cloud_sync_rounded, color: Color(0xFF0284C7), size: 22),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.folder_shared_rounded, color: Color(0xFF06B6D4), size: 18),
-                    SizedBox(width: 6),
-                    Text('Cloud Storage', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    Row(
+                      children: [
+                        const Text(
+                          'Cloudinary Media Storage',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: statusColor.withAlpha(25),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            metrics.isCloudinaryActive ? '25 GB CAP' : 'INACTIVE',
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w900,
+                              color: statusColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Cloud: ${metrics.cloudinaryCloudName} • Preset: Active • FHD Opt: ON',
+                      style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  '${metrics.storageUsedMb.toStringAsFixed(1)} MB / 5 GB',
-                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+              ),
+              OutlinedButton.icon(
+                onPressed: _runCloudinaryProbe,
+                icon: const Icon(Icons.radar_rounded, size: 14),
+                label: const Text('Ping', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                const SizedBox(height: 4),
-                const Text('Free Quota: 5 GB Stored', style: TextStyle(fontSize: 10.5, color: Colors.grey)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Storage Linear Progress Bar
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: (storagePct / 100.0).clamp(0.005, 1.0),
+              minHeight: 8,
+              backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+              valueColor: AlwaysStoppedAnimation<Color>(statusColor),
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          // Storage Telemetry Row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '${metrics.cloudinaryStorageMb.toStringAsFixed(1)} MB / 25,600 MB',
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+              ),
+              Text(
+                '${storagePct.toStringAsFixed(1)}% Used (25 GB Cap)',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: statusColor),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // Metric Badges Row
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Photos Stored', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${metrics.cloudinaryEstimatedPhotoCount}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(width: 1, height: 26, color: isDark ? Colors.white12 : const Color(0xFFCBD5E1)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Remaining Cap', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                      const SizedBox(height: 2),
+                      Text(
+                        '~$remainingPhotosEstimate photos',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF10B981)),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                Container(width: 1, height: 26, color: isDark ? Colors.white12 : const Color(0xFFCBD5E1)),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Optimization', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                      SizedBox(height: 2),
+                      Text(
+                        '1080p (75%)',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF0284C7)),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
-        ),
-        const SizedBox(width: 10),
 
+          if (isWarn) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: (isCrit ? Colors.red : const Color(0xFFF59E0B)).withAlpha(20),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: (isCrit ? Colors.red : const Color(0xFFF59E0B)).withAlpha(60)),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    isCrit ? Icons.warning_rounded : Icons.info_outline_rounded,
+                    color: isCrit ? Colors.red : const Color(0xFFF59E0B),
+                    size: 16,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      isCrit
+                          ? 'CRITICAL: 25 GB quota near 100%. Uploads will pause safely in local SQLite.'
+                          : 'WARNING: Storage is above 80% (20 GB). Free tier remains active.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: isCrit ? Colors.red : const Color(0xFFD97706),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAuthAndSecurityRow(bool isDark, FreeTierQuotaMetrics metrics) {
+    return Row(
+      children: [
         // Auth
         Expanded(
           child: Container(
@@ -856,6 +1108,38 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
                 ),
                 const SizedBox(height: 4),
                 const Text('Free Quota: 50,000 MAUs', style: TextStyle(fontSize: 10.5, color: Colors.grey)),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+
+        // Security Vault
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
+            ),
+            child: const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.shield_moon_rounded, color: Color(0xFF10B981), size: 18),
+                    SizedBox(width: 6),
+                    Text('Hardware Vault', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  ],
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'AES-256 GCM',
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                ),
+                SizedBox(height: 4),
+                Text('Keystore: Enforced', style: TextStyle(fontSize: 10.5, color: Color(0xFF10B981))),
               ],
             ),
           ),

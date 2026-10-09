@@ -123,6 +123,42 @@ void main() {
       final fsMetrics = report['freeTierMetrics']['firestore'] as Map<String, dynamic>;
       expect(fsMetrics['totalDocuments'], 200);
       expect(fsMetrics['latencyMs'], 95);
+      expect(report['freeTierMetrics']['cloudinaryMediaStorage'], isA<Map<String, dynamic>>());
+    });
+
+    test('FreeTierQuotaMetrics calculates Cloudinary 25 GB metrics and warning triggers', () {
+      final metrics = FreeTierQuotaMetrics(
+        firestoreDocCount: 10,
+        firestoreTripsCount: 2,
+        firestoreRoomsCount: 1,
+        firestoreUsersCount: 2,
+        firestoreTombstonesCount: 0,
+        firestoreInvitationsCount: 5,
+        firestoreEstimatedReads: 100,
+        firestoreEstimatedWrites: 50,
+        firestoreStorageMb: 1.0,
+        rtdbActiveConnections: 1,
+        rtdbStorageMb: 0.1,
+        rtdbBandwidthMb: 0.1,
+        storageFileCount: 15,
+        storageUsedMb: 500.0,
+        isCloudinaryActive: true,
+        cloudinaryCloudName: 'dcj4v7toh',
+        cloudinaryStorageMb: 21000.0, // 21 GB consumed (warning threshold)
+        cloudinaryMaxStorageMb: 25600.0, // 25 GB cap
+        cloudinaryStoragePercent: (21000.0 / 25600.0) * 100.0,
+        cloudinaryEstimatedPhotoCount: 70,
+        isCloudinaryWarning: true,
+        isCloudinaryCritical: false,
+        authTotalUsers: 2,
+        timestamp: DateTime.now(),
+      );
+
+      expect(metrics.isCloudinaryActive, isTrue);
+      expect(metrics.cloudinaryCloudName, equals('dcj4v7toh'));
+      expect(metrics.cloudinaryStoragePercent, closeTo(82.03, 0.1));
+      expect(metrics.isAnyQuotaWarning, isTrue);
+      expect(metrics.isAnyQuotaCritical, isFalse);
     });
   });
 }

@@ -141,5 +141,70 @@ void main() {
       final url = await service.uploadImageFile(file: nonExistentFile);
       expect(url, isNull);
     });
+
+    test('25 GB quota metrics calculate usage and thresholds properly', () async {
+      // 0 MB initially
+      await CloudinaryService.setSimulatedConsumedBytes(0);
+      expect(await CloudinaryService.getConsumedStorageMb(), equals(0.0));
+      expect(await CloudinaryService.getConsumedStoragePercent(), equals(0.0));
+      expect(await CloudinaryService.isQuotaWarning(), isFalse);
+      expect(await CloudinaryService.isQuotaExceeded(), isFalse);
+
+      // Simulate 21 GB consumed (warning threshold >= 20 GB)
+      const int twentyOneGb = (21 * 1024 * 1024 * 1024);
+      await CloudinaryService.setSimulatedConsumedBytes(twentyOneGb);
+      expect(await CloudinaryService.isQuotaWarning(), isTrue);
+      expect(await CloudinaryService.isQuotaExceeded(), isFalse);
+
+      // Simulate 25 GB consumed (exceeded threshold)
+      const int twentyFiveGb = (25 * 1024 * 1024 * 1024);
+      await CloudinaryService.setSimulatedConsumedBytes(twentyFiveGb);
+      expect(await CloudinaryService.isQuotaExceeded(), isTrue);
+      expect(await CloudinaryService.getConsumedStoragePercent(), equals(100.0));
+    });
+
+    test('uploadImageBytes blocks upload when 25 GB quota is exceeded', () async {
+      SecretConfigService.setMockVariables({
+        'CLOUDINARY_CLOUD_NAME': 'mycloud',
+        'CLOUDINARY_UPLOAD_PRESET': 'preset',
+      });
+
+      // Simulate 26 GB consumed (strictly exceeds 25 GB limit)
+      const int overLimit = (26 * 1024 * 1024 * 1024);
+      await CloudinaryService.setSimulatedConsumedBytes(overLimit);
+
+      // Verify that no HTTP network call is even attempted
+      final mockClient = MockClient((request) async {
+        fail('Network request should not be attempted when quota is exceeded');
+      });
+
+      final service = CloudinaryService(httpClient: mockClient);
+      final bytes = Uint8List.fromList([1, 2, 3, 4]);
+
+      final url = await service.uploadImageBytes(bytes: bytes);
+      // Must be blocked to prevent billing
+      expect(url, isNull);
+    });
+
+    test('pingCloudinary returns status and latency telemetry', () async {
+      SecretConfigService.setMockVariables({
+        'CLOUDINARY_CLOUD_NAME': 'testcloud',
+        'CLOUDINARY_UPLOAD_PRESET': 'testpreset',
+      });
+
+      final mockClient = MockClient((request) async {
+        expect(request.url.toString(), contains('ping'));
+        return http.Response('OK', 200);
+      });
+
+      final service = CloudinaryService(httpClient: mockClient);
+      final ping = await service.pingCloudinary();
+
+      expect(ping['status'], equals('Online'));
+      expect(ping['isHealthy'], isTrue);
+      expect(ping['cloudName'], equals('testcloud'));
+      expect(ping['presetConfigured'], isTrue);
+      expect(ping['latencyMs'], isNonNegative);
+    });
   });
 }
