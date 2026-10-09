@@ -13,9 +13,9 @@ echo -e "\n[2/4] Running Super Admin & Resilience Tests..."
 flutter test test/super_admin_test.dart test/twenty_loop_features_resilience_test.dart
 echo "✓ Core unit tests passed."
 
-echo -e "\n[3/4] Running DevOps Telemetry & Schema Verification Tests..."
-flutter test test/devops_pipeline_and_admin_telemetry_test.dart
-echo "✓ DevOps telemetry tests passed."
+echo -e "\n[3/4] Running DevOps Telemetry, Secrets & Vault Tests..."
+flutter test test/devops_pipeline_and_admin_telemetry_test.dart test/devops_secrets_and_vault_test.dart
+echo "✓ DevOps telemetry & secrets tests passed."
 
 echo -e "\n[4/4] Auditing Tracked Files for Secrets..."
 SUSPICIOUS=$(git ls-files | grep -E '(\.env$|\.env\.production$|key\.properties$|\.jks$|\.keystore$|google-services\.json\.secret)' || true)

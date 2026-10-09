@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# =============================================================================
+# TrackMyTrip DevSecOps Pre-Commit Hook: Automated Secret & Credential Blocker
+# =============================================================================
+set -e
+
+echo "[DevSecOps] Scanning staged files for accidental secrets..."
+
+# 1. Block prohibited file patterns from being staged
+PROHIBITED_FILES=$(git diff --cached --name-only | grep -E '(\.env$|\.env\.production$|key\.properties$|\.jks$|\.keystore$|google-services\.json\.secret)' || true)
+if [ -n "$PROHIBITED_FILES" ]; then
+    echo "================================================================="
+    echo " [SECURITY ERROR] Staged prohibited secret/keystore file detected!"
+    echo "================================================================="
+    echo "$PROHIBITED_FILES"
+    echo ""
+    echo "Action required: Run 'git reset HEAD <file>' and ensure it is in .gitignore."
+    exit 1
+fi
+
+# 2. Scan staged content for high-entropy secret patterns
+STAGED_DIFF=$(git diff --cached -U0)
+
+# Check for unmasked Google API keys (AIzaSy...)
+if echo "$STAGED_DIFF" | grep -E '^\+[^+]*AIza[0-9A-Za-z_-]{35}' | grep -v 'AIzaSy_YOUR_GOOGLE_MAPS_API_KEY_HERE' > /dev/null; then
+    echo "================================================================="
+    echo " [SECURITY ERROR] Real Google API key detected in staged diff!"
+    echo "================================================================="
+    echo "Do NOT commit plain-text Google Maps or Firebase API keys."
+    echo "Use .env (gitignored) or GitHub Secrets instead."
+    exit 1
+fi
+
+# Check for private keys
+if echo "$STAGED_DIFF" | grep -E '^\+[^+]*-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----' > /dev/null; then
+    echo "================================================================="
+    echo " [SECURITY ERROR] Private cryptographic key detected in staged diff!"
+    echo "================================================================="
+    exit 1
+fi
+
+# Check for Firebase service account private key blocks
+if echo "$STAGED_DIFF" | grep -E '^\+[^+]*"private_key": "-----BEGIN' > /dev/null; then
+    echo "================================================================="
+    echo " [SECURITY ERROR] Service Account private_key detected in staged diff!"
+    echo "================================================================="
+    exit 1
+fi
+
+echo "[DevSecOps] ✓ Staged diff passed secret hygiene audit."
+exit 0

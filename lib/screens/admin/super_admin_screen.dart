@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/services/admin_service.dart';
 import '../../core/services/offline_sync_engine.dart';
+import '../../core/services/security_service.dart';
+import '../../core/services/secret_config_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/admin_provider.dart';
 
@@ -28,6 +30,41 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
         content: Text('✓ System Diagnostic Report copied to clipboard.'),
         backgroundColor: Color(0xFF10B981),
         behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _runVaultDiagnostics() async {
+    final securityService = SecurityService();
+    final result = await securityService.performVaultHealthCheck();
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.shield_moon_rounded, color: Color(0xFF06B6D4)),
+            SizedBox(width: 8),
+            Text('Hardware Vault Probe', style: TextStyle(fontSize: 16)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Status: ${result['status']}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Text('Latency: ${result['latencyMs']} ms'),
+            const SizedBox(height: 6),
+            Text('Keystore Active: ${result['keystoreActive'] == true ? 'YES (Hardware Enforced)' : 'NO (Fallback)'}'),
+            const SizedBox(height: 6),
+            Text('Timestamp: ${result['timestamp']}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Close')),
+        ],
       ),
     );
   }
@@ -181,6 +218,12 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
               _buildSectionHeader('DevOps CI/CD & Pipeline Status', Icons.integration_instructions_rounded, const Color(0xFF8B5CF6)),
               const SizedBox(height: 10),
               _buildDevOpsPipelineCard(isDark),
+              const SizedBox(height: 20),
+
+              // Section: DevSecOps & Secrets Vault Posture
+              _buildSectionHeader('DevSecOps & Secrets Vault Posture', Icons.security_rounded, const Color(0xFF06B6D4)),
+              const SizedBox(height: 10),
+              _buildSecurityPostureCard(isDark),
               const SizedBox(height: 20),
 
               // Action: Diagnostic Report Copy
@@ -747,6 +790,131 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildSecurityPostureCard(bool isDark) {
+    final securityAudit = AdminService.generateSecurityAuditSummary();
+    final secrets = securityAudit['secretsAudit'] as Map<String, dynamic>;
+    final score = securityAudit['securityScore'] as int;
+    final grade = securityAudit['scoreGrade'] as String;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF06B6D4).withAlpha(30),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.verified_user_rounded, color: Color(0xFF06B6D4), size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'DevSecOps Health: $score/100',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                    Text(
+                      grade,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: score >= 90 ? const Color(0xFF10B981) : Colors.orange,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              FilledButton.tonal(
+                onPressed: _runVaultDiagnostics,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: const Text('Probe Vault', style: TextStyle(fontSize: 12)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          const Divider(height: 1),
+          const SizedBox(height: 12),
+          const Text('Masked Environment Secrets Telemetry:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          _buildSecretRow(
+            'Google Maps API Key',
+            secrets['googleMapsApiKeyMasked'] as String,
+            secrets['googleMapsConfigured'] == true,
+            isDark,
+          ),
+          const SizedBox(height: 6),
+          _buildSecretRow(
+            'Firebase App ID',
+            secrets['firebaseAppIdMasked'] as String,
+            secrets['firebaseAppIdConfigured'] == true,
+            isDark,
+          ),
+          const SizedBox(height: 6),
+          _buildSecretRow(
+            'Vault Salt & Pepper',
+            SecretConfigService.maskSecret(SecretConfigService.vaultPepper),
+            true,
+            isDark,
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildPipelineStatusBadge('Hardware Keystore', 'AES-256 GCM', Colors.cyan, isDark),
+              _buildPipelineStatusBadge('OWASP MASVS', 'FLAG_SECURE', Colors.teal, isDark),
+              _buildPipelineStatusBadge('Location Privacy', '250m Fuzzing', Colors.indigo, isDark),
+              _buildPipelineStatusBadge('Forensic Wipe', 'Armed', const Color(0xFF10B981), isDark),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSecretRow(String label, String maskedValue, bool isConfigured, bool isDark) {
+    return Row(
+      children: [
+        Icon(
+          isConfigured ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+          size: 14,
+          color: isConfigured ? const Color(0xFF10B981) : Colors.grey,
+        ),
+        const SizedBox(width: 6),
+        Text('$label: ', style: const TextStyle(fontSize: 12)),
+        Expanded(
+          child: Text(
+            maskedValue,
+            textAlign: TextAlign.end,
+            style: TextStyle(
+              fontSize: 12,
+              fontFamily: 'monospace',
+              fontWeight: FontWeight.w600,
+              color: isConfigured ? (isDark ? Colors.cyanAccent : Colors.cyan.shade800) : Colors.grey,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

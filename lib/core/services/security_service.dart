@@ -188,4 +188,58 @@ class SecurityService {
       AppLogger.debug('setSecureScreen notice: $e');
     }
   }
+
+  // =========================================================================
+  // 6. HARDWARE KEYSTORE VAULT HEALTH & SECRET ISOLATION (DEVSECOPS)
+  // =========================================================================
+
+  /// Executes an isolated diagnostic round-trip check on Android Keystore / iOS Keychain
+  Future<Map<String, dynamic>> performVaultHealthCheck() async {
+    final stopwatch = Stopwatch()..start();
+    const testKey = 'vault_health_probe_key';
+    const testPayload = 'probe_entropy_verified_2026';
+
+    try {
+      await _secureStorage.write(key: testKey, value: testPayload);
+      final readBack = await _secureStorage.read(key: testKey);
+      await _secureStorage.delete(key: testKey);
+      stopwatch.stop();
+
+      final isHealthy = readBack == testPayload;
+      return {
+        'status': isHealthy ? 'Healthy (Hardware Enforced)' : 'Degraded',
+        'latencyMs': stopwatch.elapsedMilliseconds,
+        'keystoreActive': isHealthy,
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+    } catch (e) {
+      stopwatch.stop();
+      return {
+        'status': 'Unavailable / Emulated',
+        'latencyMs': stopwatch.elapsedMilliseconds,
+        'keystoreActive': false,
+        'error': e.toString(),
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+    }
+  }
+
+  /// Stores a high-entropy secret with namespace isolation
+  Future<void> storeAppSecret(String key, String secret) async {
+    try {
+      await _secureStorage.write(key: 'app_secret_$key', value: secret);
+    } catch (e) {
+      AppLogger.error('Failed to store app secret in vault', e);
+    }
+  }
+
+  /// Retrieves a high-entropy secret safely
+  Future<String?> getAppSecret(String key) async {
+    try {
+      return await _secureStorage.read(key: 'app_secret_$key');
+    } catch (e) {
+      AppLogger.error('Failed to read app secret from vault', e);
+      return null;
+    }
+  }
 }

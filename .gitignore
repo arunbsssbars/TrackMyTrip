@@ -48,6 +48,7 @@ app.*.map.json
 *.jks
 *.keystore
 .env*
+!.env.example
 google-services.json.secret
 GoogleService-Info.plist.secret
 

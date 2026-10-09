@@ -37,11 +37,12 @@ jobs:
       - name: Static Analysis
         run: flutter analyze lib --fatal-infos
 
-      - name: Unit, Super Admin & DevOps Telemetry Tests
+      - name: Unit, Super Admin, DevOps & Secrets Tests
         run: |
           flutter test test/super_admin_test.dart
           flutter test test/twenty_loop_features_resilience_test.dart
           flutter test test/devops_pipeline_and_admin_telemetry_test.dart
+          flutter test test/devops_secrets_and_vault_test.dart
 
       - name: Comprehensive AQIL Multi-Viewport Tests
         run: flutter test test/aqil_all_screens_comprehensive_test.dart
