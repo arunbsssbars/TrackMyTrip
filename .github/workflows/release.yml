@@ -49,19 +49,37 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Build Android Release APK
-        run: flutter build apk --release --dart-define-from-file=.env
+      - name: Configure Android Signing Keystore (if secrets provided)
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/upload-keystore.jks
+            echo "storePassword=${{ secrets.KEYSTORE_PASSWORD || 'TrackMyTripReleaseKey2026!' }}" > android/key.properties
+            echo "keyPassword=${{ secrets.KEY_PASSWORD || 'TrackMyTripReleaseKey2026!' }}" >> android/key.properties
+            echo "keyAlias=${{ secrets.KEY_ALIAS || 'upload' }}" >> android/key.properties
+            echo "storeFile=upload-keystore.jks" >> android/key.properties
+            echo "Production keystore successfully provisioned from repository secrets."
+          else
+            echo "Notice: KEYSTORE_BASE64 secret not found; using fallback signing."
+          fi
 
-      - name: Stash Android APK
+      - name: Build Android Release APK and App Bundle
+        run: |
+          flutter build apk --release --dart-define-from-file=.env
+          flutter build appbundle --release --dart-define-from-file=.env
+
+      - name: Stash Android Artifacts
         run: |
           mkdir -p release-artifacts
           cp build/app/outputs/flutter-apk/app-release.apk release-artifacts/TrackMyTrip-release.apk
+          cp build/app/outputs/bundle/release/app-release.aab release-artifacts/TrackMyTrip-release.aab
 
-      - name: Upload Android Artifact
+      - name: Upload Android Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-android-apk
-          path: release-artifacts/TrackMyTrip-release.apk
+          name: release-android-artifacts
+          path: |
+            release-artifacts/TrackMyTrip-release.apk
+            release-artifacts/TrackMyTrip-release.aab
           retention-days: 1
 
   build-ios:
@@ -131,10 +149,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Download Android Artifact
+      - name: Download Android Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: release-android-apk
+          name: release-android-artifacts
           path: release-assets
 
       - name: Download iOS Artifact
@@ -164,4 +182,5 @@ jobs:
           prerelease: false
           files: |
             release-assets/TrackMyTrip-release.apk
+            release-assets/TrackMyTrip-release.aab
             release-assets/TrackMyTrip-release-unsigned.ipa
