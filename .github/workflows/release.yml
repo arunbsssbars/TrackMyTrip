@@ -1,0 +1,161 @@
+name: Release App Packages
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Semantic version tag (e.g. v1.2.0)'
+        required: true
+        default: 'v1.0.0'
+      release_title:
+        description: 'Release Title'
+        required: false
+        default: 'TrackMyTrip Production Release'
+
+jobs:
+  build-android:
+    name: Build Android Release APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Create fallback .env file
+        run: |
+          if [ -n "${{ secrets.ENV_FILE }}" ]; then
+            echo "${{ secrets.ENV_FILE }}" > .env
+          else
+            touch .env
+          fi
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build Android Release APK
+        run: flutter build apk --release
+
+      - name: Stash Android APK
+        run: |
+          mkdir -p release-artifacts
+          cp build/app/outputs/flutter-apk/app-release.apk release-artifacts/TrackMyTrip-release.apk
+
+      - name: Upload Android Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android-apk
+          path: release-artifacts/TrackMyTrip-release.apk
+          retention-days: 1
+
+  build-ios:
+    name: Build iOS IPA
+    runs-on: macos-15
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Create fallback .env file
+        run: |
+          if [ -n "${{ secrets.ENV_FILE }}" ]; then
+            echo "${{ secrets.ENV_FILE }}" > .env
+          else
+            touch .env
+          fi
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build iOS Unsigned
+        run: flutter build ios --release --no-codesign
+        env:
+          CODE_SIGN_IDENTITY: ""
+          CODE_SIGN_REQUIRED: "NO"
+          CODE_SIGNING_REQUIRED: "NO"
+          CODE_SIGNING_ALLOWED: "NO"
+
+      - name: Bundle IPA
+        run: |
+          mkdir -p build/Payload
+          if [ -d "build/ios/iphoneos/Runner.app" ]; then
+            cp -r build/ios/iphoneos/Runner.app build/Payload/
+          else
+            FOUND_APP=$(find build -name "Runner.app" -type d | head -n 1)
+            cp -r "$FOUND_APP" build/Payload/
+          fi
+          cd build
+          zip -r -q TrackMyTrip-release-unsigned.ipa Payload
+          cd ..
+          mkdir -p release-artifacts
+          cp build/TrackMyTrip-release-unsigned.ipa release-artifacts/TrackMyTrip-release-unsigned.ipa
+
+      - name: Upload iOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-ios-ipa
+          path: release-artifacts/TrackMyTrip-release-unsigned.ipa
+          retention-days: 1
+
+  publish-github-release:
+    name: Publish GitHub Release
+    needs: [build-android, build-ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Android Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-android-apk
+          path: release-assets
+
+      - name: Download iOS Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-ios-ipa
+          path: release-assets
+
+      - name: Determine Release Tag
+        id: release_meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "TAG=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+            echo "TITLE=${{ github.event.inputs.release_title }} (${{ github.event.inputs.tag_name }})" >> $GITHUB_OUTPUT
+          else
+            echo "TAG=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "TITLE=TrackMyTrip Release ${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release with Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_meta.outputs.TAG }}
+          name: ${{ steps.release_meta.outputs.TITLE }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          files: |
+            release-assets/TrackMyTrip-release.apk
+            release-assets/TrackMyTrip-release-unsigned.ipa

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/services/admin_service.dart';
 import '../../core/services/offline_sync_engine.dart';
 import '../../core/theme/app_theme.dart';
@@ -174,6 +175,12 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
               _buildSectionHeader('Cloud Room Quota Preserver', Icons.auto_delete_rounded, const Color(0xFFF97316)),
               const SizedBox(height: 10),
               _buildRoomMaintenanceCard(isDark, metrics),
+              const SizedBox(height: 20),
+
+              // Section: DevOps CI/CD & Pipeline Status
+              _buildSectionHeader('DevOps CI/CD & Pipeline Status', Icons.integration_instructions_rounded, const Color(0xFF8B5CF6)),
+              const SizedBox(height: 10),
+              _buildDevOpsPipelineCard(isDark),
               const SizedBox(height: 20),
 
               // Action: Diagnostic Report Copy
@@ -629,6 +636,116 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
       child: Text(
         '$label: $value',
         style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  Widget _buildDevOpsPipelineCard(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8B5CF6).withAlpha(30),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.rocket_launch_rounded, color: Color(0xFF8B5CF6), size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'GitHub Actions CI/CD Infrastructure',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                    Text(
+                      'Version: ${AdminService.appVersion} • ${AdminService.runtimeEnvironment}',
+                      style: TextStyle(fontSize: 12, color: isDark ? Colors.white60 : const Color(0xFF64748B)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildPipelineStatusBadge('CI Quality Gate', 'Automated', Colors.green, isDark),
+              _buildPipelineStatusBadge('Android APK Build', 'Automated', Colors.blue, isDark),
+              _buildPipelineStatusBadge('iOS Unsigned IPA', 'Automated', Colors.orange, isDark),
+              _buildPipelineStatusBadge('DevSecOps Scanner', 'Automated', Colors.purple, isDark),
+              _buildPipelineStatusBadge('Firebase IaC Rules', 'Automated', Colors.teal, isDark),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final uri = Uri.parse(AdminService.ciActionsUrl);
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }
+                  },
+                  icon: const Icon(Icons.open_in_browser_rounded, size: 16),
+                  label: const Text('Actions Pipeline', style: TextStyle(fontSize: 12)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final uri = Uri.parse(AdminService.gitReleasesUrl);
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }
+                  },
+                  icon: const Icon(Icons.download_rounded, size: 16),
+                  label: const Text('Release Downloads', style: TextStyle(fontSize: 12)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPipelineStatusBadge(String name, String status, Color color, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withAlpha(isDark ? 30 : 20),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withAlpha(80)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.check_circle_rounded, size: 12, color: color),
+          const SizedBox(width: 5),
+          Text(
+            '$name: $status',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color),
+          ),
+        ],
       ),
     );
   }

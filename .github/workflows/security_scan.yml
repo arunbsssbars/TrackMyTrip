@@ -1,0 +1,56 @@
+name: DevSecOps & Secret Scan
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  secret-scan:
+    name: TruffleHog Secret Detection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog Secret Scanner
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified=false --fail
+
+  security-audit:
+    name: Dependency & GitIgnore Hygiene Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Verify Sensitive Files Not Committed
+        run: |
+          echo "Auditing Git tracked files for sensitive patterns..."
+          SUSPICIOUS=$(git ls-files | grep -E '(\.env$|\.env\.production$|key\.properties$|\.jks$|\.keystore$|google-services\.json\.secret)' || true)
+          if [ -n "$SUSPICIOUS" ]; then
+            echo "ERROR: Sensitive secrets found tracked in Git!"
+            echo "$SUSPICIOUS"
+            exit 1
+          else
+            echo "SUCCESS: Zero private keystores, key.properties, or raw secrets tracked in Git."
+          fi
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Check Dependencies & Outdated Packages
+        run: |
+          flutter pub get
+          flutter pub outdated --no-dev-dependencies

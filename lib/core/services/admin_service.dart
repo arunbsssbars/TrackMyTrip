@@ -90,6 +90,13 @@ class FreeTierQuotaMetrics {
 
 class AdminService {
   static const String superAdminEmail = 'arunbsssbars@gmail.com';
+  static const String appVersion = '1.0.0+1';
+  static const String gitRepoUrl = 'https://github.com/arunbsssbars/TrackMyTrip';
+  static const String ciActionsUrl = 'https://github.com/arunbsssbars/TrackMyTrip/actions';
+  static const String gitReleasesUrl = 'https://github.com/arunbsssbars/TrackMyTrip/releases';
+
+  static String get runtimeEnvironment =>
+      kReleaseMode ? 'Production (Release)' : (kProfileMode ? 'Profile Mode' : 'Development (Debug)');
 
   /// Evaluates whether an email address possesses Super Admin authority
   static bool isSuperAdmin(String? email) {
@@ -227,7 +234,10 @@ class AdminService {
     return {
       'generatedAt': DateTime.now().toIso8601String(),
       'superAdmin': superAdminEmail,
-      'environment': kReleaseMode ? 'production' : 'development',
+      'appVersion': appVersion,
+      'environment': runtimeEnvironment,
+      'gitRepository': gitRepoUrl,
+      'ciActionsUrl': ciActionsUrl,
       'firebaseAvailable': CloudTripSyncService.isFirebaseAvailable,
       'currentUserAuth': () {
         try {

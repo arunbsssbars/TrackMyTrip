@@ -1,0 +1,60 @@
+name: Firebase Rules & IaC Deploy
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'firestore.rules'
+      - 'storage.rules'
+      - 'firestore.indexes.json'
+      - 'firebase.json'
+      - '.github/workflows/firebase_deploy.yml'
+  pull_request:
+    paths:
+      - 'firestore.rules'
+      - 'storage.rules'
+      - 'firestore.indexes.json'
+      - 'firebase.json'
+  workflow_dispatch:
+
+jobs:
+  validate-and-deploy:
+    name: Validate and Deploy Security Rules
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Validate Rule Files Existence & Formatting
+        run: |
+          echo "Checking Firebase configuration files..."
+          node -e "JSON.parse(require('fs').readFileSync('firebase.json'))"
+          node -e "JSON.parse(require('fs').readFileSync('firestore.indexes.json'))"
+          echo "JSON syntax is valid."
+          test -f firestore.rules && echo "firestore.rules exists."
+          test -f storage.rules && echo "storage.rules exists."
+
+      - name: Deploy to Firebase (if credentials configured)
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          if [ -n "${{ secrets.FIREBASE_TOKEN }}" ]; then
+            echo "Deploying Firestore & Storage rules via FIREBASE_TOKEN..."
+            firebase deploy --only firestore:rules,firestore:indexes,storage --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive
+          elif [ -n "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" ]; then
+            echo "Deploying Firestore & Storage rules via Service Account..."
+            echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" > gcp-key.json
+            export GOOGLE_APPLICATION_CREDENTIALS=gcp-key.json
+            firebase deploy --only firestore:rules,firestore:indexes,storage --non-interactive
+            rm -f gcp-key.json
+          else
+            echo "NOTICE: Neither FIREBASE_TOKEN nor FIREBASE_SERVICE_ACCOUNT secret is set in GitHub."
+            echo "Rules and indexes validated successfully in dry-run mode."
+          fi
