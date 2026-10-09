@@ -15,54 +15,18 @@
       },
       "oauth_client": [
         {
+          "client_id": "731719697818-52r57t98icngh8c20u18nfltplg2h54e.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.trackmytrip.app",
+            "certificate_hash": "840bd73addeca0593b2e81bc510c0d3043fd3282"
+          }
+        },
+        {
           "client_id": "731719697818-c08msnpieloveafvdrfi8g7sa9vr7s7e.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.trackmytrip.app",
-            "certificate_hash": "908ee37291ac67802c557bd7f4cf836f3c3fba5e"
-          }
-        },
-        {
-          "client_id": "731719697818-ljfrslc4gbqucih5n6qfnt01v5ct3nsj.apps.googleusercontent.com",
-          "client_type": 3
-        }
-      ],
-      "api_key": [
-        {
-          "current_key": "AIzaSyD3xg07jKRC-jDcfKCXBLC5-EMCzz4VRgc"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": [
-            {
-              "client_id": "731719697818-ljfrslc4gbqucih5n6qfnt01v5ct3nsj.apps.googleusercontent.com",
-              "client_type": 3
-            },
-            {
-              "client_id": "731719697818-g985psnmkv32n4bb14q477capf1s316u.apps.googleusercontent.com",
-              "client_type": 2,
-              "ios_info": {
-                "bundle_id": "com.triptracker.tripTrackerApp"
-              }
-            }
-          ]
-        }
-      }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:731719697818:android:fbf3b3bfba7fa282bce623",
-        "android_client_info": {
-          "package_name": "com.triptracker.trip_tracker_app"
-        }
-      },
-      "oauth_client": [
-        {
-          "client_id": "731719697818-2rnmdr802j6ikntqmld9id0q6udcu2p6.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.triptracker.trip_tracker_app",
             "certificate_hash": "908ee37291ac67802c557bd7f4cf836f3c3fba5e"
           }
         },
