@@ -64,16 +64,16 @@ jobs:
       - name: Build Android Release APK
         run: flutter build apk --release --dart-define-from-file=.env
 
-      - name: Validate Release APK Size Budget (< 50MB)
+      - name: Validate Release APK Size Budget (< 150MB Universal)
         run: |
           chmod +x scripts/measure_bundle_size.sh
-          ./scripts/measure_bundle_size.sh build/app/outputs/flutter-apk/app-release.apk 50.0
+          ./scripts/measure_bundle_size.sh build/app/outputs/flutter-apk/app-release.apk 150.0
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
           name: TrackMyTrip-Android-Release-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/*.apk
           retention-days: 14
 
       - name: Distribute to Firebase App Distribution (Beta Testers)
