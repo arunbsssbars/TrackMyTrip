@@ -1693,175 +1693,142 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    Wrap(
+                      spacing: 5,
+                      runSpacing: 3,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Expanded(
-                          child: Wrap(
-                            spacing: 4,
-                            runSpacing: 3,
-                            crossAxisAlignment: WrapCrossAlignment.center,
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: nature.color.withAlpha(25),
+                            borderRadius: BorderRadius.circular(5),
+                            border: Border.all(color: nature.color.withAlpha(80), width: 0.8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                                decoration: BoxDecoration(
-                                  color: nature.color.withAlpha(25),
-                                  borderRadius: BorderRadius.circular(5),
-                                  border: Border.all(color: nature.color.withAlpha(80), width: 0.8),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(nature.icon, size: 9, color: nature.color),
-                                    const SizedBox(width: 2.5),
-                                    Flexible(
-                                      child: Text(
-                                        nature.label,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontSize: 8.5,
-                                          fontWeight: FontWeight.w800,
-                                          color: nature.color,
-                                          letterSpacing: 0.3,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
+                              Icon(nature.icon, size: 9, color: nature.color),
+                              const SizedBox(width: 2.5),
+                              Text(
+                                nature.label,
+                                maxLines: 1,
+                                style: TextStyle(
+                                  fontSize: 8.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: nature.color,
+                                  letterSpacing: 0.3,
                                 ),
                               ),
-                              if (isAcceptedInvite)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF10B981).withAlpha(25),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: const Text('ACCEPTED', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
-                                )
-                              else if (isSender)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
-                                  decoration: BoxDecoration(
-                                    color: Colors.blueGrey.withAlpha(25),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: const Text('SENT', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
-                                ),
-                              if (displayAmount != null && displayAmount > 0)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                                  decoration: BoxDecoration(
-                                    color: Colors.indigo.withAlpha(isDark ? 45 : 25),
-                                    borderRadius: BorderRadius.circular(5),
-                                    border: Border.all(
-                                      color: Colors.indigo.withAlpha(isDark ? 90 : 60),
-                                      width: 0.8,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    '$displayCurrency ${displayAmount.toStringAsFixed(0)}',
-                                    style: TextStyle(
-                                      fontSize: 9.5,
-                                      fontWeight: FontWeight.w800,
-                                      color: isDark ? Colors.indigo.shade200 : Colors.indigo.shade800,
-                                    ),
-                                  ),
-                                ),
-                              if (!isSender && senderMember != null && senderMember.name.trim().isNotEmpty)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                                  decoration: BoxDecoration(
-                                    color: isDark ? Colors.white10 : const Color(0xFFF1F5F9),
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(
-                                      color: isDark ? Colors.white12 : const Color(0xFFCBD5E1),
-                                      width: 0.6,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      UserAvatar(
-                                        name: senderMember.name,
-                                        colorHex: senderMember.colorHex,
-                                        size: 13,
-                                        fontSize: 7,
-                                      ),
-                                      const SizedBox(width: 3.5),
-                                      Flexible(
-                                        child: ConstrainedBox(
-                                          constraints: const BoxConstraints(maxWidth: 60),
-                                          child: Text(
-                                            senderMember.name.split(' ').first,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: TextStyle(
-                                              fontSize: 8.5,
-                                              fontWeight: FontWeight.w600,
-                                              color: isDark ? Colors.grey[300] : const Color(0xFF475569),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
                             ],
                           ),
                         ),
-                        const SizedBox(width: 6),
+                        if (isAcceptedInvite)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981).withAlpha(25),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text('ACCEPTED', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+                          )
+                        else if (isSender)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: Colors.blueGrey.withAlpha(25),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text('SENT', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                          ),
+                        if (displayAmount != null && displayAmount > 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: Colors.indigo.withAlpha(isDark ? 45 : 25),
+                              borderRadius: BorderRadius.circular(5),
+                              border: Border.all(
+                                color: Colors.indigo.withAlpha(isDark ? 90 : 60),
+                                width: 0.8,
+                              ),
+                            ),
+                            child: Text(
+                              '$displayCurrency ${displayAmount.toStringAsFixed(0)}',
+                              style: TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w800,
+                                color: isDark ? Colors.indigo.shade200 : Colors.indigo.shade800,
+                              ),
+                            ),
+                          ),
+                        if (!isSender && senderMember != null && senderMember.name.trim().isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: isDark ? Colors.white10 : const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                color: isDark ? Colors.white12 : const Color(0xFFCBD5E1),
+                                width: 0.6,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                UserAvatar(
+                                  name: senderMember.name,
+                                  colorHex: senderMember.colorHex,
+                                  size: 13,
+                                  fontSize: 7,
+                                ),
+                                const SizedBox(width: 3.5),
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(maxWidth: 60),
+                                  child: Text(
+                                    senderMember.name.split(' ').first,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 8.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: isDark ? Colors.grey[300] : const Color(0xFF475569),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
                             if (!alert.isRead) ...[
                               Container(
-                                width: 6.5,
-                                height: 6.5,
+                                width: 6,
+                                height: 6,
                                 decoration: BoxDecoration(
                                   color: color,
                                   shape: BoxShape.circle,
                                 ),
                               ),
-                              const SizedBox(width: 5),
+                              const SizedBox(width: 3.5),
                             ],
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  DateFormatter.formatShortDate(alert.timestamp),
-                                  maxLines: 1,
-                                  textAlign: TextAlign.end,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: alert.isRead ? FontWeight.w600 : FontWeight.w700,
-                                    color: alert.isRead
-                                        ? (isDark ? Colors.grey[400] : const Color(0xFF94A3B8))
-                                        : (isDark ? Colors.grey[200] : const Color(0xFF334155)),
-                                  ),
-                                ),
-                                const SizedBox(height: 1.5),
-                                Text(
-                                  DateFormatter.formatTimeOnly(alert.timestamp),
-                                  maxLines: 1,
-                                  textAlign: TextAlign.end,
-                                  style: TextStyle(
-                                    fontSize: 9.5,
-                                    fontWeight: alert.isRead ? FontWeight.w500 : FontWeight.w600,
-                                    color: alert.isRead
-                                        ? (isDark ? Colors.grey[500] : const Color(0xFF94A3B8))
-                                        : (isDark ? Colors.grey[300] : const Color(0xFF475569)),
-                                  ),
-                                ),
-                              ],
+                            Text(
+                              '${DateFormatter.formatShortDate(alert.timestamp)} • ${DateFormatter.formatTimeOnly(alert.timestamp)}',
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: alert.isRead ? FontWeight.w500 : FontWeight.w700,
+                                color: alert.isRead
+                                    ? (isDark ? Colors.grey[400] : const Color(0xFF94A3B8))
+                                    : (isDark ? Colors.grey[200] : const Color(0xFF334155)),
+                              ),
                             ),
                           ],
                         ),
                       ],
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 3),
                     Text(
                       NotificationFormatter.formatTitle(alert, currentUserId: currentUser.id),
                       style: TextStyle(
@@ -1869,269 +1836,265 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                         fontSize: 13,
                         color: isDark ? Colors.white : const Color(0xFF0F172A),
                       ),
-                      maxLines: 2,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 2),
                     Text(
                       displayMessage,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontSize: 11.5, color: isDark ? Colors.grey[300] : const Color(0xFF475569)),
                     ),
-                    if (alert.latitude != null && alert.longitude != null) ...[
-                      const SizedBox(height: 5),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
-                        decoration: BoxDecoration(
-                          color: (alert.type == AlertType.sosEmergency ? Colors.red : AppTheme.primary).withAlpha(isDark ? 30 : 15),
-                          borderRadius: BorderRadius.circular(5),
-                          border: Border.all(
-                            color: (alert.type == AlertType.sosEmergency ? Colors.red : AppTheme.primary).withAlpha(isDark ? 60 : 35),
-                            width: 0.8,
+                    const SizedBox(height: 6),
+                    // Unified Horizontal Metadata & Quick Action Bar
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        if (trip != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: isDark ? Colors.white10 : const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.flight_takeoff_rounded, size: 9.5, color: isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                                const SizedBox(width: 3.5),
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(maxWidth: 120),
+                                  child: Text(
+                                    trip.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.my_location_rounded,
-                              size: 10.5,
-                              color: alert.type == AlertType.sosEmergency ? Colors.red : AppTheme.primary,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              '📍 ${alert.latitude!.toStringAsFixed(4)}, ${alert.longitude!.toStringAsFixed(4)}',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                fontFamily: 'monospace',
-                                color: alert.type == AlertType.sosEmergency
-                                    ? (isDark ? Colors.red[300] : Colors.red[800])
-                                    : (isDark ? AppTheme.primaryLight : AppTheme.primary),
+                        if (alert.latitude != null && alert.longitude != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: (alert.type == AlertType.sosEmergency ? Colors.red : AppTheme.primary).withAlpha(isDark ? 30 : 15),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                color: (alert.type == AlertType.sosEmergency ? Colors.red : AppTheme.primary).withAlpha(isDark ? 60 : 35),
+                                width: 0.8,
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                    ],
-                    if (trip != null) ...[
-                      const SizedBox(height: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                        decoration: BoxDecoration(
-                          color: isDark ? Colors.white10 : const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          'Trip: ${trip.title}',
-                          style: TextStyle(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.my_location_rounded,
+                                  size: 9.5,
+                                  color: alert.type == AlertType.sosEmergency ? Colors.red : AppTheme.primary,
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  '${alert.latitude!.toStringAsFixed(3)}, ${alert.longitude!.toStringAsFixed(3)}',
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w700,
+                                    fontFamily: 'monospace',
+                                    color: alert.type == AlertType.sosEmergency
+                                        ? (isDark ? Colors.red[300] : Colors.red[800])
+                                        : (isDark ? AppTheme.primaryLight : AppTheme.primary),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ),
-                    ],
-                    // Quick Action Buttons
-                    if ((!isSender &&
-                            ((alert.type == AlertType.sosEmergency || alert.type == AlertType.companionStray
-                                    ? (alert.senderMemberId.isNotEmpty && alert.senderMemberId != 'system')
-                                    : false) ||
-                                (alert.latitude != null && alert.longitude != null))) ||
-                        (alert.type == AlertType.stoppageAdded ||
-                            alert.type == AlertType.stoppageArrival ||
-                            alert.type == AlertType.stoppageDeparture ||
-                            alert.type == AlertType.billAdded ||
-                            alert.type == AlertType.billUpdated ||
-                            alert.type == AlertType.memoryAdded)) ...[
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 6,
-                        children: [
-                          // Bill Action Button
-                          if (alert.type == AlertType.billAdded || alert.type == AlertType.billUpdated)
-                            InkWell(
-                              onTap: () {
-                                if (trip != null) {
-                                  ref.read(selectedTripIdProvider.notifier).state = trip.id;
-                                  AppNavigator.push(context, TripDetailScreen(tripId: trip.id, initialTabIndex: 3));
-                                }
-                              },
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: Colors.indigo.withAlpha(isDark ? 35 : 20),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: Colors.indigo.withAlpha(isDark ? 90 : 60),
-                                    width: 0.9,
-                                  ),
+                        // Contextual Quick Actions aligned inline with metadata
+                        if (alert.type == AlertType.billAdded || alert.type == AlertType.billUpdated)
+                          InkWell(
+                            onTap: () {
+                              if (trip != null) {
+                                ref.read(selectedTripIdProvider.notifier).state = trip.id;
+                                AppNavigator.push(context, TripDetailScreen(tripId: trip.id, initialTabIndex: 3));
+                              }
+                            },
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                              decoration: BoxDecoration(
+                                color: Colors.indigo.withAlpha(isDark ? 35 : 20),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: Colors.indigo.withAlpha(isDark ? 90 : 60),
+                                  width: 0.8,
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.receipt_long_rounded, size: 13, color: Colors.indigo),
-                                    const SizedBox(width: 4.5),
-                                    Text(
-                                      'View Bill',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: isDark ? Colors.indigo.shade200 : Colors.indigo.shade800,
-                                      ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.receipt_long_rounded, size: 11, color: Colors.indigo),
+                                  const SizedBox(width: 3.5),
+                                  Text(
+                                    'View Bill',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: isDark ? Colors.indigo.shade200 : Colors.indigo.shade800,
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
-                          // Memories Action Button
-                          if (alert.type == AlertType.memoryAdded)
-                            InkWell(
-                              onTap: () {
-                                if (trip != null) {
-                                  ref.read(selectedTripIdProvider.notifier).state = trip.id;
-                                  AppNavigator.push(context, TripDetailScreen(tripId: trip.id, initialTabIndex: trip.isSolo ? 4 : 5));
-                                }
-                              },
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: Colors.purple.withAlpha(isDark ? 35 : 20),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: Colors.purple.withAlpha(isDark ? 90 : 60),
-                                    width: 0.9,
-                                  ),
+                          ),
+                        if (alert.type == AlertType.memoryAdded)
+                          InkWell(
+                            onTap: () {
+                              if (trip != null) {
+                                ref.read(selectedTripIdProvider.notifier).state = trip.id;
+                                AppNavigator.push(context, TripDetailScreen(tripId: trip.id, initialTabIndex: trip.isSolo ? 4 : 5));
+                              }
+                            },
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                              decoration: BoxDecoration(
+                                color: Colors.purple.withAlpha(isDark ? 35 : 20),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: Colors.purple.withAlpha(isDark ? 90 : 60),
+                                  width: 0.8,
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.photo_library_rounded, size: 13, color: Colors.purple),
-                                    const SizedBox(width: 4.5),
-                                    Text(
-                                      'View Memories',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: isDark ? Colors.purple.shade200 : Colors.purple.shade800,
-                                      ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.photo_library_rounded, size: 11, color: Colors.purple),
+                                  const SizedBox(width: 3.5),
+                                  Text(
+                                    'View Memories',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: isDark ? Colors.purple.shade200 : Colors.purple.shade800,
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
-                          // Itinerary action button for stoppage & timeline alerts
-                          if (alert.type == AlertType.stoppageAdded || alert.type == AlertType.stoppageArrival || alert.type == AlertType.stoppageDeparture)
-                            InkWell(
-                              onTap: () {
-                                if (trip != null) {
-                                  ref.read(selectedTripIdProvider.notifier).state = trip.id;
-                                  AppNavigator.push(context, TripDetailScreen(tripId: trip.id, initialTabIndex: 0));
-                                }
-                              },
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: Colors.amber.shade800.withAlpha(isDark ? 35 : 20),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: Colors.amber.shade800.withAlpha(isDark ? 90 : 60),
-                                    width: 0.9,
-                                  ),
+                          ),
+                        if (alert.type == AlertType.stoppageAdded || alert.type == AlertType.stoppageArrival || alert.type == AlertType.stoppageDeparture)
+                          InkWell(
+                            onTap: () {
+                              if (trip != null) {
+                                ref.read(selectedTripIdProvider.notifier).state = trip.id;
+                                AppNavigator.push(context, TripDetailScreen(tripId: trip.id, initialTabIndex: 0));
+                              }
+                            },
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.shade800.withAlpha(isDark ? 35 : 20),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: Colors.amber.shade800.withAlpha(isDark ? 90 : 60),
+                                  width: 0.8,
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.timeline_rounded, size: 13, color: Colors.amber.shade800),
-                                    const SizedBox(width: 4.5),
-                                    Text(
-                                      'View Itinerary',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.amber.shade800,
-                                      ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.timeline_rounded, size: 11, color: Colors.amber.shade800),
+                                  const SizedBox(width: 3.5),
+                                  Text(
+                                    'View Itinerary',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.amber.shade800,
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
-                          // Call button: only for emergency-class alerts (SOS, stray)
-                          if (!isSender &&
-                              (alert.type == AlertType.sosEmergency || alert.type == AlertType.companionStray) &&
-                              alert.senderMemberId.isNotEmpty && alert.senderMemberId != 'system')
-                            InkWell(
-                              onTap: () => _callCompanion(
-                                context,
-                                alert.senderMemberId,
-                                trip: trip,
-                                senderName: alert.senderName,
+                          ),
+                        if (!isSender &&
+                            (alert.type == AlertType.sosEmergency || alert.type == AlertType.companionStray) &&
+                            alert.senderMemberId.isNotEmpty && alert.senderMemberId != 'system')
+                          InkWell(
+                            onTap: () => _callCompanion(
+                              context,
+                              alert.senderMemberId,
+                              trip: trip,
+                              senderName: alert.senderName,
+                            ),
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF10B981).withAlpha(isDark ? 35 : 20),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: const Color(0xFF10B981).withAlpha(isDark ? 90 : 60),
+                                  width: 0.8,
+                                ),
                               ),
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4.5),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF10B981).withAlpha(isDark ? 35 : 20),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: const Color(0xFF10B981).withAlpha(isDark ? 90 : 60),
-                                    width: 0.9,
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.phone_in_talk_rounded, size: 13, color: Color(0xFF10B981)),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'Call ${alert.senderName.isNotEmpty && alert.senderName != "Unknown Member" ? alert.senderName.split(" ").first : "Companion"}',
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: Color(0xFF10B981),
-                                      ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.phone_in_talk_rounded, size: 11, color: Color(0xFF10B981)),
+                                  SizedBox(width: 3.5),
+                                  Text(
+                                    'Call',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF10B981),
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
-                          if (!isSender && alert.latitude != null && alert.longitude != null)
-                            InkWell(
-                              onTap: () => _navigateToAlert(context, alert, trip: trip),
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4.5),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF0891B2).withAlpha(isDark ? 35 : 20),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: const Color(0xFF0891B2).withAlpha(isDark ? 90 : 60),
-                                    width: 0.9,
-                                  ),
-                                ),
-                                child: const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.directions_rounded, size: 13, color: Color(0xFF0891B2)),
-                                    SizedBox(width: 4),
-                                    Text(
-                                      'Navigate',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: Color(0xFF0891B2),
-                                      ),
-                                    ),
-                                  ],
+                          ),
+                        if (!isSender && alert.latitude != null && alert.longitude != null)
+                          InkWell(
+                            onTap: () => _navigateToAlert(context, alert, trip: trip),
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF0891B2).withAlpha(isDark ? 35 : 20),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: const Color(0xFF0891B2).withAlpha(isDark ? 90 : 60),
+                                  width: 0.8,
                                 ),
                               ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.directions_rounded, size: 11, color: Color(0xFF0891B2)),
+                                  SizedBox(width: 3.5),
+                                  Text(
+                                    'Navigate',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF0891B2),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                        ],
-                      ),
-                    ],
+                          ),
+                      ],
+                    ),
                   ],
                 ),
               ),

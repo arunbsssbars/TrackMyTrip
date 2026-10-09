@@ -105,6 +105,80 @@ class MediaCacheService extends ChangeNotifier {
     return item;
   }
 
+  /// Upload raw image bytes directly (for Web or non-filesystem platforms)
+  Future<MediaItem> uploadBytesAndQueue({
+    required Uint8List bytes,
+    required String entityType,
+    required String entityId,
+    String? tripId,
+    String? previewDataUrl,
+  }) async {
+    const uuid = Uuid();
+    final item = MediaItem(
+      id: uuid.v4(),
+      localPath: previewDataUrl ?? '',
+      status: MediaUploadStatus.uploading,
+      createdAt: DateTime.now(),
+      entityType: entityType,
+      entityId: entityId,
+      tripId: tripId,
+    );
+    _items[item.id] = item;
+    notifyListeners();
+
+    _uploadItemBytes(item, bytes: bytes, tripId: tripId);
+    return item;
+  }
+
+  Future<void> _uploadItemBytes(MediaItem item, {required Uint8List bytes, String? tripId}) async {
+    if (!_items.containsKey(item.id)) return;
+    try {
+      if (_storageService.isAvailable) {
+        final targetTripId = tripId ?? item.tripId ?? 'shared_trips';
+        final memoryId = item.entityId.isNotEmpty ? item.entityId : item.id;
+        final downloadUrl = await _storageService.uploadMemoryPhotoBytes(
+          tripId: targetTripId,
+          memoryId: memoryId,
+          bytes: bytes,
+          onProgress: (progress) {
+            if (_items.containsKey(item.id)) {
+              _items[item.id]!.uploadProgress = progress;
+              notifyListeners();
+            }
+          },
+        );
+        if (downloadUrl != null && downloadUrl.isNotEmpty) {
+          _items[item.id]!
+            ..status = MediaUploadStatus.uploaded
+            ..uploadProgress = 1.0
+            ..remoteUrl = downloadUrl;
+          notifyListeners();
+          if (item.entityType == 'memory' && _ref != null) {
+            try {
+              _ref.read(allMemoriesProvider.notifier).updateMemoryMediaUrl(memoryId, downloadUrl);
+            } catch (_) {}
+          }
+          return;
+        }
+      }
+      _items[item.id]!.status = MediaUploadStatus.local;
+      if (item.entityType == 'memory' && _ref != null) {
+        try {
+          _ref.read(allMemoriesProvider.notifier).updateMemoryUploadStatus(item.entityId, MediaUploadStatus.local);
+        } catch (_) {}
+      }
+    } catch (e) {
+      debugPrint('[MediaCacheService] Web photo upload error: $e');
+      _items[item.id]!.status = MediaUploadStatus.local;
+      if (item.entityType == 'memory' && _ref != null) {
+        try {
+          _ref.read(allMemoriesProvider.notifier).updateMemoryUploadStatus(item.entityId, MediaUploadStatus.local);
+        } catch (_) {}
+      }
+    }
+    notifyListeners();
+  }
+
   /// Copy source file into app documents/media/ directory
   Future<String> _copyToAppDir(String sourcePath) async {
     final docsDir = await getApplicationDocumentsDirectory();

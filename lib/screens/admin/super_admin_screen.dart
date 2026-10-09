@@ -22,6 +22,7 @@ class SuperAdminScreen extends ConsumerStatefulWidget {
 class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
   bool _isCleaningRooms = false;
   int? _lastCleanedCount;
+  int _selectedSegment = 0;
 
   void _copyDiagnosticReport(FreeTierQuotaMetrics metrics) {
     final report = AdminService.generateSystemDiagnosticReport(metrics);
@@ -210,7 +211,7 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
       appBar: AppBar(
         title: const Row(
           children: [
-            Icon(Icons.shield_rounded, color: Color(0xFFF59E0B), size: 22),
+            Icon(Icons.shield_rounded, color: Color(0xFF6366F1), size: 22),
             SizedBox(width: 8),
             Text(
               'Super Admin Console',
@@ -266,55 +267,60 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Executive Authority Ribbon
+              // Executive Authority Ribbon (Modern Slate / Indigo)
               _buildAuthorityRibbon(isDark, metrics),
+              const SizedBox(height: 12),
+
+              // Executive Horizontal KPI Bar
+              _buildExecutiveKpiBar(isDark, metrics),
+              const SizedBox(height: 14),
+
+              // 3-Segment Navigation Switcher
+              _buildSegmentSwitcher(isDark),
               const SizedBox(height: 16),
 
-              // Section: Free Tier Quotas
-              _buildSectionHeader('Firebase Free-Tier Limits (Spark Plan)', Icons.cloud_done_rounded, const Color(0xFF3B82F6)),
-              const SizedBox(height: 10),
-              _buildFirestoreCard(isDark, metrics),
-              const SizedBox(height: 12),
-              _buildRtdbCard(isDark, metrics),
-              const SizedBox(height: 12),
-              _buildStorageAndAuthRow(isDark, metrics),
-              const SizedBox(height: 20),
-
-              // Section: Connectivity & Latency
-              _buildSectionHeader('Live Infrastructure & Diagnostics', Icons.speed_rounded, const Color(0xFF10B981)),
-              const SizedBox(height: 10),
-              _buildLatencyCard(isDark, metrics, offlineEngine),
-              const SizedBox(height: 20),
-
-              // Section: Cloud Room & Quota Preserver
-              _buildSectionHeader('Cloud Room Quota Preserver', Icons.auto_delete_rounded, const Color(0xFFF97316)),
-              const SizedBox(height: 10),
-              _buildRoomMaintenanceCard(isDark, metrics),
-              const SizedBox(height: 20),
-
-              // Section: DevOps CI/CD & Pipeline Status
-              _buildSectionHeader('DevOps CI/CD & Pipeline Status', Icons.integration_instructions_rounded, const Color(0xFF8B5CF6)),
-              const SizedBox(height: 10),
-              _buildDevOpsPipelineCard(isDark),
-              const SizedBox(height: 20),
-
-              // Section: DevSecOps & Secrets Vault Posture
-              _buildSectionHeader('DevSecOps & Secrets Vault Posture', Icons.security_rounded, const Color(0xFF06B6D4)),
-              const SizedBox(height: 10),
-              _buildSecurityPostureCard(isDark),
-              const SizedBox(height: 20),
-
-              // Action: Diagnostic Report Copy
-              FilledButton.icon(
-                icon: const Icon(Icons.data_object_rounded, size: 18),
-                label: const Text('Export System Diagnostic Report (JSON)', style: TextStyle(fontWeight: FontWeight.bold)),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  minimumSize: const Size.fromHeight(48),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              // Segment Views
+              if (_selectedSegment == 0) ...[
+                // Segment 0: Free Tier Quotas & Cloud Preserver
+                _buildSectionHeader('Firebase Free-Tier Limits (Spark Plan)', Icons.cloud_done_rounded, const Color(0xFF3B82F6)),
+                const SizedBox(height: 10),
+                _buildFirestoreCard(isDark, metrics),
+                const SizedBox(height: 12),
+                _buildRtdbCard(isDark, metrics),
+                const SizedBox(height: 12),
+                _buildStorageAndAuthRow(isDark, metrics),
+                const SizedBox(height: 18),
+                _buildSectionHeader('Cloud Room Quota Preserver', Icons.auto_delete_rounded, const Color(0xFFF97316)),
+                const SizedBox(height: 10),
+                _buildRoomMaintenanceCard(isDark, metrics),
+              ] else if (_selectedSegment == 1) ...[
+                // Segment 1: Connectivity & Latency Diagnostics
+                _buildSectionHeader('Live Infrastructure & Diagnostics', Icons.speed_rounded, const Color(0xFF10B981)),
+                const SizedBox(height: 10),
+                _buildLatencyCard(isDark, metrics, offlineEngine),
+                const SizedBox(height: 14),
+                _buildCanaryQuickProbeCard(isDark),
+              ] else ...[
+                // Segment 2: DevOps CI/CD & DevSecOps Posture
+                _buildSectionHeader('DevOps CI/CD & Pipeline Status', Icons.integration_instructions_rounded, const Color(0xFF8B5CF6)),
+                const SizedBox(height: 10),
+                _buildDevOpsPipelineCard(isDark),
+                const SizedBox(height: 14),
+                _buildSectionHeader('DevSecOps & Secrets Vault Posture', Icons.security_rounded, const Color(0xFF06B6D4)),
+                const SizedBox(height: 10),
+                _buildSecurityPostureCard(isDark),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  icon: const Icon(Icons.data_object_rounded, size: 18),
+                  label: const Text('Export System Diagnostic Report (JSON)', style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () => _copyDiagnosticReport(metrics),
                 ),
-                onPressed: () => _copyDiagnosticReport(metrics),
-              ),
+              ],
               const SizedBox(height: 24),
             ],
           ),
@@ -329,23 +335,32 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: isDark
-              ? [const Color(0xFF1E293B), const Color(0xFF334155)]
-              : [const Color(0xFFFEF3C7), const Color(0xFFFDE68A)],
+              ? [const Color(0xFF0F172A), const Color(0xFF1E293B)]
+              : [Colors.white, const Color(0xFFF8FAFC)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFF59E0B).withAlpha(120)),
+        border: Border.all(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(isDark ? 40 : 10),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: const Color(0xFFF59E0B).withAlpha(40),
+              color: const Color(0xFF6366F1).withAlpha(isDark ? 40 : 25),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.verified_user_rounded, color: Color(0xFFD97706), size: 28),
+            child: const Icon(Icons.shield_rounded, color: Color(0xFF6366F1), size: 28),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -354,35 +369,275 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
               children: [
                 Row(
                   children: [
-                    const Text(
+                    Text(
                       'SUPER ADMIN',
-                      style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.5, color: Color(0xFFB45309)),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                        letterSpacing: 0.6,
+                        color: isDark ? const Color(0xFF818CF8) : const Color(0xFF4F46E5),
+                      ),
                     ),
                     const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF10B981).withAlpha(30),
+                        color: const Color(0xFF10B981).withAlpha(25),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: const Text('ACTIVE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF059669))),
                     ),
                   ],
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 const Text(
                   AdminService.superAdminEmail,
                   style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Text(
                   'Project: trackmytrip-sync-2026 • Region: asia-south1',
-                  style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : const Color(0xFF78350F)),
+                  style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[400] : const Color(0xFF64748B)),
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExecutiveKpiBar(bool isDark, FreeTierQuotaMetrics metrics) {
+    final readsPct = metrics.firestoreReadsPercent;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildKpiChip(
+              icon: Icons.local_fire_department_rounded,
+              iconColor: const Color(0xFFF97316),
+              label: 'Firestore',
+              value: '${readsPct.toStringAsFixed(0)}%',
+              sub: '${metrics.firestoreEstimatedReads} reads',
+              isDark: isDark,
+            ),
+          ),
+          Container(width: 1, height: 34, color: isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+          Expanded(
+            child: _buildKpiChip(
+              icon: Icons.bolt_rounded,
+              iconColor: const Color(0xFF38BDF8),
+              label: 'RTDB',
+              value: '${metrics.rtdbActiveConnections}',
+              sub: '${metrics.rtdbStorageMb.toStringAsFixed(1)} MB',
+              isDark: isDark,
+            ),
+          ),
+          Container(width: 1, height: 34, color: isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+          Expanded(
+            child: _buildKpiChip(
+              icon: Icons.folder_shared_rounded,
+              iconColor: const Color(0xFF06B6D4),
+              label: 'Storage',
+              value: '${metrics.storageUsedMb.toStringAsFixed(1)} MB',
+              sub: '5 GB free',
+              isDark: isDark,
+            ),
+          ),
+          Container(width: 1, height: 34, color: isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+          Expanded(
+            child: _buildKpiChip(
+              icon: Icons.speed_rounded,
+              iconColor: const Color(0xFF10B981),
+              label: 'Latency',
+              value: metrics.firestoreLatencyMs != null ? '${metrics.firestoreLatencyMs} ms' : 'Online',
+              sub: 'Spark Plan',
+              isDark: isDark,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildKpiChip({
+    required IconData icon,
+    required Color iconColor,
+    required String label,
+    required String value,
+    required String sub,
+    required bool isDark,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 12, color: iconColor),
+              const SizedBox(width: 3),
+              Flexible(
+                child: Text(
+                  label,
+                  style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w900),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          Text(
+            sub,
+            style: const TextStyle(fontSize: 9, color: Colors.grey),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSegmentSwitcher(bool isDark) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.all(3),
+      child: Row(
+        children: [
+          _buildSegmentButton(0, 'Quotas & Cloud', Icons.cloud_done_rounded, isDark),
+          _buildSegmentButton(1, 'Diagnostics', Icons.speed_rounded, isDark),
+          _buildSegmentButton(2, 'DevOps & Security', Icons.security_rounded, isDark),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSegmentButton(int index, String label, IconData icon, bool isDark) {
+    final isSelected = _selectedSegment == index;
+    return Expanded(
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          setState(() => _selectedSegment = index);
+        },
+        borderRadius: BorderRadius.circular(10),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+          decoration: BoxDecoration(
+            color: isSelected ? (isDark ? const Color(0xFF334155) : Colors.white) : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withAlpha(isDark ? 40 : 15),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    )
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 13,
+                color: isSelected
+                    ? (isDark ? Colors.white : AppTheme.primary)
+                    : (isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                    color: isSelected
+                        ? (isDark ? Colors.white : AppTheme.primary)
+                        : (isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCanaryQuickProbeCard(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withAlpha(25),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.health_and_safety_rounded, color: Color(0xFF10B981), size: 20),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Canary Probes & Health Checks', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    Text('Synthetics, Hardware Vault & Zero-Latency Ping', style: TextStyle(fontSize: 11.5, color: Colors.grey)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _runCanaryProbe,
+                  icon: const Icon(Icons.radar_rounded, size: 16),
+                  label: const Text('Probe Canary', style: TextStyle(fontSize: 12)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _runVaultDiagnostics,
+                  icon: const Icon(Icons.shield_moon_rounded, size: 16),
+                  label: const Text('Probe Vault', style: TextStyle(fontSize: 12)),
+                ),
+              ),
+            ],
           ),
         ],
       ),

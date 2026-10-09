@@ -36,6 +36,7 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
   bool _isSigningOut = false;
   bool _isDeletingAccount = false;
   bool _hasInitializedValues = false;
+  int _selectedSegment = 0; // 0: Identity & Bio, 1: Preferences & Safety, 2: Data & Device
 
   @override
   void initState() {
@@ -305,6 +306,45 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
         elevation: 0,
         backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
       ),
+      bottomNavigationBar: SafeArea(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            border: Border(
+              top: BorderSide(
+                color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+              ),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withAlpha(isDark ? 40 : 10),
+                blurRadius: 8,
+                offset: const Offset(0, -2),
+              ),
+            ],
+          ),
+          child: FilledButton.icon(
+            onPressed: _isSaving ? null : _saveProfile,
+            icon: _isSaving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : const Icon(Icons.cloud_done_rounded, size: 20),
+            label: Text(
+              _isSaving ? 'Synchronizing Cloud Profile...' : 'Save Profile Changes',
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+            ),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primary,
+              minimumSize: const Size.fromHeight(48),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+        ),
+      ),
       body: SingleChildScrollView(
         physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
         padding: EdgeInsets.symmetric(horizontal: MediaQuery.sizeOf(context).width > 800 ? (MediaQuery.sizeOf(context).width - 640) / 2 : AppSpacing.md, vertical: AppSpacing.md),
@@ -428,15 +468,15 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                         ),
                       if (isSuperAdmin)
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                           decoration: BoxDecoration(
                             gradient: const LinearGradient(
-                              colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
+                              colors: [Color(0xFF4F46E5), Color(0xFF06B6D4)],
                             ),
                             borderRadius: BorderRadius.circular(8),
                             boxShadow: [
                               BoxShadow(
-                                color: const Color(0xFFF59E0B).withAlpha(60),
+                                color: const Color(0xFF4F46E5).withAlpha(60),
                                 blurRadius: 4,
                                 offset: const Offset(0, 1),
                               ),
@@ -446,13 +486,13 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(Icons.shield_rounded, size: 12, color: Colors.white),
-                              SizedBox(width: 3.5),
+                              SizedBox(width: 4),
                               Text(
                                 'SUPER ADMIN',
                                 style: TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.w900,
-                                  letterSpacing: 0.3,
+                                  letterSpacing: 0.4,
                                   color: Colors.white,
                                 ),
                               ),
@@ -542,8 +582,26 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
               const SizedBox(height: 14),
             ],
 
-            // Section 1: Identification & Contact
+            // Segmented Section Navigation
             Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                children: [
+                  _buildSegmentButton(0, 'Identity', Icons.person_rounded, isDark),
+                  _buildSegmentButton(1, 'Preferences', Icons.tune_rounded, isDark),
+                  _buildSegmentButton(2, 'Device & Data', Icons.dns_rounded, isDark),
+                ],
+              ),
+            ),
+
+            if (_selectedSegment == 0) ...[
+              // Section 1: Identification & Contact
+              Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: isDark ? const Color(0xFF1E293B) : Colors.white,
@@ -682,10 +740,12 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                 ],
               ),
             ),
-            const SizedBox(height: 14),
+            ],
 
-            // Section 3 (Loop 125): Travel Preferences & Emergency Contact
-            Container(
+            // SEGMENT 1: Preferences & Safety
+            if (_selectedSegment == 1) ...[
+              // Section 3: Travel Preferences & Emergency Contact
+              Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: isDark ? const Color(0xFF1E293B) : Colors.white,
@@ -831,98 +891,99 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
             ),
             const SizedBox(height: 14),
 
-            if (isSuperAdmin) ...[
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: isDark
-                        ? [const Color(0xFF1E293B), const Color(0xFF292524)]
-                        : [const Color(0xFFFFFBEB), Colors.white],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+              if (isSuperAdmin) ...[
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: isDark
+                          ? [const Color(0xFF0F172A), const Color(0xFF1E293B)]
+                          : [const Color(0xFFF8FAFC), const Color(0xFFEEF2FF)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isDark ? const Color(0xFF3B82F6).withAlpha(80) : const Color(0xFF6366F1).withAlpha(80),
+                      width: 1.2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF6366F1).withAlpha(isDark ? 25 : 15),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
                   ),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFFF59E0B).withAlpha(140), width: 1.2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFFF59E0B).withAlpha(isDark ? 30 : 20),
-                      blurRadius: 10,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF6366F1).withAlpha(35),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.admin_panel_settings_rounded, color: Color(0xFF6366F1), size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  'Super Admin Console',
+                                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+                                ),
+                                SizedBox(width: 6),
+                                Icon(Icons.verified_rounded, size: 14, color: Color(0xFF6366F1)),
+                              ],
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Free-Tier Quota Monitor & Cloud Telemetry',
+                              style: TextStyle(fontSize: 11.5, color: Colors.grey),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      FilledButton.tonalIcon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF6366F1).withAlpha(30),
+                          foregroundColor: isDark ? const Color(0xFF818CF8) : const Color(0xFF4F46E5),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          minimumSize: const Size(40, 34),
+                        ),
+                        icon: const Icon(Icons.arrow_forward_rounded, size: 14),
+                        label: const Text('Open', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        onPressed: () {
+                          HapticFeedback.lightImpact();
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (context) => const SuperAdminScreen()),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF59E0B).withAlpha(40),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(Icons.admin_panel_settings_rounded, color: Color(0xFFD97706), size: 24),
-                        ),
-                        const SizedBox(width: 12),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Text(
-                                    'Super Admin Console',
-                                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
-                                  ),
-                                  SizedBox(width: 6),
-                                  Icon(Icons.verified_rounded, size: 14, color: Color(0xFFD97706)),
-                                ],
-                              ),
-                              SizedBox(height: 2),
-                              Text(
-                                'Free-Tier Quota Monitor & Cloud Telemetry',
-                                style: TextStyle(fontSize: 11.5, color: Colors.grey),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                        FilledButton.tonalIcon(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFFF59E0B).withAlpha(40),
-                            foregroundColor: const Color(0xFFB45309),
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            minimumSize: const Size(40, 32),
-                          ),
-                          icon: const Icon(Icons.arrow_forward_rounded, size: 14),
-                          label: const Text('Open', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                          onPressed: () {
-                            HapticFeedback.lightImpact();
-                            Navigator.of(context).push(
-                              MaterialPageRoute(builder: (context) => const SuperAdminScreen()),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 14),
+                const SizedBox(height: 14),
+              ],
             ],
 
-            // Section 5 (Loop 126): Local SQLite Cache & Offline Sync Telemetry
-            Builder(
-              builder: (ctx) {
-                Map<String, int> telemetry = const {};
-                try {
-                  telemetry = ref.read(localStorageServiceProvider).getStorageTelemetry();
-                } catch (_) {}
+            // SEGMENT 2: Device & Data
+            if (_selectedSegment == 2) ...[
+              // Section 5: Local SQLite Cache & Offline Sync Telemetry
+              Builder(
+                builder: (ctx) {
+                  Map<String, int> telemetry = const {};
+                  try {
+                    telemetry = ref.read(localStorageServiceProvider).getStorageTelemetry();
+                  } catch (_) {}
 
-                return Container(
+                  return Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     color: isDark ? const Color(0xFF1E293B) : Colors.white,
@@ -997,28 +1058,10 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                 );
               },
             ),
-            const SizedBox(height: 20),
-
-            // Action: Save Profile & Sync
-            FilledButton.icon(
-              onPressed: _isSaving ? null : _saveProfile,
-              icon: _isSaving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.cloud_done_rounded, size: 20),
-              label: Text(
-                _isSaving ? 'Synchronizing Cloud Profile...' : 'Save Profile Changes',
-                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-              ),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                minimumSize: const Size.fromHeight(48),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
-              ),
+            const SizedBox(height: 16),
+            const Text(
+              'Account & Security Actions',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5),
             ),
             const SizedBox(height: 12),
 
@@ -1119,10 +1162,11 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                     )
                   : const Icon(Icons.delete_forever_rounded, size: 16, color: Colors.redAccent),
               label: Text(
-                _isDeletingAccount ? 'Deleting Account...' : 'Delete Account & Purge Data',
+                _isDeletingAccount ? 'Deleting Account...' : 'Delete Account & Purge Data (GDPR)',
                 style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.redAccent),
               ),
             ),
+            ],
             const SizedBox(height: 24),
           ],
         ),
@@ -1262,6 +1306,64 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSegmentButton(int index, String label, IconData icon, bool isDark) {
+    final isSelected = _selectedSegment == index;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          setState(() => _selectedSegment = index);
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? (isDark ? const Color(0xFF0F172A) : Colors.white)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(11),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withAlpha(isDark ? 50 : 15),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    )
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 15,
+                color: isSelected
+                    ? AppTheme.primary
+                    : (isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                    color: isSelected
+                        ? (isDark ? Colors.white : const Color(0xFF0F172A))
+                        : (isDark ? Colors.grey[400] : const Color(0xFF64748B)),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),

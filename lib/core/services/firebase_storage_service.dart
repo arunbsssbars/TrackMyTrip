@@ -8,7 +8,19 @@ class FirebaseStorageService {
   final FirebaseStorage? _storage;
 
   FirebaseStorageService({FirebaseStorage? storage})
-      : _storage = storage ?? (Firebase.apps.isNotEmpty ? FirebaseStorage.instance : null);
+      : _storage = storage ?? _resolveStorage();
+
+  static FirebaseStorage? _resolveStorage() {
+    if (Firebase.apps.isEmpty) return null;
+    try {
+      return FirebaseStorage.instance;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[FirebaseStorageService] Could not resolve FirebaseStorage instance: $e');
+      }
+      return null;
+    }
+  }
 
   bool get isAvailable => _storage != null;
 

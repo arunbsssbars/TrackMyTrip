@@ -118,21 +118,38 @@ class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
       String? localPath;
       bool isQueueing = false;
 
-      // Cache image permanently into local app storage
-      if (_pickedFile != null && !kIsWeb && !_activePhoto!.startsWith('data:image')) {
-        try {
-          final mediaService = ref.read(mediaCacheServiceProvider);
-          final item = await mediaService.cacheAndQueue(
-            sourcePath: _activePhoto!,
-            entityType: 'memory',
-            entityId: memoryId,
-            tripId: widget.tripId,
-          );
-          finalMediaPath = item.localPath;
-          localPath = item.localPath;
-          isQueueing = true;
-        } catch (e) {
-          localPath = _activePhoto;
+      // Cache image permanently into local app storage or queue for Cloud Storage
+      if (_pickedFile != null) {
+        if (kIsWeb) {
+          try {
+            final bytes = await _pickedFile!.readAsBytes();
+            final mediaService = ref.read(mediaCacheServiceProvider);
+            await mediaService.uploadBytesAndQueue(
+              bytes: bytes,
+              entityType: 'memory',
+              entityId: memoryId,
+              tripId: widget.tripId,
+              previewDataUrl: _activePhoto,
+            );
+            isQueueing = true;
+          } catch (e) {
+            debugPrint('[AddMemoryDialog] Web upload exception: $e');
+          }
+        } else if (!_activePhoto!.startsWith('data:image')) {
+          try {
+            final mediaService = ref.read(mediaCacheServiceProvider);
+            final item = await mediaService.cacheAndQueue(
+              sourcePath: _activePhoto!,
+              entityType: 'memory',
+              entityId: memoryId,
+              tripId: widget.tripId,
+            );
+            finalMediaPath = item.localPath;
+            localPath = item.localPath;
+            isQueueing = true;
+          } catch (e) {
+            localPath = _activePhoto;
+          }
         }
       }
 
