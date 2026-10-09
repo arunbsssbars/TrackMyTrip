@@ -22,6 +22,9 @@ import 'models/auth_user.dart';
 
 import 'core/utils/app_logger.dart';
 import 'core/database/app_database.dart';
+import 'core/services/crash_reporting_service.dart';
+import 'core/services/live_currency_service.dart';
+import 'screens/common/app_error_boundary.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -39,14 +42,32 @@ void main() async {
   ]);
 
   // Production Global Error Telemetry & Crash Logging
+  await CrashReportingService.initialize();
+  await LiveCurrencyService.initialize();
+
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
-    AppLogger.error('Flutter Framework Error: ${details.exceptionAsString()}', details.exception, details.stack);
+    CrashReportingService.recordError(
+      details.exception,
+      details.stack,
+      reason: 'Flutter Framework Error: ${details.exceptionAsString()}',
+      fatal: false,
+    );
   };
 
   WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
-    AppLogger.error('Unhandled Platform Exception: $error', error, stack);
+    CrashReportingService.recordError(
+      error,
+      stack,
+      reason: 'Unhandled Platform Exception',
+      fatal: true,
+    );
     return true;
+  };
+
+  // Graceful visual error recovery instead of red screen of death
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return AppErrorBoundary(details: details);
   };
 
   await Firebase.initializeApp(

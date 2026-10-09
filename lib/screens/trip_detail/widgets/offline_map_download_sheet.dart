@@ -39,6 +39,23 @@ class _OfflineMapDownloadSheetState extends State<OfflineMapDownloadSheet> {
   double _cachedMb = 0.0;
   bool _loadingStats = true;
 
+  String _selectedPack = 'Trip Route';
+
+  static final Map<String, List<LatLng>> _regionalPacks = {
+    'Trip Route': [],
+    'Manali & Solang': [const LatLng(32.2396, 77.1887), const LatLng(32.3166, 77.1575), const LatLng(32.3716, 77.2466)],
+    'Shimla & Kufri': [const LatLng(31.1048, 77.1734), const LatLng(31.0988, 77.2678), const LatLng(31.1444, 77.1592)],
+    'Goa Coastal': [const LatLng(15.5524, 73.7557), const LatLng(15.4909, 73.8278), const LatLng(15.2832, 73.9863)],
+    'Leh & Ladakh': [const LatLng(34.1526, 77.5771), const LatLng(34.2787, 77.6047), const LatLng(33.7595, 78.6674)],
+  };
+
+  List<LatLng> get _effectivePoints {
+    if (_selectedPack == 'Trip Route' || !_regionalPacks.containsKey(_selectedPack)) {
+      return widget.routePoints;
+    }
+    return _regionalPacks[_selectedPack]!;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -63,7 +80,8 @@ class _OfflineMapDownloadSheetState extends State<OfflineMapDownloadSheet> {
   }
 
   void _startDownload() {
-    final tiles = MapTileCacheService.calculateTileCoordinates(points: widget.routePoints);
+    final points = _effectivePoints;
+    final tiles = MapTileCacheService.calculateTileCoordinates(points: points);
     if (tiles.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No route points or stoppages found to cache.')),
@@ -77,7 +95,7 @@ class _OfflineMapDownloadSheetState extends State<OfflineMapDownloadSheet> {
     });
 
     _sub?.cancel();
-    _sub = MapTileCacheService.downloadRouteTiles(points: widget.routePoints).listen(
+    _sub = MapTileCacheService.downloadRouteTiles(points: points).listen(
       (progress) {
         if (mounted) {
           setState(() {
@@ -119,7 +137,8 @@ class _OfflineMapDownloadSheetState extends State<OfflineMapDownloadSheet> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final calculatedTiles = MapTileCacheService.calculateTileCoordinates(points: widget.routePoints);
+    final effectivePts = _effectivePoints;
+    final calculatedTiles = MapTileCacheService.calculateTileCoordinates(points: effectivePts);
     final estTilesCount = calculatedTiles.length;
     final estMb = (estTilesCount * 0.022).toStringAsFixed(1);
 
@@ -178,7 +197,53 @@ class _OfflineMapDownloadSheetState extends State<OfflineMapDownloadSheet> {
               ),
             ],
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
+
+          // Regional Pack Filter Chips
+          const Text(
+            'Select Region / Preset Pack:',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.grey),
+          ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Row(
+              children: _regionalPacks.keys.map((packName) {
+                final isSelected = _selectedPack == packName;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilterChip(
+                    label: Text(packName),
+                    selected: isSelected,
+                    onSelected: _isDownloading
+                        ? null
+                        : (selected) {
+                            if (selected) {
+                              setState(() {
+                                _selectedPack = packName;
+                              });
+                            }
+                          },
+                    selectedColor: AppTheme.primary.withAlpha(40),
+                    checkmarkColor: AppTheme.primary,
+                    labelStyle: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      color: isSelected ? AppTheme.primary : (isDark ? Colors.white70 : Colors.black87),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(
+                        color: isSelected ? AppTheme.primary : (isDark ? Colors.grey[800]! : Colors.grey[300]!),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 16),
 
           // Info Card
           Container(
@@ -193,9 +258,9 @@ class _OfflineMapDownloadSheetState extends State<OfflineMapDownloadSheet> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Expanded(child: Text('Route Coverage Points', style: TextStyle(fontSize: 12.5, color: Colors.grey))),
+                    const Expanded(child: Text('Selected Area Points', style: TextStyle(fontSize: 12.5, color: Colors.grey))),
                     const SizedBox(width: 8),
-                    Text('${widget.routePoints.length} GPS Points', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    Text('${effectivePts.length} GPS Points', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                   ],
                 ),
                 const Divider(height: 16),
