@@ -3,6 +3,13 @@ name: Build iOS IPA
 on:
   workflow_dispatch:
   push:
+    branches: [ main ]
+    paths:
+      - 'lib/**'
+      - 'ios/**'
+      - 'assets/**'
+      - 'pubspec.yaml'
+      - '.github/workflows/build_ios.yml'
 
 jobs:
   build-ios:
