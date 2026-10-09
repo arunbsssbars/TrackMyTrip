@@ -33,7 +33,7 @@ jobs:
           if [ -n "${{ secrets.ENV_FILE }}" ]; then
             echo "${{ secrets.ENV_FILE }}" > .env
           else
-            touch .env
+            cp .env.example .env
           fi
 
       - name: Install Dependencies
@@ -42,7 +42,7 @@ jobs:
           flutter pub get
 
       - name: Build iOS App with Unsigned Signing Allowed
-        run: flutter build ios --release --no-codesign
+        run: flutter build ios --release --no-codesign --dart-define-from-file=.env
         env:
           CODE_SIGN_IDENTITY: ""
           CODE_SIGN_REQUIRED: "NO"
