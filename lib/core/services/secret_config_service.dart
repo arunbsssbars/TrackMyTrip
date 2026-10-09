@@ -28,6 +28,9 @@ class SecretConfigService {
   static const String keyEnableCrashReporting = 'ENABLE_CRASH_REPORTING';
   static const String keyEnableAnalytics = 'ENABLE_ANALYTICS';
   static const String keyCiRunnerId = 'CI_RUNNER_ID';
+  static const String keyCloudinaryCloudName = 'CLOUDINARY_CLOUD_NAME';
+  static const String keyCloudinaryUploadPreset = 'CLOUDINARY_UPLOAD_PRESET';
+  static const String keyCloudinaryApiKey = 'CLOUDINARY_API_KEY';
 
   /// Initializes configuration from all available standard layers.
   static Future<void> initialize({Map<String, String>? overrides}) async {
@@ -73,6 +76,9 @@ class SecretConfigService {
       keyEnableCrashReporting,
       keyEnableAnalytics,
       keyCiRunnerId,
+      keyCloudinaryCloudName,
+      keyCloudinaryUploadPreset,
+      keyCloudinaryApiKey,
     ];
 
     for (final key in knownKeys) {
@@ -258,6 +264,13 @@ class SecretConfigService {
   static bool get isAnalyticsEnabled => getBool(keyEnableAnalytics, fallback: true);
   static String get ciRunnerId => get(keyCiRunnerId, fallback: 'local_env');
 
+  // Cloudinary Zero-Card Media Config
+  static String get cloudinaryCloudName => get(keyCloudinaryCloudName);
+  static String get cloudinaryUploadPreset => get(keyCloudinaryUploadPreset);
+  static String get cloudinaryApiKey => get(keyCloudinaryApiKey);
+  static bool get isCloudinaryConfigured =>
+      isConfigured(keyCloudinaryCloudName) && isConfigured(keyCloudinaryUploadPreset);
+
   // =================================================================
   // Zero-Leak Secret Masking & Security Audit
   // =================================================================
@@ -288,6 +301,9 @@ class SecretConfigService {
       'firebaseAppIdConfigured': isConfigured(keyFirebaseAppId),
       'firebaseAppIdMasked': maskSecret(get(keyFirebaseAppId)),
       'firebaseProjectId': firebaseProjectId,
+      'cloudinaryConfigured': isCloudinaryConfigured,
+      'cloudinaryCloudName': cloudinaryCloudName.isNotEmpty ? cloudinaryCloudName : '[NOT CONFIGURED]',
+      'cloudinaryPresetMasked': maskSecret(cloudinaryUploadPreset),
       'vaultPepperConfigured': isConfigured(keyVaultPepper),
       'crashReportingEnabled': isCrashReportingEnabled,
       'analyticsEnabled': isAnalyticsEnabled,

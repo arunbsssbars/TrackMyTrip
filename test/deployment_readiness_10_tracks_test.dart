@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:trackmytrip/core/services/admin_service.dart';
 import 'package:trackmytrip/core/services/canary_health_service.dart';
+import 'package:trackmytrip/core/services/cloudinary_service.dart';
 import 'package:trackmytrip/core/services/live_currency_service.dart';
 import 'package:trackmytrip/core/services/map_tile_cache_service.dart';
 import 'package:trackmytrip/core/services/media_cache_service.dart';
@@ -162,6 +163,14 @@ void main() {
       expect(item.isLocal, isTrue);
       expect(item.isUploaded, isFalse);
       expect(item.displayPath, equals('/local/test/photo.jpg'));
+    });
+
+    test('CloudinaryService produces optimized responsive memory URLs', () {
+      const cdnUrl = 'https://res.cloudinary.com/testcloud/image/upload/v1/photos/snow.jpg';
+      final optimized = CloudinaryService.getOptimizedUrl(cdnUrl, width: 600, quality: 80);
+      expect(optimized, contains('w_600'));
+      expect(optimized, contains('q_80'));
+      expect(optimized, contains('f_auto'));
     });
   });
 

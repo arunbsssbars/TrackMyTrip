@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'image_compression_service.dart';
 import 'firebase_storage_service.dart';
+import 'cloudinary_service.dart';
 import '../../providers/memory_provider.dart';
 import 'tombstone_service.dart';
 
@@ -51,10 +52,15 @@ class MediaItem {
 class MediaCacheService extends ChangeNotifier {
   final _items = <String, MediaItem>{};  // id → MediaItem
   final FirebaseStorageService _storageService;
+  final CloudinaryService _cloudinaryService;
   final Ref? _ref;
 
-  MediaCacheService({FirebaseStorageService? storageService, Ref? ref})
-      : _storageService = storageService ?? FirebaseStorageService(),
+  MediaCacheService({
+    FirebaseStorageService? storageService,
+    CloudinaryService? cloudinaryService,
+    Ref? ref,
+  })  : _storageService = storageService ?? FirebaseStorageService(),
+        _cloudinaryService = cloudinaryService ?? CloudinaryService(),
         _ref = ref;
 
   /// All tracked media items
@@ -133,9 +139,40 @@ class MediaCacheService extends ChangeNotifier {
   Future<void> _uploadItemBytes(MediaItem item, {required Uint8List bytes, String? tripId}) async {
     if (!_items.containsKey(item.id)) return;
     try {
+      final targetTripId = tripId ?? item.tripId ?? 'shared_trips';
+      final memoryId = item.entityId.isNotEmpty ? item.entityId : item.id;
+
+      // Strategy 1: Cloudinary (Zero-card free quota with dynamic transformations)
+      if (_cloudinaryService.isConfigured) {
+        final downloadUrl = await _cloudinaryService.uploadImageBytes(
+          bytes: bytes,
+          folder: 'trackmytrip/trips/$targetTripId/memories',
+          publicId: 'mem_$memoryId',
+          onProgress: (progress) {
+            if (_items.containsKey(item.id)) {
+              _items[item.id]!.uploadProgress = progress;
+              notifyListeners();
+            }
+          },
+        );
+
+        if (downloadUrl != null && downloadUrl.isNotEmpty) {
+          _items[item.id]!
+            ..status = MediaUploadStatus.uploaded
+            ..uploadProgress = 1.0
+            ..remoteUrl = downloadUrl;
+          notifyListeners();
+          if (item.entityType == 'memory' && _ref != null) {
+            try {
+              _ref.read(allMemoriesProvider.notifier).updateMemoryMediaUrl(memoryId, downloadUrl);
+            } catch (_) {}
+          }
+          return;
+        }
+      }
+
+      // Strategy 2: Firebase Storage fallback
       if (_storageService.isAvailable) {
-        final targetTripId = tripId ?? item.tripId ?? 'shared_trips';
-        final memoryId = item.entityId.isNotEmpty ? item.entityId : item.id;
         final downloadUrl = await _storageService.uploadMemoryPhotoBytes(
           tripId: targetTripId,
           memoryId: memoryId,
@@ -168,7 +205,7 @@ class MediaCacheService extends ChangeNotifier {
         } catch (_) {}
       }
     } catch (e) {
-      debugPrint('[MediaCacheService] Web photo upload error: $e');
+      debugPrint('[MediaCacheService] Photo upload error: $e');
       _items[item.id]!.status = MediaUploadStatus.local;
       if (item.entityType == 'memory' && _ref != null) {
         try {
@@ -198,7 +235,7 @@ class MediaCacheService extends ChangeNotifier {
     return destFile.path;
   }
 
-  /// Upload a single item directly to Firebase Cloud Storage
+  /// Upload a single item directly to remote cloud storage (Cloudinary or Firebase)
   Future<void> _uploadItem(MediaItem item, {String? tripId}) async {
     if (!_items.containsKey(item.id)) return;
 
@@ -230,9 +267,46 @@ class MediaCacheService extends ChangeNotifier {
         return;
       }
 
+      final targetTripId = tripId ?? item.tripId ?? 'shared_trips';
+      final memoryId = item.entityId.isNotEmpty ? item.entityId : item.id;
+
+      // Strategy 1: Cloudinary (Zero-card free quota with dynamic transformations)
+      if (_cloudinaryService.isConfigured) {
+        final downloadUrl = await _cloudinaryService.uploadImageFile(
+          file: file,
+          folder: 'trackmytrip/trips/$targetTripId/memories',
+          publicId: 'mem_$memoryId',
+          onProgress: (progress) {
+            if (_items.containsKey(item.id)) {
+              _items[item.id]!.uploadProgress = progress;
+              notifyListeners();
+            }
+          },
+        );
+
+        // Check if item was deleted while uploading
+        if (item.entityType == 'memory' && TombstoneService.isMemoryTombstoned(item.entityId)) {
+          await deleteItem(item.id);
+          return;
+        }
+
+        if (downloadUrl != null && downloadUrl.isNotEmpty) {
+          _items[item.id]!
+            ..status = MediaUploadStatus.uploaded
+            ..uploadProgress = 1.0
+            ..remoteUrl = downloadUrl;
+          notifyListeners();
+          if (item.entityType == 'memory' && _ref != null) {
+            try {
+              _ref.read(allMemoriesProvider.notifier).updateMemoryMediaUrl(memoryId, downloadUrl);
+            } catch (_) {}
+          }
+          return;
+        }
+      }
+
+      // Strategy 2: Firebase Storage fallback
       if (_storageService.isAvailable) {
-        final targetTripId = tripId ?? item.tripId ?? 'shared_trips';
-        final memoryId = item.entityId.isNotEmpty ? item.entityId : item.id;
         final downloadUrl = await _storageService.uploadMemoryPhoto(
           tripId: targetTripId,
           memoryId: memoryId,
@@ -266,7 +340,7 @@ class MediaCacheService extends ChangeNotifier {
         }
       }
 
-      // If Firebase Storage is unreachable or unconfigured, keep local and safe
+      // If both remote services are unconfigured/offline, keep safe in local cache
       _items[item.id]!.status = MediaUploadStatus.local;
       _items[item.id]!.uploadProgress = 0.0;
       if (item.entityType == 'memory' && _ref != null) {
@@ -275,7 +349,7 @@ class MediaCacheService extends ChangeNotifier {
         } catch (_) {}
       }
     } catch (e) {
-      debugPrint('[MediaCacheService] Firebase Storage upload error: $e');
+      debugPrint('[MediaCacheService] Remote storage upload error: $e');
       _items[item.id]!.status = MediaUploadStatus.local;
       _items[item.id]!.uploadProgress = 0.0;
       if (item.entityType == 'memory' && _ref != null) {
@@ -371,5 +445,6 @@ class MediaCacheService extends ChangeNotifier {
 
 final mediaCacheServiceProvider = ChangeNotifierProvider<MediaCacheService>((ref) {
   final storage = ref.watch(firebaseStorageServiceProvider);
-  return MediaCacheService(storageService: storage, ref: ref);
+  final cloudinary = ref.watch(cloudinaryServiceProvider);
+  return MediaCacheService(storageService: storage, cloudinaryService: cloudinary, ref: ref);
 });
