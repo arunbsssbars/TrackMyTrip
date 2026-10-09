@@ -36,10 +36,13 @@ jobs:
       - name: Create fallback .env file
         run: |
           if [ -n "${{ secrets.ENV_FILE }}" ]; then
+            echo "Using secret ENV_FILE configured in repository secrets."
             echo "${{ secrets.ENV_FILE }}" > .env
           else
+            echo "NOTICE: ENV_FILE secret not found; using fallback template from .env.example."
             cp .env.example .env
           fi
+          echo "Environment configuration ready ($(wc -l < .env) lines)."
 
       - name: Install Dependencies
         run: flutter pub get
