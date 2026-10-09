@@ -101,10 +101,23 @@ class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
   String? _activeTripId;
   Position? _lastFirestoreBroadcastPosition;
   DateTime? _lastFirestoreBroadcastTime;
+  DateTime? _lastRtdbBroadcastTime;
+
+  /// Minimum interval between RTDB broadcasts to prevent flooding (2.0 seconds)
+  static const Duration minRtdbBroadcastInterval = Duration(milliseconds: 2000);
+
+  /// Validates whether coordinates fall within valid geographic boundaries
+  static bool isValidCoordinate(double lat, double lng) {
+    return lat >= -90.0 && lat <= 90.0 && lng >= -180.0 && lng <= 180.0;
+  }
 
   /// Testing hook for setting last broadcast timestamp
   @visibleForTesting
   set lastFirestoreBroadcastTimeForTesting(DateTime? time) => _lastFirestoreBroadcastTime = time;
+
+  /// Testing hook for setting last RTDB broadcast timestamp
+  @visibleForTesting
+  set lastRtdbBroadcastTimeForTesting(DateTime? time) => _lastRtdbBroadcastTime = time;
 
   /// Testing hook for setting last broadcast position
   @visibleForTesting
@@ -256,6 +269,7 @@ class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
     _activeTripId = tripId;
     _lastFirestoreBroadcastPosition = null;
     _lastFirestoreBroadcastTime = null;
+    _lastRtdbBroadcastTime = null;
 
     final hasPerm = await requestPermission();
     if (!hasPerm) {
@@ -335,6 +349,14 @@ class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
   void _onNewPosition(Position pos) {
     if (!state.isTracking) return;
 
+    // Defense-in-depth: Reject corrupt or spoofed out-of-bounds geographic coordinates
+    if (!isValidCoordinate(pos.latitude, pos.longitude)) {
+      if (kDebugMode) {
+        debugPrint('[LiveLocation] Discarding invalid GPS coordinates: (${pos.latitude}, ${pos.longitude})');
+      }
+      return;
+    }
+
     if (_activeTripId != null) {
       final trips = _ref.read(tripListProvider);
       final trip = trips.where((t) => t.id == _activeTripId).firstOrNull;
@@ -358,7 +380,9 @@ class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
       ) / 1000.0;
     }
 
-    final speedKmh = pos.speed >= 0 ? (pos.speed * 3.6) : 0.0;
+    // Clamp speed to realistic bounds [0.0, 500.0 km/h] to prevent corrupt telemetry spikes
+    final rawSpeed = pos.speed >= 0 ? (pos.speed * 3.6) : 0.0;
+    final speedKmh = rawSpeed.clamp(0.0, 500.0);
     final now = DateTime.now();
 
     DateTime? stationarySince = state.stationarySince;
@@ -398,13 +422,19 @@ class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
         _ref.read(tripListProvider.notifier).updateMemberLocation(_activeTripId!, creatorId, broadcastLat, broadcastLng);
 
         // 2. Technique 1 - Option B: RTDB live convoy updates (unlimited operations within 10GB/mo free bandwidth)
-        _ref.read(realtimeSyncServiceProvider).broadcastLocation(
-          creatorId,
-          broadcastLat,
-          broadcastLng,
-          speedKmh: speedKmh,
-          heading: pos.heading,
-        );
+        // Rate-limited to max 1 write every 2.0s to prevent rapid sensor/jitter flood
+        final shouldBroadcastRtdb = _lastRtdbBroadcastTime == null ||
+            now.difference(_lastRtdbBroadcastTime!) >= minRtdbBroadcastInterval;
+        if (shouldBroadcastRtdb) {
+          _lastRtdbBroadcastTime = now;
+          _ref.read(realtimeSyncServiceProvider).broadcastLocation(
+            creatorId,
+            broadcastLat,
+            broadcastLng,
+            speedKmh: speedKmh,
+            heading: pos.heading,
+          );
+        }
 
         // 3. Technique 1 - Option A: Adaptive throttling for Firestore (guarantees staying below 20,000 writes/day)
         if (shouldBroadcastToFirestore(pos, speedKmh)) {
@@ -480,6 +510,7 @@ class LiveLocationTrackerNotifier extends StateNotifier<LiveTrackingState> {
     _positionStreamSub = null;
     _lastFirestoreBroadcastPosition = null;
     _lastFirestoreBroadcastTime = null;
+    _lastRtdbBroadcastTime = null;
     state = state.copyWith(
       isTracking: false,
       statusMessage: 'Tracking paused',

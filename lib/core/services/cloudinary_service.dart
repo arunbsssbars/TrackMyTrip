@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'anti_abuse_rate_limiter_service.dart';
 import 'image_compression_service.dart';
 import 'secret_config_service.dart';
 
@@ -121,14 +122,95 @@ class CloudinaryService {
   }
 
   // =================================================================
+  // Magic Byte Validation & Anti-Abuse Signatures
+  // =================================================================
+
+  /// Maximum permissible raw file size before compression (15 MB) to avoid OOM DoS attacks
+  static const int maxRawFileSizeBytes = 15 * 1024 * 1024;
+
+  /// Validates whether the given raw [bytes] match a legitimate image file header
+  /// (JPEG, PNG, WebP, or GIF) via binary magic bytes.
+  static bool isValidImageBytes(List<int> bytes) {
+    if (bytes.length < 4) return false;
+
+    // JPEG: FF D8 FF
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xFF &&
+        bytes[1] == 0xD8 &&
+        bytes[2] == 0xFF) {
+      return true;
+    }
+
+    // PNG: 89 50 4E 47 0D 0A 1A 0A
+    if (bytes.length >= 8 &&
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47 &&
+        bytes[4] == 0x0D &&
+        bytes[5] == 0x0A &&
+        bytes[6] == 0x1A &&
+        bytes[7] == 0x0A) {
+      return true;
+    }
+
+    // WebP: 52 49 46 46 (RIFF) ... 57 45 42 50 (WEBP)
+    if (bytes.length >= 12 &&
+        bytes[0] == 0x52 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x46 &&
+        bytes[8] == 0x57 &&
+        bytes[9] == 0x45 &&
+        bytes[10] == 0x42 &&
+        bytes[11] == 0x50) {
+      return true;
+    }
+
+    // GIF: 47 49 46 38 (GIF87a or GIF89a)
+    if (bytes.length >= 6 &&
+        bytes[0] == 0x47 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x38 &&
+        (bytes[4] == 0x37 || bytes[4] == 0x39) &&
+        bytes[5] == 0x61) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /// Inspects the magic bytes of a local [File] header without loading the entire file into memory.
+  static Future<bool> isValidImageFile(File file) async {
+    try {
+      if (!await file.exists()) return false;
+      final length = await file.length();
+      if (length < 4 || length > maxRawFileSizeBytes) return false;
+
+      final raf = await file.open(mode: FileMode.read);
+      try {
+        final header = await raf.read(16);
+        return isValidImageBytes(header);
+      } finally {
+        await raf.close();
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // =================================================================
   // Upload Pipeline (Guaranteed Image Optimization)
   // =================================================================
 
   /// Uploads a local image [File] to Cloudinary using an unsigned upload preset.
   /// Enforces:
-  /// 1. 25 GB quota cap guard (blocks upload if 25 GB reached to prevent billing).
-  /// 2. Guaranteed pre-upload compression down to FHD 1080p and 75-80% quality.
-  /// 3. In-flight Cloudinary auto format and quality parameters.
+  /// 1. Anti-abuse rate limit guard (max 10/min, 100/day).
+  /// 2. Binary magic byte validation (blocks non-image executable payloads).
+  /// 3. 25 GB quota cap guard (blocks upload if 25 GB reached to prevent billing).
+  /// 4. Guaranteed pre-upload compression down to FHD 1080p and 75-80% quality.
+  /// 5. In-flight Cloudinary auto format and quality parameters.
   /// Returns the secure HTTPS URL of the uploaded asset, or `null` on failure.
   Future<String?> uploadImageFile({
     required File file,
@@ -144,6 +226,15 @@ class CloudinaryService {
       return null;
     }
 
+    // Anti-Abuse Rate Limit guard: prevent runaway bot upload loops
+    final rateLimit = AntiAbuseRateLimiterService.checkMediaUploadAllowed();
+    if (!rateLimit.isAllowed) {
+      if (kDebugMode) {
+        debugPrint('[CloudinaryService] Upload blocked by rate limiter: ${rateLimit.message}');
+      }
+      return null;
+    }
+
     // 25 GB Quota guard: prevent charges by halting remote upload
     if (await isQuotaExceeded()) {
       if (kDebugMode) {
@@ -152,13 +243,15 @@ class CloudinaryService {
       return null;
     }
 
-    try {
-      if (!await file.exists()) {
-        if (kDebugMode) {
-          debugPrint('[CloudinaryService] File does not exist at: ${file.path}');
-        }
-        return null;
+    // Security & Magic Byte guard: verify file exists, size bounded, and valid image binary header
+    if (!await isValidImageFile(file)) {
+      if (kDebugMode) {
+        debugPrint('[CloudinaryService] Upload blocked: File is invalid, exceeds 15 MB, or is not a genuine image.');
       }
+      return null;
+    }
+
+    try {
 
       // Mandatory Pre-Upload Optimization: ensure file is compressed before transmitting
       final optimizedFile = await ImageCompressionService.compressFile(file);
@@ -199,6 +292,7 @@ class CloudinaryService {
         final secureUrl = data['secure_url'] as String?;
         final uploadedBytes = data['bytes'] as int? ?? (await optimizedFile.length());
         await recordUploadBytes(uploadedBytes);
+        AntiAbuseRateLimiterService.recordMediaUpload();
 
         onProgress?.call(1.0);
         if (kDebugMode) {
@@ -235,6 +329,23 @@ class CloudinaryService {
     if (!isConfigured) {
       if (kDebugMode) {
         debugPrint('[CloudinaryService] Skip upload: Cloudinary credentials not configured.');
+      }
+      return null;
+    }
+
+    // Anti-Abuse Rate Limit guard: prevent runaway byte upload loops
+    final rateLimit = AntiAbuseRateLimiterService.checkMediaUploadAllowed();
+    if (!rateLimit.isAllowed) {
+      if (kDebugMode) {
+        debugPrint('[CloudinaryService] Byte upload blocked by rate limiter: ${rateLimit.message}');
+      }
+      return null;
+    }
+
+    // Binary magic byte validation: verify raw buffer matches valid image header
+    if (!isValidImageBytes(bytes)) {
+      if (kDebugMode) {
+        debugPrint('[CloudinaryService] Byte upload blocked: Raw bytes do not match recognized image header.');
       }
       return null;
     }
@@ -290,6 +401,7 @@ class CloudinaryService {
         final secureUrl = data['secure_url'] as String?;
         final uploadedBytes = data['bytes'] as int? ?? optimizedBytes.lengthInBytes;
         await recordUploadBytes(uploadedBytes);
+        AntiAbuseRateLimiterService.recordMediaUpload();
 
         onProgress?.call(1.0);
         if (kDebugMode) {

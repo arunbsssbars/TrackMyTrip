@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
+import '../../core/services/anti_abuse_rate_limiter_service.dart';
 import '../../core/services/cloud_trip_sync_service.dart';
 import '../../core/services/trip_share_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -150,6 +151,17 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
 
     // 2. Try fetching from Cloud Live Room by code
     if (clean.toUpperCase().startsWith('TRIP-') || clean.length == 4 || clean.length == 9) {
+      // Anti-Abuse Guard: verify client rate limits and penalty lockouts before remote query
+      final rateLimit = AntiAbuseRateLimiterService.checkRoomJoinAllowed();
+      if (!rateLimit.isAllowed) {
+        setState(() {
+          _parsedPackage = null;
+          _isLoading = false;
+          _errorMessage = rateLimit.message ?? 'Join rate limit reached. Please wait a moment.';
+        });
+        return;
+      }
+
       setState(() {
         _isLoading = true;
         _errorMessage = null;
@@ -157,12 +169,15 @@ class _JoinTripSheetState extends ConsumerState<JoinTripSheet> {
       final cloudPkg = await CloudTripSyncService.fetchTripByCode(clean);
       if (!mounted) return;
       if (cloudPkg != null) {
+        AntiAbuseRateLimiterService.recordRoomJoinAttempt(success: true);
         setState(() {
           _parsedPackage = cloudPkg;
           _errorMessage = null;
           _isLoading = false;
         });
         return;
+      } else {
+        AntiAbuseRateLimiterService.recordRoomJoinAttempt(success: false);
       }
     }
 

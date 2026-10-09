@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:trackmytrip/core/services/anti_abuse_rate_limiter_service.dart';
 import 'package:trackmytrip/core/services/cloudinary_service.dart';
 import 'package:trackmytrip/core/services/secret_config_service.dart';
 
@@ -11,6 +12,7 @@ void main() {
   group('CloudinaryService Tests', () {
     setUp(() {
       SecretConfigService.reset();
+      AntiAbuseRateLimiterService.resetForTesting();
     });
 
     tearDown(() {
@@ -95,7 +97,7 @@ void main() {
       });
 
       final service = CloudinaryService(httpClient: mockClient);
-      final bytes = Uint8List.fromList([1, 2, 3, 4, 5]);
+      final bytes = Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46]);
 
       final url = await service.uploadImageBytes(
         bytes: bytes,
@@ -123,7 +125,7 @@ void main() {
       });
 
       final service = CloudinaryService(httpClient: mockClient);
-      final bytes = Uint8List.fromList([1, 2, 3, 4]);
+      final bytes = Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46]);
 
       final url = await service.uploadImageBytes(bytes: bytes);
       expect(url, isNull);
@@ -179,7 +181,7 @@ void main() {
       });
 
       final service = CloudinaryService(httpClient: mockClient);
-      final bytes = Uint8List.fromList([1, 2, 3, 4]);
+      final bytes = Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46]);
 
       final url = await service.uploadImageBytes(bytes: bytes);
       // Must be blocked to prevent billing

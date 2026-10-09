@@ -37,10 +37,20 @@ service cloud.firestore {
       );
     }
 
+    function isValidTripData() {
+      return request.resource.data.title is string &&
+        request.resource.data.title.size() <= 150 &&
+        (!('description' in request.resource.data) || (request.resource.data.description is string && request.resource.data.description.size() <= 2000)) &&
+        (!('destination' in request.resource.data) || (request.resource.data.destination is string && request.resource.data.destination.size() <= 200));
+    }
+
     // 1. Rooms collection (for 6-character room codes)
     match /rooms/{roomCode} {
-      allow read: if true;
-      allow create, update: if isAuthenticated();
+      allow read: if isAuthenticated() && roomCode.size() >= 4 && roomCode.size() <= 12;
+      allow create, update: if isAuthenticated() &&
+        roomCode.size() >= 4 && roomCode.size() <= 12 &&
+        request.resource.data.code is string &&
+        request.resource.data.package is map;
       allow delete: if isAuthenticated();
     }
 
@@ -60,7 +70,7 @@ service cloud.firestore {
       allow create: if isAuthenticated() && (
         request.resource.data.creatorId == request.auth.uid ||
         request.resource.data.createdByMemberId == request.auth.uid
-      );
+      ) && isValidTripData();
 
       // Allow read for authenticated users (members or users with tripId)
       allow read: if isAuthenticated();
@@ -69,14 +79,14 @@ service cloud.firestore {
       allow update: if isAuthenticated() && (
         isTripMember(resource.data) ||
         (request.resource.data.memberIds != null && request.auth.uid in request.resource.data.memberIds)
-      );
+      ) && isValidTripData();
 
       // Only the trip creator can permanently delete the trip
       allow delete: if isAuthenticated() && isTripCreator(resource.data);
 
       // Subcollections: stoppages, expenses, memories, audit_logs
       match /{subcollection}/{document=**} {
-        allow read, write: if isAuthenticated();
+        allow read, write: if isAuthenticated() && isTripMember(get(/databases/$(database)/documents/trips/$(tripId)).data);
       }
     }
 
@@ -118,7 +128,14 @@ service cloud.firestore {
 
     // 6. Sync Mutations Outbox
     match /mutations/{mutationId} {
-      allow read, write: if isAuthenticated();
+      allow create: if isAuthenticated() && (
+        request.resource.data.userId == request.auth.uid ||
+        request.resource.data.memberId == request.auth.uid
+      );
+      allow read, update, delete: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.memberId == request.auth.uid
+      );
     }
 
     // Tombstones collection (for deleted trips anti-resurrection)
