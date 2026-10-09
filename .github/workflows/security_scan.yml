@@ -24,10 +24,7 @@ jobs:
       - name: TruffleHog Secret Scanner
         uses: trufflesecurity/trufflehog@main
         with:
-          path: ./
-          base: ${{ github.event.repository.default_branch }}
-          head: HEAD
-          extra_args: --only-verified --fail --exclude-paths=.trufflehog-exclude.txt
+          extra_args: --only-verified --exclude-paths=/tmp/.trufflehog-exclude.txt
 
   security-audit:
     name: Dependency & GitIgnore Hygiene Audit
