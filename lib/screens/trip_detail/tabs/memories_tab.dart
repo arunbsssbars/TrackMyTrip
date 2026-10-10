@@ -309,6 +309,9 @@ class _MemoriesTabState extends ConsumerState<MemoriesTab> {
 
     // Check for pending/local uploads in this trip that actually exist on disk
     final pendingCount = rawMemories.where((m) {
+      if (m.uploadStatus == MediaUploadStatus.uploaded) return false;
+      if (m.remoteUrl != null && m.remoteUrl!.isNotEmpty) return false;
+      if (m.mediaPath.startsWith('http://') || m.mediaPath.startsWith('https://')) return false;
       if (m.uploadStatus != MediaUploadStatus.failed && m.uploadStatus != MediaUploadStatus.local) {
         return false;
       }
@@ -417,6 +420,10 @@ class _MemoriesTabState extends ConsumerState<MemoriesTab> {
                                 )
                               : null,
                           border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          errorBorder: InputBorder.none,
+                          disabledBorder: InputBorder.none,
                           contentPadding: const EdgeInsets.symmetric(vertical: 10),
                         ),
                         onChanged: (val) => setState(() => _searchQuery = val.trim()),

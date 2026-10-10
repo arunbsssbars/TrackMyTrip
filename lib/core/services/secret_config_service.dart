@@ -267,12 +267,21 @@ class SecretConfigService {
   static String get ciRunnerId => get(keyCiRunnerId, fallback: 'local_env');
 
   // Cloudinary Zero-Card Media Config
-  static String get cloudinaryCloudName => get(keyCloudinaryCloudName);
-  static String get cloudinaryUploadPreset => get(keyCloudinaryUploadPreset);
+  static String get cloudinaryCloudName => get(keyCloudinaryCloudName, fallback: 'dcj4v7toh');
+  static String get cloudinaryUploadPreset => get(keyCloudinaryUploadPreset, fallback: 'TrackMyTrip');
   static String get cloudinaryApiKey => get(keyCloudinaryApiKey);
   static String get cloudinaryApiSecret => get(keyCloudinaryApiSecret);
-  static bool get isCloudinaryConfigured =>
-      isConfigured(keyCloudinaryCloudName) && isConfigured(keyCloudinaryUploadPreset);
+  static bool get isCloudinaryConfigured {
+    final name = cloudinaryCloudName;
+    final preset = cloudinaryUploadPreset;
+    if (name.isEmpty || preset.isEmpty || name == '[NOT CONFIGURED]') return false;
+    final nameLower = name.toLowerCase();
+    final presetLower = preset.toLowerCase();
+    return !nameLower.contains('your_') &&
+        !presetLower.contains('your_') &&
+        !nameLower.contains('placeholder') &&
+        !presetLower.contains('placeholder');
+  }
 
   // =================================================================
   // Zero-Leak Secret Masking & Security Audit

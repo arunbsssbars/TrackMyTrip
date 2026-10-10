@@ -77,6 +77,18 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
       }
     }
 
+    // Also check if media cache service already completed upload for this memory
+    try {
+      final cachedItem = _ref.read(mediaCacheServiceProvider).itemForEntity(memory.id);
+      if (cachedItem != null && cachedItem.remoteUrl != null && cachedItem.remoteUrl!.isNotEmpty) {
+        finalMemory = finalMemory.copyWith(
+          uploadStatus: MediaUploadStatus.uploaded,
+          remoteUrl: cachedItem.remoteUrl,
+          mediaPath: cachedItem.remoteUrl ?? finalMemory.mediaPath,
+        );
+      }
+    } catch (_) {}
+
     state = [finalMemory, ...state.where((m) => m.id != finalMemory.id)];
     await _storage.saveAllMemories(state);
 

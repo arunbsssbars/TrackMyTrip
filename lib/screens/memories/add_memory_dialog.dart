@@ -13,6 +13,7 @@ import '../../models/stoppage.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/trip_provider.dart';
 import '../../core/services/realtime_sync_service.dart';
+import '../../core/services/secret_config_service.dart';
 
 class AddMemoryDialog extends ConsumerStatefulWidget {
   final String tripId;
@@ -355,14 +356,16 @@ class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
                                   color: Colors.black.withAlpha(180),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-                                child: const Row(
+                                child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.cloud_done_rounded, color: Colors.greenAccent, size: 12),
-                                    SizedBox(width: 4),
+                                    const Icon(Icons.cloud_done_rounded, color: Colors.greenAccent, size: 12),
+                                    const SizedBox(width: 4),
                                     Text(
-                                      'Firebase Storage Ready',
-                                      style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                      SecretConfigService.isCloudinaryConfigured
+                                          ? 'Cloudinary 25 GB Ready'
+                                          : 'Firebase Storage Ready',
+                                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
                                     ),
                                   ],
                                 ),

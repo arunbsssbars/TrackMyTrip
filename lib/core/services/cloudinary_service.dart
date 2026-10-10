@@ -54,9 +54,9 @@ class CloudinaryService {
   /// Active unsigned upload preset name
   String get uploadPreset => SecretConfigService.cloudinaryUploadPreset;
 
-  /// Target Cloudinary upload endpoint for specified [resourceType] ('image', 'video', 'raw', 'auto')
-  Uri getUploadEndpoint([String resourceType = 'image']) =>
-      Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/$resourceType/upload');
+  /// Target Cloudinary upload endpoint for image uploads
+  Uri getUploadEndpoint() =>
+      Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/image/upload');
 
   // =================================================================
   // Quota Telemetry & Enforcement Methods
@@ -218,93 +218,13 @@ class CloudinaryService {
     }
   }
 
-  /// Validates whether the given raw [bytes] match a legitimate image, audio, or video header.
-  static bool isValidMediaBytes(List<int> bytes) {
-    if (bytes.length < 4) return false;
-
-    // 1. Check Images (JPEG, PNG, WebP, GIF)
-    if (isValidImageBytes(bytes)) return true;
-
-    // 2. Audio & Video headers:
-    // MP4/M4A/MOV: byte 4..7 == 'ftyp'
-    if (bytes.length >= 8 &&
-        bytes[4] == 0x66 &&
-        bytes[5] == 0x74 &&
-        bytes[6] == 0x79 &&
-        bytes[7] == 0x70) {
-      return true;
-    }
-
-    // MP3 with ID3 tag: 'ID3' (0x49 0x44 0x33)
-    if (bytes.length >= 3 &&
-        bytes[0] == 0x49 &&
-        bytes[1] == 0x44 &&
-        bytes[2] == 0x33) {
-      return true;
-    }
-
-    // MP3 frame sync: 0xFF followed by 0xE0..0xFF
-    if (bytes.length >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0) {
-      return true;
-    }
-
-    // WAV: 'RIFF' .... 'WAVE'
-    if (bytes.length >= 12 &&
-        bytes[0] == 0x52 &&
-        bytes[1] == 0x49 &&
-        bytes[2] == 0x46 &&
-        bytes[3] == 0x46 &&
-        bytes[8] == 0x57 &&
-        bytes[9] == 0x41 &&
-        bytes[10] == 0x56 &&
-        bytes[11] == 0x45) {
-      return true;
-    }
-
-    // AAC (ADTS sync 0xFFF)
-    if (bytes.length >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xF0) == 0xF0) {
-      return true;
-    }
-
-    // OGG container (0x4F 0x67 0x67 0x53)
-    if (bytes.length >= 4 &&
-        bytes[0] == 0x4F &&
-        bytes[1] == 0x47 &&
-        bytes[2] == 0x47 &&
-        bytes[3] == 0x53) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /// Inspects magic bytes of a local media file (image, audio, or video).
-  static Future<bool> isValidMediaFile(File file) async {
-    try {
-      if (!await file.exists()) return false;
-      final length = await file.length();
-      if (length < 4 || length > maxRawFileSizeBytes) return false;
-
-      final raf = await file.open(mode: FileMode.read);
-      try {
-        final header = await raf.read(16);
-        return isValidMediaBytes(header);
-      } finally {
-        await raf.close();
-      }
-    } catch (_) {
-      return false;
-    }
-  }
-
   // =================================================================
-  // Upload Pipeline (Images, Audio, and Video)
+  // Upload Pipeline (Strictly Images: JPEG, PNG, WebP, GIF)
   // =================================================================
 
-  /// Uploads any supported media [File] (image, video, or audio note) to Cloudinary.
-  Future<String?> uploadMediaFile({
+  /// Uploads a local image [File] to Cloudinary using an unsigned upload preset.
+  Future<String?> uploadImageFile({
     required File file,
-    String resourceType = 'auto',
     String? folder,
     String? publicId,
     Map<String, String>? tags,
@@ -335,25 +255,20 @@ class CloudinaryService {
     }
 
     // Security & Magic Byte guard
-    if (!await isValidMediaFile(file)) {
+    if (!await isValidImageFile(file)) {
       if (kDebugMode) {
-        debugPrint('[CloudinaryService] Upload blocked: File is invalid, exceeds 15 MB, or is unsupported.');
+        debugPrint('[CloudinaryService] Upload blocked: File is invalid, exceeds 15 MB, or is not an image.');
       }
       return null;
     }
 
     try {
       // Pre-upload optimization for images
-      final File fileToUpload;
-      if (resourceType == 'image' || (resourceType == 'auto' && await isValidImageFile(file))) {
-        fileToUpload = await ImageCompressionService.compressFile(file);
-      } else {
-        fileToUpload = file;
-      }
+      final fileToUpload = await ImageCompressionService.compressFile(file);
 
       onProgress?.call(0.1);
 
-      final endpoint = getUploadEndpoint(resourceType);
+      final endpoint = getUploadEndpoint();
       final request = http.MultipartRequest('POST', endpoint);
       request.fields['upload_preset'] = uploadPreset;
       request.fields['return_delete_token'] = 'true';
@@ -433,28 +348,10 @@ class CloudinaryService {
     return 'API error';
   }
 
-  /// Uploads a local image [File] to Cloudinary using an unsigned upload preset.
-  Future<String?> uploadImageFile({
-    required File file,
-    String? folder,
-    String? publicId,
-    Map<String, String>? tags,
-    void Function(double progress)? onProgress,
-  }) =>
-      uploadMediaFile(
-        file: file,
-        resourceType: 'image',
-        folder: folder,
-        publicId: publicId,
-        tags: tags,
-        onProgress: onProgress,
-      );
-
-  /// Uploads raw media [Uint8List] bytes directly to Cloudinary.
-  Future<String?> uploadMediaBytes({
+  /// Uploads raw image [Uint8List] bytes directly to Cloudinary.
+  Future<String?> uploadImageBytes({
     required Uint8List bytes,
-    String resourceType = 'auto',
-    String filename = 'media.bin',
+    String filename = 'photo.jpg',
     String? folder,
     String? publicId,
     Map<String, String>? tags,
@@ -475,9 +372,9 @@ class CloudinaryService {
       return null;
     }
 
-    if (!isValidMediaBytes(bytes)) {
+    if (!isValidImageBytes(bytes)) {
       if (kDebugMode) {
-        debugPrint('[CloudinaryService] Byte upload blocked: Raw bytes do not match recognized media header.');
+        debugPrint('[CloudinaryService] Byte upload blocked: Raw bytes do not match recognized image header.');
       }
       return null;
     }
@@ -490,16 +387,11 @@ class CloudinaryService {
     }
 
     try {
-      final Uint8List optimizedBytes;
-      if (resourceType == 'image' || (resourceType == 'auto' && isValidImageBytes(bytes))) {
-        optimizedBytes = await ImageCompressionService.compressBytes(bytes);
-      } else {
-        optimizedBytes = bytes;
-      }
+      final optimizedBytes = await ImageCompressionService.compressBytes(bytes);
 
       onProgress?.call(0.1);
 
-      final endpoint = getUploadEndpoint(resourceType);
+      final endpoint = getUploadEndpoint();
       final request = http.MultipartRequest('POST', endpoint);
       request.fields['upload_preset'] = uploadPreset;
       request.fields['return_delete_token'] = 'true';
@@ -573,25 +465,6 @@ class CloudinaryService {
       return null;
     }
   }
-
-  /// Uploads raw image [Uint8List] bytes directly to Cloudinary.
-  Future<String?> uploadImageBytes({
-    required Uint8List bytes,
-    String filename = 'photo.jpg',
-    String? folder,
-    String? publicId,
-    Map<String, String>? tags,
-    void Function(double progress)? onProgress,
-  }) =>
-      uploadMediaBytes(
-        bytes: bytes,
-        resourceType: 'image',
-        filename: filename,
-        folder: folder,
-        publicId: publicId,
-        tags: tags,
-        onProgress: onProgress,
-      );
 
   /// Pings Cloudinary to check credential health, endpoint accessibility, and round-trip latency
   Future<Map<String, dynamic>> pingCloudinary() async {

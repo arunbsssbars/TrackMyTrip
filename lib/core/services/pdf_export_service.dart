@@ -120,7 +120,7 @@ class PdfExportService {
                               pw.Text(stop.address!, style: const pw.TextStyle(color: PdfColors.grey600, fontSize: 9)),
                             pw.SizedBox(height: 2),
                             pw.Text(
-                              'Category: ${stop.category}  |  Arrived: ${DateFormatter.formatDateTime(stop.arrivedAt)}',
+                              'Category: ${stop.category}  |  Arrived: ${DateFormatter.formatShortDate(stop.arrivedAt)} at ${DateFormatter.formatTimeOnly(stop.arrivedAt)}',
                               style: const pw.TextStyle(color: PdfColors.grey700, fontSize: 9),
                             ),
                             if (stop.notes != null)

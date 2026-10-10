@@ -45,8 +45,9 @@ class ImageCompressionService {
     int maxWidth = 1920,
     int maxHeight = 1080,
   }) async {
-    // If bytes are already reasonably small (< 1.5 MB), do not re-encode
-    if (bytes.lengthInBytes <= 1536 * 1024) {
+    // If bytes are already reasonably sized (< 3 MB), preserve native JPEG byte stream untouched
+    // to avoid color space loss or black texture corruption on Impeller/Skia.
+    if (bytes.lengthInBytes <= 3 * 1024 * 1024) {
       return bytes;
     }
 
@@ -107,8 +108,9 @@ class ImageCompressionService {
       if (!await sourceFile.exists()) return sourceFile;
 
       final length = await sourceFile.length();
-      // Skip files already under 2 MB (all ImagePicker FHD images are ~250-450 KB)
-      if (length <= 2 * 1024 * 1024) {
+      // Skip files already under 3 MB (all ImagePicker FHD images are ~250-450 KB)
+      // Preserves original camera JPEG encoding and prevents black texture corruption.
+      if (length <= 3 * 1024 * 1024) {
         return sourceFile;
       }
 

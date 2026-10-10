@@ -125,8 +125,8 @@ void main() {
   group('Loop 17: UserAvatar Color & Unicode Initials', () {
     test('parseColor handles 3-char, 6-char, and hashtag hex strings safely', () {
       final c1 = UserAvatar.parseColor('#F00');
-      expect(c1.red, 255);
-      expect(c1.green, 0);
+      expect((c1.r * 255.0).round(), 255);
+      expect((c1.g * 255.0).round(), 0);
 
       final c2 = UserAvatar.parseColor('#0F766E');
       expect(c2, isA<Color>());

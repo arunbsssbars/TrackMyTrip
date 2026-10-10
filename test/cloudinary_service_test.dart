@@ -19,9 +19,10 @@ void main() {
       SecretConfigService.reset();
     });
 
-    test('isConfigured is false when unconfigured or default placeholders', () {
+    test('isConfigured is true with built-in fallbacks and false with placeholder keys', () {
       final service = CloudinaryService();
-      expect(service.isConfigured, isFalse);
+      expect(service.isConfigured, isTrue);
+      expect(service.cloudName, equals('dcj4v7toh'));
 
       SecretConfigService.setMockVariables({
         'CLOUDINARY_CLOUD_NAME': 'your_cloudinary_cloud_name',
@@ -131,54 +132,24 @@ void main() {
       expect(best, contains('/upload/w_1280,c_limit,q_auto:best,f_auto/'));
     });
 
-    test('isValidMediaBytes recognizes both images and audio/video containers', () {
+    test('isValidImageBytes recognizes valid image formats (JPEG, PNG, WebP, GIF) and rejects others', () {
       // JPEG
-      expect(CloudinaryService.isValidMediaBytes([0xFF, 0xD8, 0xFF, 0xEE]), isTrue);
-      // MP4 / M4A (ftyp)
+      expect(CloudinaryService.isValidImageBytes([0xFF, 0xD8, 0xFF, 0xEE]), isTrue);
+      // PNG
+      expect(CloudinaryService.isValidImageBytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]), isTrue);
+      // WebP
+      final webpHeader = [0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50];
+      expect(CloudinaryService.isValidImageBytes(webpHeader), isTrue);
+      // GIF
+      expect(CloudinaryService.isValidImageBytes([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]), isTrue);
+
+      // Audio / video containers are rejected
       final mp4Header = [0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70];
-      expect(CloudinaryService.isValidMediaBytes(mp4Header), isTrue);
-      // MP3 (ID3)
+      expect(CloudinaryService.isValidImageBytes(mp4Header), isFalse);
       final mp3Header = [0x49, 0x44, 0x33, 0x03, 0x00, 0x00];
-      expect(CloudinaryService.isValidMediaBytes(mp3Header), isTrue);
-      // WAV
-      final wavHeader = [0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45];
-      expect(CloudinaryService.isValidMediaBytes(wavHeader), isTrue);
+      expect(CloudinaryService.isValidImageBytes(mp3Header), isFalse);
       // Executable / invalid
-      expect(CloudinaryService.isValidMediaBytes([0x4D, 0x5A, 0x90, 0x00]), isFalse);
-    });
-
-    test('uploadMediaBytes routes to resourceType specific endpoint for video/audio', () async {
-      SecretConfigService.setMockVariables({
-        'CLOUDINARY_CLOUD_NAME': 'mycloud',
-        'CLOUDINARY_UPLOAD_PRESET': 'trip_unsigned',
-      });
-
-      final mockClient = MockClient((request) async {
-        expect(request.url.toString(), equals('https://api.cloudinary.com/v1_1/mycloud/video/upload'));
-        expect(request.method, equals('POST'));
-
-        return http.Response(
-          jsonEncode({
-            'public_id': 'trackmytrip/audio/note_1',
-            'secure_url': 'https://res.cloudinary.com/mycloud/video/upload/v12345/note_1.mp4',
-            'bytes': 8192,
-          }),
-          200,
-          headers: {'content-type': 'application/json'},
-        );
-      });
-
-      final service = CloudinaryService(httpClient: mockClient);
-      final mp4Bytes = Uint8List.fromList([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6D, 0x70, 0x34, 0x32]);
-
-      final url = await service.uploadMediaBytes(
-        bytes: mp4Bytes,
-        resourceType: 'video',
-        folder: 'trackmytrip/audio',
-        publicId: 'note_1',
-      );
-
-      expect(url, equals('https://res.cloudinary.com/mycloud/video/upload/v12345/note_1.mp4'));
+      expect(CloudinaryService.isValidImageBytes([0x4D, 0x5A, 0x90, 0x00]), isFalse);
     });
 
     test('uploadImageBytes successfully sends multipart request and returns secure_url', () async {
