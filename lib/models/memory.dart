@@ -93,17 +93,19 @@ class Memory {
     } catch (_) {}
 
     return Memory(
-      id: json['id'] as String,
-      tripId: json['tripId'] as String,
-      stoppageId: json['stoppageId'] as String,
-      uploadedByMemberId: json['uploadedByMemberId'] as String,
-      mediaPath: json['mediaPath'] as String,
+      id: json['id'] as String? ?? '',
+      tripId: json['tripId'] as String? ?? '',
+      stoppageId: json['stoppageId'] as String? ?? '',
+      uploadedByMemberId: json['uploadedByMemberId'] as String? ?? '',
+      mediaPath: json['mediaPath'] as String? ?? '',
       localPath: json['localPath'] as String?,
       remoteUrl: json['remoteUrl'] as String?,
       deleteToken: json['deleteToken'] as String?,
       uploadStatus: status,
       caption: json['caption'] as String?,
-      createdAt: DateTime.parse(json['createdAt'] as String),
+      createdAt: json['createdAt'] != null
+          ? (DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now())
+          : DateTime.now(),
       likedByMemberIds: (json['likedByMemberIds'] as List<dynamic>?)
               ?.map((e) => e.toString())
               .toList() ??

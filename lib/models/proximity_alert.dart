@@ -158,14 +158,14 @@ class ProximityAlert {
 
   factory ProximityAlert.fromJson(Map<String, dynamic> json) {
     return ProximityAlert(
-      id: json['id'] as String,
-      tripId: json['tripId'] as String,
+      id: json['id'] as String? ?? '',
+      tripId: json['tripId'] as String? ?? '',
       type: AlertType.values.firstWhere(
         (e) => e.name == json['type'],
         orElse: () => AlertType.general,
       ),
-      title: json['title'] as String,
-      message: json['message'] as String,
+      title: json['title'] as String? ?? 'Alert',
+      message: json['message'] as String? ?? '',
       senderMemberId: json['senderMemberId'] as String? ?? 'User',
       senderName: json['senderName'] as String? ?? 'Companion',
       latitude: (json['latitude'] as num?)?.toDouble(),
