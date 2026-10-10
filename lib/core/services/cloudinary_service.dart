@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:crypto/crypto.dart';
 import 'anti_abuse_rate_limiter_service.dart';
+import 'cloudinary_exceptions.dart';
 import 'image_compression_service.dart';
 import 'secret_config_service.dart';
 
@@ -15,6 +16,22 @@ enum CloudinaryNetworkTier {
   eco,   // 2G / metered mobile: 480px, q_auto:eco
   good,  // 3G / 4G standard: 800px, q_auto:good
   best,  // High-speed Wi-Fi: 1280px, q_auto:best
+}
+
+/// Structured outcome of a Cloudinary upload operation containing
+/// the secure delivery URL, Cloudinary public_id, and unsigned delete_token.
+class CloudinaryUploadResult {
+  final String secureUrl;
+  final String publicId;
+  final String? deleteToken;
+  final int bytes;
+
+  const CloudinaryUploadResult({
+    required this.secureUrl,
+    required this.publicId,
+    this.deleteToken,
+    required this.bytes,
+  });
 }
 
 /// Cloudinary media service providing free, zero-card cloud media uploads,
@@ -222,8 +239,68 @@ class CloudinaryService {
   // Upload Pipeline (Strictly Images: JPEG, PNG, WebP, GIF)
   // =================================================================
 
-  /// Uploads a local image [File] to Cloudinary using an unsigned upload preset.
-  Future<String?> uploadImageFile({
+  /// Retrieves any cached delete token for an asset public ID.
+  static Future<String?> getCachedDeleteToken(String publicId, {SharedPreferences? prefs}) async {
+    try {
+      final sp = prefs ?? await SharedPreferences.getInstance();
+      return sp.getString('cld_del_token_$publicId');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Loop 1: Executes an HTTP multipart request with exponential backoff for transient network issues.
+  Future<http.StreamedResponse> _sendWithTransientRetry(
+    Future<http.BaseRequest> Function() buildRequest, {
+    int maxRetries = 2,
+    Duration timeout = const Duration(seconds: 40),
+  }) async {
+    int attempt = 0;
+    while (true) {
+      try {
+        final req = await buildRequest();
+        final streamedResponse = await _httpClient.send(req).timeout(
+          timeout,
+          onTimeout: () => throw TimeoutException('Cloudinary upload timed out after ${timeout.inSeconds}s'),
+        );
+        // Retry transient 5xx server errors
+        if (streamedResponse.statusCode >= 500 && streamedResponse.statusCode <= 504 && attempt < maxRetries) {
+          attempt++;
+          final backoffMs = 400 * (1 << attempt);
+          await Future.delayed(Duration(milliseconds: backoffMs));
+          continue;
+        }
+        return streamedResponse;
+      } on SocketException catch (e) {
+        if (attempt < maxRetries) {
+          attempt++;
+          final backoffMs = 400 * (1 << attempt);
+          await Future.delayed(Duration(milliseconds: backoffMs));
+          continue;
+        }
+        throw CloudinaryNetworkException('Network connection failed', originalError: e);
+      } on TimeoutException catch (e) {
+        if (attempt < maxRetries) {
+          attempt++;
+          final backoffMs = 400 * (1 << attempt);
+          await Future.delayed(Duration(milliseconds: backoffMs));
+          continue;
+        }
+        throw CloudinaryNetworkException('Network connection timed out', originalError: e);
+      } catch (e) {
+        if (e is http.ClientException && attempt < maxRetries) {
+          attempt++;
+          final backoffMs = 400 * (1 << attempt);
+          await Future.delayed(Duration(milliseconds: backoffMs));
+          continue;
+        }
+        rethrow;
+      }
+    }
+  }
+
+  /// Uploads a local image [File] to Cloudinary, returning full result metadata.
+  Future<CloudinaryUploadResult?> uploadImageFileWithResult({
     required File file,
     String? folder,
     String? publicId,
@@ -246,7 +323,7 @@ class CloudinaryService {
       return null;
     }
 
-    // 25 GB Quota guard: prevent charges by halting remote upload
+    // Loop 3: 25 GB Quota guard: prevent charges by halting remote upload
     if (await isQuotaExceeded()) {
       if (kDebugMode) {
         debugPrint('[CloudinaryService] Upload blocked: 25 GB free quota reached.');
@@ -254,7 +331,7 @@ class CloudinaryService {
       return null;
     }
 
-    // Security & Magic Byte guard
+    // Loop 4: Security & Magic Byte guard
     if (!await isValidImageFile(file)) {
       if (kDebugMode) {
         debugPrint('[CloudinaryService] Upload blocked: File is invalid, exceeds 15 MB, or is not an image.');
@@ -263,35 +340,41 @@ class CloudinaryService {
     }
 
     try {
-      // Pre-upload optimization for images
-      final fileToUpload = await ImageCompressionService.compressFile(file);
+      // Loop 4: Pre-upload optimization with error fallback to original file
+      File fileToUpload;
+      try {
+        fileToUpload = await ImageCompressionService.compressFile(file);
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[CloudinaryService] Image compression fallback: uploading original ($e)');
+        }
+        fileToUpload = file;
+      }
 
       onProgress?.call(0.1);
 
       final endpoint = getUploadEndpoint();
-      final request = http.MultipartRequest('POST', endpoint);
-      request.fields['upload_preset'] = uploadPreset;
-
-      if (folder != null && folder.isNotEmpty) {
-        request.fields['folder'] = folder;
+      Future<http.BaseRequest> buildReq() async {
+        final request = http.MultipartRequest('POST', endpoint);
+        request.fields['upload_preset'] = uploadPreset;
+        if (folder != null && folder.isNotEmpty) {
+          request.fields['folder'] = folder;
+        }
+        if (publicId != null && publicId.isNotEmpty) {
+          request.fields['public_id'] = publicId;
+        }
+        if (tags != null && tags.isNotEmpty) {
+          request.fields['tags'] = tags.values.join(',');
+        }
+        final multipartFile = await http.MultipartFile.fromPath('file', fileToUpload.path);
+        request.files.add(multipartFile);
+        return request;
       }
-      if (publicId != null && publicId.isNotEmpty) {
-        request.fields['public_id'] = publicId;
-      }
-      if (tags != null && tags.isNotEmpty) {
-        request.fields['tags'] = tags.values.join(',');
-      }
-
-      final multipartFile = await http.MultipartFile.fromPath('file', fileToUpload.path);
-      request.files.add(multipartFile);
 
       onProgress?.call(0.3);
 
-      final streamedResponse = await _httpClient.send(request).timeout(
-        const Duration(seconds: 40),
-        onTimeout: () => throw TimeoutException('Cloudinary upload timed out after 40 seconds'),
-      );
-
+      // Loop 1: Send request with exponential backoff retry for transient network faults
+      final streamedResponse = await _sendWithTransientRetry(buildReq);
       final responseBody = await streamedResponse.stream.bytesToString();
       onProgress?.call(0.9);
 
@@ -300,7 +383,7 @@ class CloudinaryService {
         final secureUrl = data['secure_url'] as String?;
         final uploadedBytes = data['bytes'] as int? ?? (await fileToUpload.length());
         final deleteToken = data['delete_token'] as String?;
-        final returnedPublicId = data['public_id'] as String?;
+        final returnedPublicId = (data['public_id'] as String?) ?? publicId ?? '';
         await recordUploadBytes(uploadedBytes);
         AntiAbuseRateLimiterService.recordMediaUpload();
 
@@ -310,7 +393,7 @@ class CloudinaryService {
             if (publicId != null && publicId.isNotEmpty) {
               await sp.setString('cld_del_token_$publicId', deleteToken);
             }
-            if (returnedPublicId != null && returnedPublicId.isNotEmpty) {
+            if (returnedPublicId.isNotEmpty) {
               await sp.setString('cld_del_token_$returnedPublicId', deleteToken);
             }
           } catch (_) {}
@@ -320,11 +403,26 @@ class CloudinaryService {
         if (kDebugMode) {
           debugPrint('[CloudinaryService] Upload succeeded ($uploadedBytes bytes): $secureUrl');
         }
-        return secureUrl;
+        if (secureUrl != null && secureUrl.isNotEmpty) {
+          return CloudinaryUploadResult(
+            secureUrl: secureUrl,
+            publicId: returnedPublicId,
+            deleteToken: deleteToken,
+            bytes: uploadedBytes,
+          );
+        }
+        return null;
       } else {
+        // Loop 2 & 3: Defensive error diagnosis
+        final errorMsg = _sanitizeErrorMessage(responseBody);
         if (kDebugMode) {
-          final errorMsg = _sanitizeErrorMessage(responseBody);
-          debugPrint('[CloudinaryService] Upload failed (${streamedResponse.statusCode}): $errorMsg');
+          if (streamedResponse.statusCode == 401 || streamedResponse.statusCode == 403) {
+            debugPrint('[CloudinaryService] Auth error (${streamedResponse.statusCode}): $errorMsg');
+          } else if (streamedResponse.statusCode == 420 || streamedResponse.statusCode == 429) {
+            debugPrint('[CloudinaryService] Rate limit error (${streamedResponse.statusCode}): $errorMsg');
+          } else {
+            debugPrint('[CloudinaryService] Upload failed (${streamedResponse.statusCode}): $errorMsg');
+          }
         }
         return null;
       }
@@ -334,6 +432,24 @@ class CloudinaryService {
       }
       return null;
     }
+  }
+
+  /// Uploads a local image [File] to Cloudinary using an unsigned upload preset.
+  Future<String?> uploadImageFile({
+    required File file,
+    String? folder,
+    String? publicId,
+    Map<String, String>? tags,
+    void Function(double progress)? onProgress,
+  }) async {
+    final result = await uploadImageFileWithResult(
+      file: file,
+      folder: folder,
+      publicId: publicId,
+      tags: tags,
+      onProgress: onProgress,
+    );
+    return result?.secureUrl;
   }
 
   static String _sanitizeErrorMessage(String responseBody) {
@@ -347,8 +463,8 @@ class CloudinaryService {
     return 'API error';
   }
 
-  /// Uploads raw image [Uint8List] bytes directly to Cloudinary.
-  Future<String?> uploadImageBytes({
+  /// Uploads raw image [Uint8List] bytes directly to Cloudinary, returning full result metadata.
+  Future<CloudinaryUploadResult?> uploadImageBytesWithResult({
     required Uint8List bytes,
     String filename = 'photo.jpg',
     String? folder,
@@ -371,6 +487,7 @@ class CloudinaryService {
       return null;
     }
 
+    // Loop 4: Pre-flight magic byte check
     if (!isValidImageBytes(bytes)) {
       if (kDebugMode) {
         debugPrint('[CloudinaryService] Byte upload blocked: Raw bytes do not match recognized image header.');
@@ -378,6 +495,7 @@ class CloudinaryService {
       return null;
     }
 
+    // Loop 3: Quota check
     if (await isQuotaExceeded()) {
       if (kDebugMode) {
         debugPrint('[CloudinaryService] Byte upload blocked: 25 GB free quota reached.');
@@ -386,38 +504,46 @@ class CloudinaryService {
     }
 
     try {
-      final optimizedBytes = await ImageCompressionService.compressBytes(bytes);
+      Uint8List optimizedBytes;
+      try {
+        optimizedBytes = await ImageCompressionService.compressBytes(bytes);
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[CloudinaryService] Byte compression fallback: uploading original ($e)');
+        }
+        optimizedBytes = bytes;
+      }
 
       onProgress?.call(0.1);
 
       final endpoint = getUploadEndpoint();
-      final request = http.MultipartRequest('POST', endpoint);
-      request.fields['upload_preset'] = uploadPreset;
+      Future<http.BaseRequest> buildReq() async {
+        final request = http.MultipartRequest('POST', endpoint);
+        request.fields['upload_preset'] = uploadPreset;
 
-      if (folder != null && folder.isNotEmpty) {
-        request.fields['folder'] = folder;
-      }
-      if (publicId != null && publicId.isNotEmpty) {
-        request.fields['public_id'] = publicId;
-      }
-      if (tags != null && tags.isNotEmpty) {
-        request.fields['tags'] = tags.values.join(',');
-      }
+        if (folder != null && folder.isNotEmpty) {
+          request.fields['folder'] = folder;
+        }
+        if (publicId != null && publicId.isNotEmpty) {
+          request.fields['public_id'] = publicId;
+        }
+        if (tags != null && tags.isNotEmpty) {
+          request.fields['tags'] = tags.values.join(',');
+        }
 
-      final multipartFile = http.MultipartFile.fromBytes(
-        'file',
-        optimizedBytes,
-        filename: filename,
-      );
-      request.files.add(multipartFile);
+        final multipartFile = http.MultipartFile.fromBytes(
+          'file',
+          optimizedBytes,
+          filename: filename,
+        );
+        request.files.add(multipartFile);
+        return request;
+      }
 
       onProgress?.call(0.3);
 
-      final streamedResponse = await _httpClient.send(request).timeout(
-        const Duration(seconds: 40),
-        onTimeout: () => throw TimeoutException('Cloudinary byte upload timed out after 40 seconds'),
-      );
-
+      // Loop 1: Transient retry wrapper
+      final streamedResponse = await _sendWithTransientRetry(buildReq);
       final responseBody = await streamedResponse.stream.bytesToString();
       onProgress?.call(0.9);
 
@@ -426,7 +552,7 @@ class CloudinaryService {
         final secureUrl = data['secure_url'] as String?;
         final uploadedBytes = data['bytes'] as int? ?? optimizedBytes.lengthInBytes;
         final deleteToken = data['delete_token'] as String?;
-        final returnedPublicId = data['public_id'] as String?;
+        final returnedPublicId = (data['public_id'] as String?) ?? publicId ?? '';
         await recordUploadBytes(uploadedBytes);
         AntiAbuseRateLimiterService.recordMediaUpload();
 
@@ -436,7 +562,7 @@ class CloudinaryService {
             if (publicId != null && publicId.isNotEmpty) {
               await sp.setString('cld_del_token_$publicId', deleteToken);
             }
-            if (returnedPublicId != null && returnedPublicId.isNotEmpty) {
+            if (returnedPublicId.isNotEmpty) {
               await sp.setString('cld_del_token_$returnedPublicId', deleteToken);
             }
           } catch (_) {}
@@ -446,13 +572,25 @@ class CloudinaryService {
         if (kDebugMode) {
           debugPrint('[CloudinaryService] Byte upload succeeded ($uploadedBytes bytes): $secureUrl');
         }
-        return secureUrl;
-      } else {
-        if (kDebugMode) {
-          final errorMsg = _sanitizeErrorMessage(responseBody);
-          debugPrint(
-            '[CloudinaryService] Byte upload failed (${streamedResponse.statusCode}): $errorMsg',
+        if (secureUrl != null && secureUrl.isNotEmpty) {
+          return CloudinaryUploadResult(
+            secureUrl: secureUrl,
+            publicId: returnedPublicId,
+            deleteToken: deleteToken,
+            bytes: uploadedBytes,
           );
+        }
+        return null;
+      } else {
+        final errorMsg = _sanitizeErrorMessage(responseBody);
+        if (kDebugMode) {
+          if (streamedResponse.statusCode == 401 || streamedResponse.statusCode == 403) {
+            debugPrint('[CloudinaryService] Byte upload auth error (${streamedResponse.statusCode}): $errorMsg');
+          } else if (streamedResponse.statusCode == 420 || streamedResponse.statusCode == 429) {
+            debugPrint('[CloudinaryService] Byte upload rate limited (${streamedResponse.statusCode}): $errorMsg');
+          } else {
+            debugPrint('[CloudinaryService] Byte upload failed (${streamedResponse.statusCode}): $errorMsg');
+          }
         }
         return null;
       }
@@ -462,6 +600,26 @@ class CloudinaryService {
       }
       return null;
     }
+  }
+
+  /// Uploads raw image [Uint8List] bytes directly to Cloudinary.
+  Future<String?> uploadImageBytes({
+    required Uint8List bytes,
+    String filename = 'photo.jpg',
+    String? folder,
+    String? publicId,
+    Map<String, String>? tags,
+    void Function(double progress)? onProgress,
+  }) async {
+    final result = await uploadImageBytesWithResult(
+      bytes: bytes,
+      filename: filename,
+      folder: folder,
+      publicId: publicId,
+      tags: tags,
+      onProgress: onProgress,
+    );
+    return result?.secureUrl;
   }
 
   /// Pings Cloudinary to check credential health, endpoint accessibility, and round-trip latency
@@ -753,7 +911,7 @@ class CloudinaryService {
 
         if (response.statusCode >= 200 && response.statusCode < 300) {
           final data = jsonDecode(response.body) as Map<String, dynamic>;
-          if (data['result'] == 'ok') {
+          if (data['result'] == 'ok' || data['result'] == 'not found') {
             if (kDebugMode) {
               debugPrint('[CloudinaryService] Successfully deleted asset via delete_token: $publicId');
             }
@@ -763,6 +921,15 @@ class CloudinaryService {
             } catch (_) {}
             return true;
           }
+        } else if (response.statusCode == 404) {
+          if (kDebugMode) {
+            debugPrint('[CloudinaryService] Asset already absent (404 idempotent): $publicId');
+          }
+          try {
+            final sp = await SharedPreferences.getInstance();
+            await sp.remove('cld_del_token_$publicId');
+          } catch (_) {}
+          return true;
         }
       } catch (e) {
         if (kDebugMode) {
@@ -799,8 +966,21 @@ class CloudinaryService {
             if (kDebugMode) {
               debugPrint('[CloudinaryService] Successfully deleted asset via signed destroy: $publicId');
             }
+            try {
+              final sp = await SharedPreferences.getInstance();
+              await sp.remove('cld_del_token_$publicId');
+            } catch (_) {}
             return true;
           }
+        } else if (response.statusCode == 404) {
+          if (kDebugMode) {
+            debugPrint('[CloudinaryService] Signed destroy: asset already absent (404 idempotent): $publicId');
+          }
+          try {
+            final sp = await SharedPreferences.getInstance();
+            await sp.remove('cld_del_token_$publicId');
+          } catch (_) {}
+          return true;
         }
       } catch (e) {
         if (kDebugMode) {

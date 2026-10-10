@@ -445,7 +445,7 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
     final int unreadActivityTab = activityAlerts.where((a) => !a.isRead).length;
     final int unreadBillsTab = relevantAlerts.where((a) => !a.isRead && (a.itemType == 'bill' || a.itemType == 'settlement' || a.type == AlertType.billAdded || a.type == AlertType.settlementRecorded)).length;
     final int unreadStopsTab = relevantAlerts.where((a) => !a.isRead && (a.itemType == 'stop' || a.type == AlertType.stoppageAdded)).length;
-    final int unreadMemoriesTab = relevantAlerts.where((a) => !a.isRead && (a.itemType == 'memory' || a.type == AlertType.memoryAdded)).length;
+    final int unreadMemoriesTab = relevantAlerts.where((a) => !a.isRead && (a.itemType == 'memory' || a.type == AlertType.memoryAdded || a.type == AlertType.memoryDeleted)).length;
     final int unreadAuditsTab = relevantAlerts.where((a) => !a.isRead && (a.itemType == 'audit' || a.itemType == 'trust' || a.type == AlertType.tripReopened || a.type == AlertType.sosEmergency)).length;
     final int totalUnread = unreadInvitesTab + unreadActivityTab;
 
@@ -812,7 +812,7 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
         if (!isStop) return false;
       }
       if (selectedFilter == 5) {
-        final isMemory = alert.itemType == 'memory' || alert.type == AlertType.memoryAdded;
+        final isMemory = alert.itemType == 'memory' || alert.type == AlertType.memoryAdded || alert.type == AlertType.memoryDeleted;
         if (!isMemory) return false;
       }
       if (selectedFilter == 6) {
@@ -1519,6 +1519,10 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
         icon = Icons.photo_camera_rounded;
         color = Colors.purple;
         break;
+      case AlertType.memoryDeleted:
+        icon = Icons.delete_outline_rounded;
+        color = Colors.deepOrange;
+        break;
       case AlertType.stoppageAdded:
         icon = Icons.add_location_alt_rounded;
         color = Colors.amber.shade800;
@@ -1646,7 +1650,7 @@ class _ActivityHubTabState extends ConsumerState<ActivityHubTab> {
                 targetTab = 1; // Route Map tab
               } else if (alert.type == AlertType.memberJoined || alert.type == AlertType.memberLeft || alert.type == AlertType.invitationAccepted || alert.type == AlertType.invitation) {
                 targetTab = 2; // Members tab
-              } else if (alert.type == AlertType.memoryAdded) {
+              } else if (alert.type == AlertType.memoryAdded || alert.type == AlertType.memoryDeleted) {
                 targetTab = matchingTrip.isSolo ? 4 : 5; // Memories tab
               }
               ref.read(selectedTripIdProvider.notifier).state = matchingTrip.id;
@@ -2218,6 +2222,7 @@ enum ActivityNature {
       case AlertType.memberLeft:
         return ActivityNature.invitation;
       case AlertType.memoryAdded:
+      case AlertType.memoryDeleted:
         return ActivityNature.memory;
       case AlertType.locationShared:
       case AlertType.general:

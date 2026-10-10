@@ -9,6 +9,7 @@ class Memory {
   final String? localPath;       // Always points to permanent local copy (null if preset/URL)
   final String? remoteUrl;       // Populated after cloud upload
   final MediaUploadStatus uploadStatus; // local / uploading / uploaded / failed
+  final String? deleteToken;    // Deletion token for unsigned Cloudinary asset destruction
   final String? caption;
   final DateTime createdAt;
   final List<String> likedByMemberIds;
@@ -21,6 +22,7 @@ class Memory {
     required this.mediaPath,
     this.localPath,
     this.remoteUrl,
+    this.deleteToken,
     this.uploadStatus = MediaUploadStatus.local,
     this.caption,
     required this.createdAt,
@@ -42,6 +44,7 @@ class Memory {
     String? mediaPath,
     String? localPath,
     String? remoteUrl,
+    String? deleteToken,
     MediaUploadStatus? uploadStatus,
     String? caption,
     DateTime? createdAt,
@@ -55,6 +58,7 @@ class Memory {
       mediaPath: mediaPath ?? this.mediaPath,
       localPath: localPath ?? this.localPath,
       remoteUrl: remoteUrl ?? this.remoteUrl,
+      deleteToken: deleteToken ?? this.deleteToken,
       uploadStatus: uploadStatus ?? this.uploadStatus,
       caption: caption ?? this.caption,
       createdAt: createdAt ?? this.createdAt,
@@ -71,6 +75,7 @@ class Memory {
       'mediaPath': mediaPath,
       'localPath': localPath,
       'remoteUrl': remoteUrl,
+      'deleteToken': deleteToken,
       'uploadStatus': uploadStatus.name,
       'caption': caption,
       'createdAt': createdAt.toIso8601String(),
@@ -95,6 +100,7 @@ class Memory {
       mediaPath: json['mediaPath'] as String,
       localPath: json['localPath'] as String?,
       remoteUrl: json['remoteUrl'] as String?,
+      deleteToken: json['deleteToken'] as String?,
       uploadStatus: status,
       caption: json['caption'] as String?,
       createdAt: DateTime.parse(json['createdAt'] as String),

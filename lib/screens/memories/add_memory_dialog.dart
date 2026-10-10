@@ -359,12 +359,20 @@ class _AddMemoryDialogState extends ConsumerState<AddMemoryDialog> {
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.cloud_done_rounded, color: Colors.greenAccent, size: 12),
+                                    Icon(
+                                      SecretConfigService.isCloudinaryConfigured
+                                          ? Icons.cloud_done_rounded
+                                          : Icons.phone_android_rounded,
+                                      color: SecretConfigService.isCloudinaryConfigured
+                                          ? Colors.greenAccent
+                                          : Colors.amberAccent,
+                                      size: 12,
+                                    ),
                                     const SizedBox(width: 4),
                                     Text(
                                       SecretConfigService.isCloudinaryConfigured
-                                          ? 'Cloudinary 25 GB Ready'
-                                          : 'Firebase Storage Ready',
+                                          ? 'Cloud Backup Ready'
+                                          : 'Saved on Device',
                                       style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
                                     ),
                                   ],

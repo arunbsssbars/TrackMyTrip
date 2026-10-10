@@ -67,6 +67,8 @@ class NotificationFormatter {
       msg = msg.replaceAll(RegExp('$escapedName created', caseSensitive: false), 'You created');
       msg = msg.replaceAll(RegExp('$escapedName shared', caseSensitive: false), 'You shared');
       msg = msg.replaceAll(RegExp('$escapedName reopened', caseSensitive: false), 'You reopened');
+      msg = msg.replaceAll(RegExp('$escapedName removed', caseSensitive: false), 'You removed');
+      msg = msg.replaceAll(RegExp('$escapedName deleted', caseSensitive: false), 'You deleted');
 
       // General fallback replace when this user is the sender
       if (isSender) {

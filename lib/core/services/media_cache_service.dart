@@ -23,6 +23,7 @@ class MediaItem {
   final String id;
   final String localPath;    // Absolute path in app docs dir
   String? remoteUrl;         // Populated after successful upload
+  String? deleteToken;       // Cloudinary unsigned deletion token
   MediaUploadStatus status;
   double uploadProgress;     // 0.0 – 1.0
   final DateTime createdAt;
@@ -34,6 +35,7 @@ class MediaItem {
     required this.id,
     required this.localPath,
     this.remoteUrl,
+    this.deleteToken,
     this.status = MediaUploadStatus.local,
     this.uploadProgress = 0.0,
     required this.createdAt,
@@ -52,6 +54,7 @@ class MediaItem {
     'id': id,
     'localPath': localPath,
     'remoteUrl': remoteUrl,
+    'deleteToken': deleteToken,
     'status': status.name,
     'uploadProgress': uploadProgress,
     'createdAt': createdAt.toIso8601String(),
@@ -65,6 +68,7 @@ class MediaItem {
       id: json['id'] as String,
       localPath: json['localPath'] as String? ?? '',
       remoteUrl: json['remoteUrl'] as String?,
+      deleteToken: json['deleteToken'] as String?,
       status: MediaUploadStatus.values.byName(json['status'] as String? ?? 'local'),
       uploadProgress: (json['uploadProgress'] as num?)?.toDouble() ?? 0.0,
       createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
@@ -133,6 +137,7 @@ class MediaCacheService extends ChangeNotifier {
   Future<void> deleteForEntity(String entityId) async {
     final matching = _items.values.where((i) => i.entityId == entityId).toList();
     final publicIdsToDelete = <String>[];
+    final deleteTokens = <String, String>{};
 
     for (final item in matching) {
       _items.remove(item.id);
@@ -149,6 +154,9 @@ class MediaCacheService extends ChangeNotifier {
             (item.tripId != null ? 'trackmytrip/trips/${item.tripId}/memories/mem_$entityId' : null);
         if (publicId != null) {
           publicIdsToDelete.add(publicId);
+          if (item.deleteToken != null && item.deleteToken!.isNotEmpty) {
+            deleteTokens[publicId] = item.deleteToken!;
+          }
         }
       }
     }
@@ -156,11 +164,12 @@ class MediaCacheService extends ChangeNotifier {
     if (publicIdsToDelete.isNotEmpty) {
       if (publicIdsToDelete.length == 1) {
         try {
-          await _cloudinaryService.deleteAsset(publicId: publicIdsToDelete.first);
+          final pid = publicIdsToDelete.first;
+          await _cloudinaryService.deleteAsset(publicId: pid, deleteToken: deleteTokens[pid]);
         } catch (_) {}
       } else {
         try {
-          await _cloudinaryService.deleteAssetsBatch(publicIdsToDelete);
+          await _cloudinaryService.deleteAssetsBatch(publicIdsToDelete, deleteTokens: deleteTokens);
         } catch (_) {}
       }
     }
@@ -172,6 +181,7 @@ class MediaCacheService extends ChangeNotifier {
   Future<void> deleteForTrip(String tripId) async {
     final matching = _items.values.where((i) => i.tripId == tripId).toList();
     final publicIdsToDelete = <String>[];
+    final deleteTokens = <String, String>{};
 
     for (final item in matching) {
       _items.remove(item.id);
@@ -186,12 +196,15 @@ class MediaCacheService extends ChangeNotifier {
         final publicId = CloudinaryService.extractPublicId(item.remoteUrl!) ??
             'trackmytrip/trips/$tripId/memories/mem_${item.entityId}';
         publicIdsToDelete.add(publicId);
+        if (item.deleteToken != null && item.deleteToken!.isNotEmpty) {
+          deleteTokens[publicId] = item.deleteToken!;
+        }
       }
     }
 
     if (publicIdsToDelete.isNotEmpty) {
       try {
-        await _cloudinaryService.deleteAssetsBatch(publicIdsToDelete);
+        await _cloudinaryService.deleteAssetsBatch(publicIdsToDelete, deleteTokens: deleteTokens);
       } catch (_) {}
     }
     notifyListeners();
@@ -259,7 +272,7 @@ class MediaCacheService extends ChangeNotifier {
 
       // Strategy 1: Cloudinary (Zero-card free quota with dynamic transformations)
       if (_cloudinaryService.isConfigured) {
-        final downloadUrl = await _cloudinaryService.uploadImageBytes(
+        final result = await _cloudinaryService.uploadImageBytesWithResult(
           bytes: bytes,
           folder: 'trackmytrip/trips/$targetTripId/memories',
           publicId: 'mem_$memoryId',
@@ -271,15 +284,34 @@ class MediaCacheService extends ChangeNotifier {
           },
         );
 
-        if (downloadUrl != null && downloadUrl.isNotEmpty) {
+        // Loop 5: Check if item was deleted while uploading
+        if (item.entityType == 'memory' && TombstoneService.isMemoryTombstoned(item.entityId)) {
+          if (result != null) {
+            try {
+              await _cloudinaryService.deleteAsset(
+                publicId: result.publicId,
+                deleteToken: result.deleteToken,
+              );
+            } catch (_) {}
+          }
+          await deleteItem(item.id);
+          return;
+        }
+
+        if (result != null && result.secureUrl.isNotEmpty) {
           _items[item.id]!
             ..status = MediaUploadStatus.uploaded
             ..uploadProgress = 1.0
-            ..remoteUrl = downloadUrl;
+            ..remoteUrl = result.secureUrl
+            ..deleteToken = result.deleteToken;
           notifyListeners();
           if (item.entityType == 'memory' && _ref != null) {
             try {
-              _ref.read(allMemoriesProvider.notifier).updateMemoryMediaUrl(memoryId, downloadUrl);
+              _ref.read(allMemoriesProvider.notifier).updateMemoryMediaUrl(
+                memoryId,
+                result.secureUrl,
+                deleteToken: result.deleteToken,
+              );
             } catch (_) {}
           }
           return;
@@ -388,7 +420,7 @@ class MediaCacheService extends ChangeNotifier {
 
       // Strategy 1: Cloudinary (Zero-card free quota with dynamic transformations)
       if (_cloudinaryService.isConfigured) {
-        final downloadUrl = await _cloudinaryService.uploadImageFile(
+        final result = await _cloudinaryService.uploadImageFileWithResult(
           file: file,
           folder: 'trackmytrip/trips/$targetTripId/memories',
           publicId: 'mem_$memoryId',
@@ -400,21 +432,34 @@ class MediaCacheService extends ChangeNotifier {
           },
         );
 
-        // Check if item was deleted while uploading
+        // Loop 5: Check if item was deleted while uploading
         if (item.entityType == 'memory' && TombstoneService.isMemoryTombstoned(item.entityId)) {
+          if (result != null) {
+            try {
+              await _cloudinaryService.deleteAsset(
+                publicId: result.publicId,
+                deleteToken: result.deleteToken,
+              );
+            } catch (_) {}
+          }
           await deleteItem(item.id);
           return;
         }
 
-        if (downloadUrl != null && downloadUrl.isNotEmpty) {
+        if (result != null && result.secureUrl.isNotEmpty) {
           _items[item.id]!
             ..status = MediaUploadStatus.uploaded
             ..uploadProgress = 1.0
-            ..remoteUrl = downloadUrl;
+            ..remoteUrl = result.secureUrl
+            ..deleteToken = result.deleteToken;
           notifyListeners();
           if (item.entityType == 'memory' && _ref != null) {
             try {
-              _ref.read(allMemoriesProvider.notifier).updateMemoryMediaUrl(memoryId, downloadUrl);
+              _ref.read(allMemoriesProvider.notifier).updateMemoryMediaUrl(
+                memoryId,
+                result.secureUrl,
+                deleteToken: result.deleteToken,
+              );
             } catch (_) {}
           }
           return;

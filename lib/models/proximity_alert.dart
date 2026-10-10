@@ -15,6 +15,7 @@ enum AlertType {
   billDeleted,
   settlementRecorded,
   memoryAdded,
+  memoryDeleted,
   stoppageAdded,
   locationShared,
   tripReopened,

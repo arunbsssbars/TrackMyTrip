@@ -177,7 +177,7 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
     }
 
     // 5. Memory Deep-Linking
-    if (alert.itemType == 'memory' || alert.type == AlertType.memoryAdded) {
+    if (alert.itemType == 'memory' || alert.type == AlertType.memoryAdded || alert.type == AlertType.memoryDeleted) {
       final matchingTrip = trip ?? ref.read(tripListProvider).where((t) => t.id == alert.tripId).firstOrNull;
       if (matchingTrip != null) {
         if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
@@ -396,6 +396,8 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
           return const Color(0xFF10B981);
         case AlertType.memoryAdded:
           return Colors.purple;
+        case AlertType.memoryDeleted:
+          return Colors.deepOrange;
         case AlertType.stoppageAdded:
         case AlertType.stoppageArrival:
         case AlertType.stoppageDeparture:
@@ -449,6 +451,8 @@ class _NotificationCenterSheetState extends ConsumerState<NotificationCenterShee
         return Icons.payments_rounded;
       case AlertType.memoryAdded:
         return Icons.photo_camera_rounded;
+      case AlertType.memoryDeleted:
+        return Icons.delete_outline_rounded;
       case AlertType.stoppageAdded:
         return Icons.add_location_alt_rounded;
       case AlertType.locationShared:

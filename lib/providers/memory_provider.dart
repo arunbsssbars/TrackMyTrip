@@ -14,6 +14,7 @@ import '../core/services/proximity_alert_service.dart';
 import '../core/services/firestore_sync_service.dart';
 import '../core/services/tombstone_service.dart';
 import '../core/services/cloudinary_service.dart';
+import '../core/services/user_service.dart';
 
 class MemoryNotifier extends StateNotifier<List<Memory>> {
   final LocalStorageService _storage;
@@ -137,7 +138,7 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
     }
   }
 
-  Future<void> updateMemoryMediaUrl(String memoryId, String remoteUrl) async {
+  Future<void> updateMemoryMediaUrl(String memoryId, String remoteUrl, {String? deleteToken}) async {
     final index = state.indexWhere((m) => m.id == memoryId);
     if (index == -1) {
       // Defensive fallback: check persistent storage in case memory was written or rehydrated
@@ -147,6 +148,7 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
         final updated = all[storageIdx].copyWith(
           mediaPath: remoteUrl,
           remoteUrl: remoteUrl,
+          deleteToken: deleteToken ?? all[storageIdx].deleteToken,
           uploadStatus: MediaUploadStatus.uploaded,
         );
         all[storageIdx] = updated;
@@ -162,6 +164,7 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
     final updated = state[index].copyWith(
       mediaPath: remoteUrl,
       remoteUrl: remoteUrl,
+      deleteToken: deleteToken ?? state[index].deleteToken,
       uploadStatus: MediaUploadStatus.uploaded,
     );
     state = [
@@ -332,12 +335,36 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
         publicId = CloudinaryService.extractPublicId(existing.mediaPath);
       }
       publicId ??= 'trackmytrip/trips/${existing.tripId}/memories/mem_$memoryId';
-      cloudinary.deleteAsset(publicId: publicId);
+      await cloudinary.deleteAsset(
+        publicId: publicId,
+        deleteToken: existing.deleteToken,
+      );
     } catch (_) {}
 
     if (broadcast) {
       try {
         _ref.read(realtimeSyncServiceProvider).broadcastDeleteMemory(memoryId, existing.tripId);
+      } catch (_) {}
+
+      // Activity notification broadcast for memory deletion
+      try {
+        final currentUser = UserService.getCurrentUser();
+        final currentTrip = _ref.read(tripListProvider).where((t) => t.id == existing.tripId).firstOrNull;
+        final senderName = currentTrip?.getMemberName(currentUser.id) ?? currentUser.displayName;
+        final caption = existing.caption?.isNotEmpty == true ? existing.caption! : 'Trip photo';
+        _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
+          id: 'act_mem_del_${memoryId}_${DateTime.now().millisecondsSinceEpoch}',
+          tripId: existing.tripId,
+          type: AlertType.memoryDeleted,
+          title: 'Memory Removed',
+          message: '$senderName removed memory "$caption"',
+          senderMemberId: currentUser.id,
+          senderName: senderName,
+          itemId: memoryId,
+          itemType: 'memory',
+          urgency: AlertUrgency.low,
+          showLocalBanner: false,
+        );
       } catch (_) {}
     }
 
