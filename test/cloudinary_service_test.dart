@@ -158,17 +158,19 @@ void main() {
         'CLOUDINARY_UPLOAD_PRESET': 'trip_unsigned',
       });
 
-      final mockClient = MockClient((request) async {
+      final mockClient = MockClient.streaming((request, bodyStream) async {
         expect(request.url.toString(), equals('https://api.cloudinary.com/v1_1/mycloud/image/upload'));
         expect(request.method, equals('POST'));
 
-        return http.Response(
-          jsonEncode({
-            'asset_id': 'abc12345',
-            'public_id': 'trackmytrip/memories/mem_1',
-            'secure_url': 'https://res.cloudinary.com/mycloud/image/upload/v12345/mem_1.jpg',
-            'bytes': 4096,
-          }),
+        final responseJson = jsonEncode({
+          'asset_id': 'abc12345',
+          'public_id': 'trackmytrip/memories/mem_1',
+          'secure_url': 'https://res.cloudinary.com/mycloud/image/upload/v12345/mem_1.jpg',
+          'bytes': 4096,
+        });
+
+        return http.StreamedResponse(
+          Stream.value(utf8.encode(responseJson)),
           200,
           headers: {'content-type': 'application/json'},
         );

@@ -58,58 +58,7 @@ class CloudinaryProgressiveImage extends StatelessWidget {
       return _buildPlaceholder();
     }
 
-    // 1. Instant zero-latency rendering for cached local files
-    if (!kIsWeb && localPath != null && localPath!.isNotEmpty) {
-      try {
-        final f = File(localPath!);
-        if (f.existsSync()) {
-          return Image.file(
-            f,
-            fit: fit,
-            width: width,
-            height: height,
-            errorBuilder: (ctx, err, stack) => _buildErrorFallback(),
-          );
-        }
-      } catch (_) {}
-    }
-
-    // 2. Base64 data URLs
-    if (imageUrl.startsWith('data:image')) {
-      try {
-        final base64Str = imageUrl.split(',').last;
-        return Image.memory(
-          base64Decode(base64Str),
-          fit: fit,
-          width: width,
-          height: height,
-          errorBuilder: (ctx, err, stack) => _buildErrorFallback(),
-        );
-      } catch (_) {
-        return _buildErrorFallback();
-      }
-    }
-
-    // 3. Local filesystem path in imageUrl
-    if (!kIsWeb &&
-        !imageUrl.startsWith('http://') &&
-        !imageUrl.startsWith('https://')) {
-      try {
-        final f = File(imageUrl);
-        if (f.existsSync()) {
-          return Image.file(
-            f,
-            fit: fit,
-            width: width,
-            height: height,
-            errorBuilder: (ctx, err, stack) => _buildErrorFallback(),
-          );
-        }
-      } catch (_) {}
-      return _buildErrorFallback();
-    }
-
-    // 4. Remote URLs: Cloudinary Progressive LQIP or standard network image
+    // 1. Remote URLs: Cloudinary Progressive LQIP or standard network image (prioritized when uploaded)
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
       final isCloudinary = imageUrl.contains('res.cloudinary.com') && imageUrl.contains('/upload/');
 
@@ -145,7 +94,24 @@ class CloudinaryProgressiveImage extends StatelessWidget {
                 }
                 return const SizedBox.shrink();
               },
-              errorBuilder: (ctx, err, stack) => _buildErrorFallback(),
+              errorBuilder: (ctx, err, stack) {
+                // Offline fallback to local cached file if available
+                if (!kIsWeb && localPath != null && localPath!.isNotEmpty) {
+                  try {
+                    final f = File(localPath!);
+                    if (f.existsSync()) {
+                      return Image.file(
+                        f,
+                        fit: fit,
+                        width: width,
+                        height: height,
+                        errorBuilder: (_, __, ___) => _buildErrorFallback(),
+                      );
+                    }
+                  } catch (_) {}
+                }
+                return _buildErrorFallback();
+              },
             ),
           ],
         );
@@ -161,11 +127,62 @@ class CloudinaryProgressiveImage extends StatelessWidget {
           if (progress == null) return child;
           return _buildPlaceholder();
         },
-        errorBuilder: (ctx, err, stack) => _buildErrorFallback(),
+        errorBuilder: (ctx, err, stack) {
+          if (!kIsWeb && localPath != null && localPath!.isNotEmpty) {
+            try {
+              final f = File(localPath!);
+              if (f.existsSync()) {
+                return Image.file(
+                  f,
+                  fit: fit,
+                  width: width,
+                  height: height,
+                  errorBuilder: (_, __, ___) => _buildErrorFallback(),
+                );
+              }
+            } catch (_) {}
+          }
+          return _buildErrorFallback();
+        },
       );
     }
 
-    return _buildPlaceholder();
+    // 2. Base64 data URLs
+    if (imageUrl.startsWith('data:image')) {
+      try {
+        final base64Str = imageUrl.split(',').last;
+        return Image.memory(
+          base64Decode(base64Str),
+          fit: fit,
+          width: width,
+          height: height,
+          errorBuilder: (ctx, err, stack) => _buildErrorFallback(),
+        );
+      } catch (_) {
+        return _buildErrorFallback();
+      }
+    }
+
+    // 3. Local filesystem path in imageUrl or localPath (when not yet uploaded)
+    if (!kIsWeb) {
+      final pathToCheck = imageUrl.isNotEmpty && !imageUrl.startsWith('http') ? imageUrl : localPath;
+      if (pathToCheck != null && pathToCheck.isNotEmpty) {
+        try {
+          final f = File(pathToCheck);
+          if (f.existsSync()) {
+            return Image.file(
+              f,
+              fit: fit,
+              width: width,
+              height: height,
+              errorBuilder: (ctx, err, stack) => _buildErrorFallback(),
+            );
+          }
+        } catch (_) {}
+      }
+    }
+
+    return _buildErrorFallback();
   }
 
   Widget _buildPlaceholder() {

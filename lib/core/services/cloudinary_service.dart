@@ -271,7 +271,6 @@ class CloudinaryService {
       final endpoint = getUploadEndpoint();
       final request = http.MultipartRequest('POST', endpoint);
       request.fields['upload_preset'] = uploadPreset;
-      request.fields['return_delete_token'] = 'true';
 
       if (folder != null && folder.isNotEmpty) {
         request.fields['folder'] = folder;
@@ -394,7 +393,6 @@ class CloudinaryService {
       final endpoint = getUploadEndpoint();
       final request = http.MultipartRequest('POST', endpoint);
       request.fields['upload_preset'] = uploadPreset;
-      request.fields['return_delete_token'] = 'true';
 
       if (folder != null && folder.isNotEmpty) {
         request.fields['folder'] = folder;
