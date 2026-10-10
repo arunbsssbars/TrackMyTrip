@@ -381,6 +381,129 @@ class MemoryNotifier extends StateNotifier<List<Memory>> {
     } catch (_) {}
   }
 
+  /// Batch deletes multiple memories from local state, storage, tombstones, and Cloudinary.
+  /// Returns Cloudinary deletion statistics: `{'total': int, 'succeeded': int, 'failed': int}`.
+  Future<Map<String, int>> deleteMemoriesBatch(List<String> memoryIds, {bool broadcast = true}) async {
+    final idsToDelete = memoryIds.toSet();
+    final targets = state.where((m) => idsToDelete.contains(m.id)).toList();
+    if (targets.isEmpty) return {'total': 0, 'succeeded': 0, 'failed': 0};
+
+    final tripIds = <String>{};
+    final publicIds = <String>[];
+    final tokenMap = <String, String>{};
+
+    for (final memory in targets) {
+      tripIds.add(memory.tripId);
+      await TombstoneService.markMemoryTombstoned(memory.id, tripId: memory.tripId);
+      await _storage.deleteMemory(memory.id);
+
+      // Local file cleanup
+      await MediaCacheService.deleteMediaFile(memory.mediaPath);
+      if (memory.localPath != null && memory.localPath != memory.mediaPath) {
+        await MediaCacheService.deleteMediaFile(memory.localPath);
+      }
+      try {
+        _ref.read(mediaCacheServiceProvider).deleteForEntity(memory.id);
+      } catch (_) {}
+      try {
+        _ref.read(firestoreSyncServiceProvider).deleteMemory(memory.tripId, memory.id);
+      } catch (_) {}
+
+      // Collect Cloudinary asset public_id and deleteToken
+      String? publicId;
+      if (memory.remoteUrl != null && memory.remoteUrl!.contains('cloudinary.com')) {
+        publicId = CloudinaryService.extractPublicId(memory.remoteUrl!);
+      } else if (memory.mediaPath.contains('cloudinary.com')) {
+        publicId = CloudinaryService.extractPublicId(memory.mediaPath);
+      }
+      publicId ??= 'trackmytrip/trips/${memory.tripId}/memories/mem_${memory.id}';
+      publicIds.add(publicId);
+      if (memory.deleteToken != null && memory.deleteToken!.isNotEmpty) {
+        tokenMap[publicId] = memory.deleteToken!;
+      }
+    }
+
+    // Update state & persistent storage once for all items
+    state = state.where((m) => !idsToDelete.contains(m.id)).toList();
+    await _storage.saveAllMemories(state);
+
+    // Cancel pending mutations for all target memories
+    try {
+      final pendingMutations = _storage.getPendingMutations();
+      for (final m in pendingMutations) {
+        if (idsToDelete.contains(m.entityId)) {
+          await _storage.removeMutation(m.id);
+        }
+      }
+    } catch (_) {}
+
+    // Cloud package sync for all impacted trips
+    for (final tId in tripIds) {
+      _syncToCloud(tId);
+    }
+
+    // Remote Cloudinary batch deletion with bounded concurrency
+    Map<String, int> cloudResult = {'total': publicIds.length, 'succeeded': publicIds.length, 'failed': 0};
+    try {
+      final cloudinary = _ref.read(cloudinaryServiceProvider);
+      cloudResult = await cloudinary.deleteAssetsBatch(
+        publicIds,
+        deleteTokens: tokenMap,
+        concurrency: 4,
+      );
+    } catch (_) {}
+
+    // Realtime broadcast and activity notifications
+    if (broadcast) {
+      for (final memory in targets) {
+        try {
+          _ref.read(realtimeSyncServiceProvider).broadcastDeleteMemory(memory.id, memory.tripId);
+        } catch (_) {}
+      }
+
+      try {
+        final currentUser = UserService.getCurrentUser();
+        for (final tId in tripIds) {
+          final countForTrip = targets.where((m) => m.tripId == tId).length;
+          final currentTrip = _ref.read(tripListProvider).where((t) => t.id == tId).firstOrNull;
+          final senderName = currentTrip?.getMemberName(currentUser.id) ?? currentUser.displayName;
+          final message = countForTrip == 1
+              ? '$senderName removed a memory'
+              : '$senderName removed $countForTrip memories';
+
+          _ref.read(proximityAlertServiceProvider).broadcastActivityAlert(
+            id: 'act_mem_del_batch_${DateTime.now().millisecondsSinceEpoch}_$tId',
+            tripId: tId,
+            type: AlertType.memoryDeleted,
+            title: countForTrip == 1 ? 'Memory Removed' : 'Memories Removed',
+            message: message,
+            senderMemberId: currentUser.id,
+            senderName: senderName,
+            itemId: targets.firstWhere((m) => m.tripId == tId).id,
+            itemType: 'memory',
+            urgency: AlertUrgency.low,
+            showLocalBanner: false,
+          );
+        }
+      } catch (_) {}
+    }
+
+    // Enqueue offline deletion mutations for synchronization
+    for (final memory in targets) {
+      try {
+        _ref.read(offlineSyncEngineProvider).enqueueMutation(
+          action: MutationAction.deleteMemory,
+          entityType: 'memory',
+          entityId: memory.id,
+          tripId: memory.tripId,
+          payload: {'id': memory.id},
+        );
+      } catch (_) {}
+    }
+
+    return cloudResult;
+  }
+
   void _syncToCloud(String tripId) {
     try {
       final trips = _storage.getTrips();

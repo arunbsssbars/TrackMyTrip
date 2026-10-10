@@ -9,8 +9,6 @@ import 'package:share_plus/share_plus.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/media_cache_service.dart';
 import '../../../core/services/realtime_sync_service.dart';
-import '../../../core/services/firebase_storage_service.dart';
-import '../../../core/services/cloudinary_service.dart';
 import '../../../widgets/cloudinary_progressive_image.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../models/memory.dart';
@@ -58,6 +56,47 @@ class _MemoriesTabState extends ConsumerState<MemoriesTab> {
   String _searchQuery = '';
   bool _newestFirst = true;
   bool _isSyncingPending = false;
+  bool _isSelectionMode = false;
+  final Set<String> _selectedMemoryIds = <String>{};
+
+  void _enterSelectionMode(String? initialMemoryId) {
+    setState(() {
+      _isSelectionMode = true;
+      if (initialMemoryId != null) {
+        _selectedMemoryIds.add(initialMemoryId);
+      }
+    });
+    HapticFeedback.selectionClick();
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _isSelectionMode = false;
+      _selectedMemoryIds.clear();
+    });
+  }
+
+  void _toggleMemorySelection(String memoryId) {
+    setState(() {
+      if (_selectedMemoryIds.contains(memoryId)) {
+        _selectedMemoryIds.remove(memoryId);
+      } else {
+        _selectedMemoryIds.add(memoryId);
+      }
+    });
+    HapticFeedback.selectionClick();
+  }
+
+  void _toggleSelectAll(List<Memory> visibleMemories) {
+    setState(() {
+      if (_selectedMemoryIds.length == visibleMemories.length) {
+        _selectedMemoryIds.clear();
+      } else {
+        _selectedMemoryIds.addAll(visibleMemories.map((m) => m.id));
+      }
+    });
+    HapticFeedback.selectionClick();
+  }
 
   @override
   void dispose() {
@@ -151,7 +190,7 @@ class _MemoriesTabState extends ConsumerState<MemoriesTab> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Delete Memory?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         content: const Text(
-          'This photo will be removed from the trip. Local file will also be deleted.',
+          'This photo will be removed from the trip and deleted from Cloudinary storage.',
           style: TextStyle(fontSize: 13),
         ),
         actions: [
@@ -166,19 +205,57 @@ class _MemoriesTabState extends ConsumerState<MemoriesTab> {
             onPressed: () async {
               Navigator.of(ctx).pop();
               await ref.read(allMemoriesProvider.notifier).deleteMemory(memory.id);
-              final cloudinary = ref.read(cloudinaryServiceProvider);
-              if (cloudinary.isConfigured) {
-                final publicId = CloudinaryService.extractPublicId(memory.remoteUrl ?? memory.mediaPath) ??
-                    'trackmytrip/trips/${widget.trip.id}/memories/mem_${memory.id}';
-                cloudinary.deleteAsset(publicId: publicId);
-              }
-              final storage = ref.read(firebaseStorageServiceProvider);
-              if (storage.isAvailable) {
-                storage.deleteMemoryPhoto(tripId: widget.trip.id, memoryId: memory.id);
-              }
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Memory deleted')),
+                );
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeleteSelected(BuildContext context) {
+    if (_selectedMemoryIds.isEmpty) return;
+    final count = _selectedMemoryIds.length;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          'Delete $count ${count == 1 ? "Memory" : "Memories"}?',
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        content: Text(
+          count == 1
+              ? 'This photo will be permanently removed from the trip and deleted from Cloudinary storage.'
+              : 'These $count photos will be permanently removed from the trip and deleted from Cloudinary storage.',
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            icon: const Icon(Icons.delete_sweep_rounded, size: 16),
+            label: Text('Delete ($count)'),
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              final idsToDelete = _selectedMemoryIds.toList();
+              _exitSelectionMode();
+              final result = await ref.read(allMemoriesProvider.notifier).deleteMemoriesBatch(idsToDelete);
+              if (context.mounted) {
+                final succeeded = result['succeeded'] ?? count;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('$succeeded ${succeeded == 1 ? "memory" : "memories"} deleted'),
+                    behavior: SnackBarBehavior.floating,
+                    duration: const Duration(seconds: 2),
+                  ),
                 );
               }
             },
@@ -527,8 +604,134 @@ class _MemoriesTabState extends ConsumerState<MemoriesTab> {
                       },
                     ),
                   ),
+                  const SizedBox(width: 6),
+
+                  // Multi-Selection Mode Toggle Button
+                  Container(
+                    decoration: BoxDecoration(
+                      color: _isSelectionMode
+                          ? AppTheme.primary
+                          : (isDark ? AppTheme.surfaceDark : AppTheme.surfaceLight),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _isSelectionMode
+                            ? AppTheme.primary
+                            : (isDark ? AppTheme.borderDark : AppTheme.borderLight),
+                      ),
+                    ),
+                    child: IconButton(
+                      icon: Icon(
+                        _isSelectionMode ? Icons.check_circle_rounded : Icons.checklist_rounded,
+                        color: _isSelectionMode ? Colors.white : AppTheme.primary,
+                      ),
+                      constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                      iconSize: 18,
+                      tooltip: _isSelectionMode ? 'Exit Selection Mode' : 'Select Multiple Photos',
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        setState(() {
+                          _isSelectionMode = !_isSelectionMode;
+                          if (!_isSelectionMode) {
+                            _selectedMemoryIds.clear();
+                          }
+                        });
+                      },
+                    ),
+                  ),
                 ],
               ),
+
+              // Multi-Selection Action Banner (when selection mode is active)
+              if (_isSelectionMode) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppTheme.surfaceDark : Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppTheme.primary.withAlpha(isDark ? 90 : 60),
+                      width: 1.2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(isDark ? 80 : 25),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final textScale = MediaQuery.textScalerOf(context).scale(1.0);
+                      final isCompact = constraints.maxWidth < (textScale > 1.1 ? 380 : 340);
+                      final isVeryCompact = constraints.maxWidth < (textScale > 1.1 ? 340 : 280);
+                      return Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                            tooltip: 'Cancel Selection',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                            onPressed: _exitSelectionMode,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              isVeryCompact
+                                  ? '${_selectedMemoryIds.length}/${filteredMemories.length}'
+                                  : '${_selectedMemoryIds.length} of ${filteredMemories.length} selected',
+                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 11.5),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          TextButton(
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              minimumSize: const Size(32, 30),
+                            ),
+                            onPressed: () => _toggleSelectAll(filteredMemories),
+                            child: Text(
+                              _selectedMemoryIds.length == filteredMemories.length
+                                  ? (isVeryCompact ? 'None' : 'Deselect')
+                                  : (isCompact ? 'All' : 'Select All'),
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          isVeryCompact
+                              ? IconButton.filled(
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: Colors.redAccent,
+                                    visualDensity: VisualDensity.compact,
+                                    padding: EdgeInsets.zero,
+                                    minimumSize: const Size(32, 30),
+                                  ),
+                                  icon: const Icon(Icons.delete_sweep_rounded, size: 16),
+                                  tooltip: 'Delete (${_selectedMemoryIds.length})',
+                                  onPressed: _selectedMemoryIds.isEmpty ? null : () => _confirmDeleteSelected(context),
+                                )
+                              : FilledButton.icon(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: Colors.redAccent,
+                                    visualDensity: VisualDensity.compact,
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    minimumSize: const Size(32, 30),
+                                  ),
+                                  icon: const Icon(Icons.delete_sweep_rounded, size: 14),
+                                  label: Text(
+                                    'Delete (${_selectedMemoryIds.length})',
+                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                  ),
+                                  onPressed: _selectedMemoryIds.isEmpty ? null : () => _confirmDeleteSelected(context),
+                                ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ],
               const SizedBox(height: 8),
 
               // Filter Chips Row
@@ -956,14 +1159,22 @@ class _MemoriesTabState extends ConsumerState<MemoriesTab> {
                     clipBehavior: Clip.antiAlias,
                     child: InkWell(
                       onTap: () {
-                        final initialIdx = allTripMemories.indexOf(memory);
-                        _openGalleryViewer(
-                          memories: allTripMemories,
-                          initialIndex: initialIdx >= 0 ? initialIdx : 0,
-                          stoppages: stoppages,
-                        );
+                        if (_isSelectionMode) {
+                          _toggleMemorySelection(memory.id);
+                        } else {
+                          final initialIdx = allTripMemories.indexOf(memory);
+                          _openGalleryViewer(
+                            memories: allTripMemories,
+                            initialIndex: initialIdx >= 0 ? initialIdx : 0,
+                            stoppages: stoppages,
+                          );
+                        }
                       },
                       onDoubleTap: () {
+                        if (_isSelectionMode) {
+                          _toggleMemorySelection(memory.id);
+                          return;
+                        }
                         if (myMember != null) {
                           HapticFeedback.mediumImpact();
                           ref.read(allMemoriesProvider.notifier).toggleLike(memory.id, myMember.id);
@@ -976,14 +1187,55 @@ class _MemoriesTabState extends ConsumerState<MemoriesTab> {
                           );
                         }
                       },
-                      onLongPress: () => _showContextMenu(context, memory, allTripMemories, stoppages),
+                      onLongPress: () {
+                        if (_isSelectionMode) {
+                          _toggleMemorySelection(memory.id);
+                        } else {
+                          _enterSelectionMode(memory.id);
+                        }
+                      },
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
                           MemoriesTab.buildMemoryImage(memory.displayPath, localPath: memory.localPath),
 
+                          // Selection Tint & Badge
+                          if (_isSelectionMode) ...[
+                            Positioned.fill(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: _selectedMemoryIds.contains(memory.id)
+                                      ? Colors.black.withAlpha(100)
+                                      : Colors.transparent,
+                                  border: _selectedMemoryIds.contains(memory.id)
+                                      ? Border.all(color: AppTheme.primary, width: 3)
+                                      : null,
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              top: 8,
+                              left: 8,
+                              child: Container(
+                                decoration: const BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.white,
+                                ),
+                                child: Icon(
+                                  _selectedMemoryIds.contains(memory.id)
+                                      ? Icons.check_circle_rounded
+                                      : Icons.circle_outlined,
+                                  color: _selectedMemoryIds.contains(memory.id)
+                                      ? AppTheme.primary
+                                      : Colors.grey[600],
+                                  size: 22,
+                                ),
+                              ),
+                            ),
+                          ],
+
                           // Syncing Pill
-                          if (memory.uploadStatus == MediaUploadStatus.uploading)
+                          if (memory.uploadStatus == MediaUploadStatus.uploading && !_isSelectionMode)
                             Positioned(
                               top: 8,
                               left: 8,
@@ -1011,23 +1263,24 @@ class _MemoriesTabState extends ConsumerState<MemoriesTab> {
                               ),
                             ),
 
-                          // Top Right 3-dots Menu Button
-                          Positioned(
-                            top: 4,
-                            right: 4,
-                            child: Material(
-                              color: Colors.black45,
-                              shape: const CircleBorder(),
-                              clipBehavior: Clip.antiAlias,
-                              child: InkWell(
-                                onTap: () => _showContextMenu(context, memory, allTripMemories, stoppages),
-                                child: const Padding(
-                                  padding: EdgeInsets.all(4.5),
-                                  child: Icon(Icons.more_vert_rounded, color: Colors.white, size: 16),
+                          // Top Right 3-dots Menu Button (hidden during selection mode)
+                          if (!_isSelectionMode)
+                            Positioned(
+                              top: 4,
+                              right: 4,
+                              child: Material(
+                                color: Colors.black45,
+                                shape: const CircleBorder(),
+                                clipBehavior: Clip.antiAlias,
+                                child: InkWell(
+                                  onTap: () => _showContextMenu(context, memory, allTripMemories, stoppages),
+                                  child: const Padding(
+                                    padding: EdgeInsets.all(4.5),
+                                    child: Icon(Icons.more_vert_rounded, color: Colors.white, size: 16),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
 
                           // Bottom Info Overlay
                           Positioned(
@@ -1165,13 +1418,21 @@ class _MemoriesTabState extends ConsumerState<MemoriesTab> {
             color: isDark ? AppTheme.surfaceDark : AppTheme.surfaceLight,
             child: InkWell(
               onTap: () {
-                _openGalleryViewer(
-                  memories: memories,
-                  initialIndex: index,
-                  stoppages: stoppages,
-                );
+                if (_isSelectionMode) {
+                  _toggleMemorySelection(memory.id);
+                } else {
+                  _openGalleryViewer(
+                    memories: memories,
+                    initialIndex: index,
+                    stoppages: stoppages,
+                  );
+                }
               },
               onDoubleTap: () {
+                if (_isSelectionMode) {
+                  _toggleMemorySelection(memory.id);
+                  return;
+                }
                 if (myMember != null) {
                   HapticFeedback.mediumImpact();
                   ref.read(allMemoriesProvider.notifier).toggleLike(memory.id, myMember.id);
@@ -1184,14 +1445,55 @@ class _MemoriesTabState extends ConsumerState<MemoriesTab> {
                   );
                 }
               },
-              onLongPress: () => _showContextMenu(context, memory, memories, stoppages),
+              onLongPress: () {
+                if (_isSelectionMode) {
+                  _toggleMemorySelection(memory.id);
+                } else {
+                  _enterSelectionMode(memory.id);
+                }
+              },
               child: Stack(
                 fit: StackFit.expand,
                 children: [
                   MemoriesTab.buildMemoryImage(memory.displayPath, localPath: memory.localPath),
 
-                  // Top left: Like badge if liked
-                  if (memory.likedByMemberIds.isNotEmpty)
+                  // Selection Tint & Badge
+                  if (_isSelectionMode) ...[
+                    Positioned.fill(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: _selectedMemoryIds.contains(memory.id)
+                              ? Colors.black.withAlpha(100)
+                              : Colors.transparent,
+                          border: _selectedMemoryIds.contains(memory.id)
+                              ? Border.all(color: AppTheme.primary, width: 2.5)
+                              : null,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 6,
+                      left: 6,
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white,
+                        ),
+                        child: Icon(
+                          _selectedMemoryIds.contains(memory.id)
+                              ? Icons.check_circle_rounded
+                              : Icons.circle_outlined,
+                          color: _selectedMemoryIds.contains(memory.id)
+                              ? AppTheme.primary
+                              : Colors.grey[600],
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  // Top left: Like badge if liked (hidden during selection)
+                  if (memory.likedByMemberIds.isNotEmpty && !_isSelectionMode)
                     Positioned(
                       top: 4,
                       left: 4,
@@ -1219,23 +1521,24 @@ class _MemoriesTabState extends ConsumerState<MemoriesTab> {
                       ),
                     ),
 
-                  // Top right: 3-dots menu button
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: Material(
-                      color: Colors.black45,
-                      shape: const CircleBorder(),
-                      clipBehavior: Clip.antiAlias,
-                      child: InkWell(
-                        onTap: () => _showContextMenu(context, memory, memories, stoppages),
-                        child: const Padding(
-                          padding: EdgeInsets.all(4),
-                          child: Icon(Icons.more_vert_rounded, color: Colors.white, size: 15),
+                  // Top right: 3-dots menu button (hidden during selection)
+                  if (!_isSelectionMode)
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: Material(
+                        color: Colors.black45,
+                        shape: const CircleBorder(),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => _showContextMenu(context, memory, memories, stoppages),
+                          child: const Padding(
+                            padding: EdgeInsets.all(4),
+                            child: Icon(Icons.more_vert_rounded, color: Colors.white, size: 15),
+                          ),
                         ),
                       ),
                     ),
-                  ),
 
                   // Bottom left: Upload status icon
                   Positioned(
@@ -1412,26 +1715,11 @@ class _FullScreenGalleryViewerState extends ConsumerState<FullScreenGalleryViewe
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             icon: const Icon(Icons.delete_rounded, size: 16),
             label: const Text('Delete'),
-            onPressed: () {
+            onPressed: () async {
               Navigator.of(ctx).pop();
-              ref.read(allMemoriesProvider.notifier).deleteMemory(memory.id);
-              final cloudinary = ref.read(cloudinaryServiceProvider);
-              if (cloudinary.isConfigured) {
-                final publicId = CloudinaryService.extractPublicId(memory.remoteUrl ?? memory.mediaPath) ??
-                    'trackmytrip/trips/${widget.trip.id}/memories/mem_${memory.id}';
-                cloudinary.deleteAsset(publicId: publicId);
-              }
-              if (memory.localPath != null) {
-                ref.read(mediaCacheServiceProvider).deleteItem(
-                  ref.read(mediaCacheServiceProvider).itemForEntity(memory.id)?.id ?? '',
-                );
-              }
-              final storage = ref.read(firebaseStorageServiceProvider);
-              if (storage.isAvailable) {
-                storage.deleteMemoryPhoto(tripId: widget.trip.id, memoryId: memory.id);
-              }
+              await ref.read(allMemoriesProvider.notifier).deleteMemory(memory.id);
               if (_viewerMemories.length <= 1) {
-                Navigator.of(context).pop();
+                if (mounted) Navigator.of(context).pop();
               } else {
                 setState(() {
                   _viewerMemories.removeAt(_currentIndex);
