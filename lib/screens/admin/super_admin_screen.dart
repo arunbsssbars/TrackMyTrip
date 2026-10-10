@@ -10,6 +10,7 @@ import '../../core/services/secret_config_service.dart';
 import '../../core/services/build_info_service.dart';
 import '../../core/services/canary_health_service.dart';
 import '../../core/services/cloudinary_service.dart';
+import '../../core/services/media_cache_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/admin_provider.dart';
 
@@ -200,6 +201,51 @@ class _SuperAdminScreenState extends ConsumerState<SuperAdminScreen> {
             Text('Latency: ${result['latencyMs']} ms'),
             const SizedBox(height: 6),
             Text('Message: ${result['message']}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            const Divider(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      side: const BorderSide(color: Colors.orange),
+                    ),
+                    onPressed: () async {
+                      Navigator.of(ctx).pop();
+                      await MediaCacheService.wipeAllMediaCache();
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Local media cache wiped successfully.')),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.delete_sweep_rounded, size: 14, color: Colors.orange),
+                    label: const Text('Purge Cache', style: TextStyle(fontSize: 11, color: Colors.orange)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      side: const BorderSide(color: Colors.blue),
+                    ),
+                    onPressed: () async {
+                      Navigator.of(ctx).pop();
+                      await CloudinaryService.resetQuotaTelemetry();
+                      if (mounted) {
+                        setState(() {});
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Quota telemetry counter reset.')),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.refresh_rounded, size: 14, color: Colors.blue),
+                    label: const Text('Reset Quota', style: TextStyle(fontSize: 11, color: Colors.blue)),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
         actions: [

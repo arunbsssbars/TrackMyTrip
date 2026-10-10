@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'image_compression_service.dart';
 import 'firebase_storage_service.dart';
@@ -45,6 +47,32 @@ class MediaItem {
   bool get isUploading => status == MediaUploadStatus.uploading;
 
   String get displayPath => remoteUrl ?? localPath;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'localPath': localPath,
+    'remoteUrl': remoteUrl,
+    'status': status.name,
+    'uploadProgress': uploadProgress,
+    'createdAt': createdAt.toIso8601String(),
+    'entityType': entityType,
+    'entityId': entityId,
+    'tripId': tripId,
+  };
+
+  factory MediaItem.fromJson(Map<String, dynamic> json) {
+    return MediaItem(
+      id: json['id'] as String,
+      localPath: json['localPath'] as String? ?? '',
+      remoteUrl: json['remoteUrl'] as String?,
+      status: MediaUploadStatus.values.byName(json['status'] as String? ?? 'local'),
+      uploadProgress: (json['uploadProgress'] as num?)?.toDouble() ?? 0.0,
+      createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
+      entityType: json['entityType'] as String? ?? 'memory',
+      entityId: json['entityId'] as String? ?? '',
+      tripId: json['tripId'] as String?,
+    );
+  }
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -55,13 +83,44 @@ class MediaCacheService extends ChangeNotifier {
   final CloudinaryService _cloudinaryService;
   final Ref? _ref;
 
+  static const String _keyPendingQueue = 'cld_pending_media_queue';
+
   MediaCacheService({
     FirebaseStorageService? storageService,
     CloudinaryService? cloudinaryService,
     Ref? ref,
   })  : _storageService = storageService ?? FirebaseStorageService(),
         _cloudinaryService = cloudinaryService ?? CloudinaryService(),
-        _ref = ref;
+        _ref = ref {
+    restorePendingQueue();
+  }
+
+  /// Saves any pending local/failed media items to persistent storage
+  Future<void> persistPendingQueue({SharedPreferences? prefs}) async {
+    try {
+      final sp = prefs ?? await SharedPreferences.getInstance();
+      final pending = _items.values.where((i) => i.isLocal).map((i) => i.toJson()).toList();
+      await sp.setString(_keyPendingQueue, jsonEncode(pending));
+    } catch (_) {}
+  }
+
+  /// Restores pending queue on service startup or app resumption
+  Future<void> restorePendingQueue({SharedPreferences? prefs}) async {
+    try {
+      final sp = prefs ?? await SharedPreferences.getInstance();
+      final raw = sp.getString(_keyPendingQueue);
+      if (raw != null && raw.isNotEmpty) {
+        final list = jsonDecode(raw) as List<dynamic>;
+        for (final itemJson in list) {
+          final item = MediaItem.fromJson(itemJson as Map<String, dynamic>);
+          if (!_items.containsKey(item.id)) {
+            _items[item.id] = item;
+          }
+        }
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
 
   /// All tracked media items
   List<MediaItem> get allItems => _items.values.toList();
@@ -73,6 +132,8 @@ class MediaCacheService extends ChangeNotifier {
   /// Delete any items matching a specific entity (e.g. when memory is deleted)
   Future<void> deleteForEntity(String entityId) async {
     final matching = _items.values.where((i) => i.entityId == entityId).toList();
+    final publicIdsToDelete = <String>[];
+
     for (final item in matching) {
       _items.remove(item.id);
       try {
@@ -87,13 +148,54 @@ class MediaCacheService extends ChangeNotifier {
         final publicId = CloudinaryService.extractPublicId(item.remoteUrl!) ??
             (item.tripId != null ? 'trackmytrip/trips/${item.tripId}/memories/mem_$entityId' : null);
         if (publicId != null) {
-          try {
-            await _cloudinaryService.deleteAsset(publicId: publicId);
-          } catch (_) {}
+          publicIdsToDelete.add(publicId);
         }
       }
     }
+
+    if (publicIdsToDelete.isNotEmpty) {
+      if (publicIdsToDelete.length == 1) {
+        try {
+          await _cloudinaryService.deleteAsset(publicId: publicIdsToDelete.first);
+        } catch (_) {}
+      } else {
+        try {
+          await _cloudinaryService.deleteAssetsBatch(publicIdsToDelete);
+        } catch (_) {}
+      }
+    }
     notifyListeners();
+    await persistPendingQueue();
+  }
+
+  /// Delete all media items and remote Cloudinary assets associated with a trip
+  Future<void> deleteForTrip(String tripId) async {
+    final matching = _items.values.where((i) => i.tripId == tripId).toList();
+    final publicIdsToDelete = <String>[];
+
+    for (final item in matching) {
+      _items.remove(item.id);
+      try {
+        final file = File(item.localPath);
+        if (await file.exists()) await file.delete();
+        final thumbFile = ImageCompressionService.getThumbnailFile(file);
+        if (await thumbFile.exists()) await thumbFile.delete();
+      } catch (_) {}
+
+      if (item.remoteUrl != null && item.remoteUrl!.contains('cloudinary.com')) {
+        final publicId = CloudinaryService.extractPublicId(item.remoteUrl!) ??
+            'trackmytrip/trips/$tripId/memories/mem_${item.entityId}';
+        publicIdsToDelete.add(publicId);
+      }
+    }
+
+    if (publicIdsToDelete.isNotEmpty) {
+      try {
+        await _cloudinaryService.deleteAssetsBatch(publicIdsToDelete);
+      } catch (_) {}
+    }
+    notifyListeners();
+    await persistPendingQueue();
   }
 
   /// Copy a picked file into the app's permanent storage and queue it for upload
@@ -116,6 +218,7 @@ class MediaCacheService extends ChangeNotifier {
     );
     _items[item.id] = item;
     notifyListeners();
+    persistPendingQueue();
 
     // Start upload to Firebase Storage in background
     _uploadItem(item, tripId: tripId);
@@ -142,6 +245,7 @@ class MediaCacheService extends ChangeNotifier {
     );
     _items[item.id] = item;
     notifyListeners();
+    persistPendingQueue();
 
     _uploadItemBytes(item, bytes: bytes, tripId: tripId);
     return item;
@@ -225,6 +329,7 @@ class MediaCacheService extends ChangeNotifier {
       }
     }
     notifyListeners();
+    persistPendingQueue();
   }
 
   /// Copy source file into app documents/media/ directory
@@ -370,6 +475,7 @@ class MediaCacheService extends ChangeNotifier {
       }
     }
     notifyListeners();
+    persistPendingQueue();
   }
 
   /// Retry failed or pending local uploads (call when connectivity is restored or on manual sync)
@@ -434,6 +540,7 @@ class MediaCacheService extends ChangeNotifier {
         if (await file.exists()) await file.delete();
       } catch (_) {}
       notifyListeners();
+      await persistPendingQueue();
     }
   }
 

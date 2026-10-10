@@ -74,6 +74,113 @@ void main() {
       expect(reOptimized, equals(alreadyOptimized));
     });
 
+    test('preset transformations generate correct optimized URLs', () {
+      const rawUrl = 'https://res.cloudinary.com/testcloud/image/upload/v12345/trip_memory.jpg';
+
+      final thumb = CloudinaryService.getThumbnailUrl(rawUrl, size: 150, cropFace: true);
+      expect(thumb, contains('/upload/c_thumb,g_face,w_150,h_150,q_auto,f_auto/'));
+
+      final cardBanner = CloudinaryService.getCardBannerUrl(rawUrl, width: 600, height: 400);
+      expect(cardBanner, contains('/upload/c_fill,g_auto,w_600,h_400,q_auto,f_auto/'));
+
+      final preview = CloudinaryService.getPreviewUrl(rawUrl, maxWidth: 1200);
+      expect(preview, contains('/upload/w_1200,c_limit,q_auto,f_auto/'));
+
+      final lqip = CloudinaryService.getLqipUrl(rawUrl, width: 30);
+      expect(lqip, contains('/upload/c_scale,w_30,e_blur:1000,q_10,f_auto/'));
+    });
+
+    test('getSignedUrl inserts standard s--sig-- token when apiSecret provided', () {
+      const rawUrl = 'https://res.cloudinary.com/testcloud/image/upload/v12345/trip_memory.jpg';
+
+      // 1. With secret provided
+      final signed = CloudinaryService.getSignedUrl(
+        rawUrl,
+        transformation: 'w_800,c_limit',
+        apiSecret: 'my_secret_key',
+      );
+      expect(signed, startsWith('https://res.cloudinary.com/testcloud/image/upload/s--'));
+      expect(signed, contains('--/w_800,c_limit/v12345/trip_memory.jpg'));
+
+      // 2. Without secret, degrades gracefully to transformation
+      final unsigned = CloudinaryService.getSignedUrl(
+        rawUrl,
+        transformation: 'w_800,c_limit',
+        apiSecret: '',
+      );
+      expect(unsigned, equals('https://res.cloudinary.com/testcloud/image/upload/w_800,c_limit/v12345/trip_memory.jpg'));
+    });
+
+    test('addWatermark overlays brand mark text onto transformation chain', () {
+      const rawUrl = 'https://res.cloudinary.com/testcloud/image/upload/v12345/trip_memory.jpg';
+      final watermarked = CloudinaryService.addWatermark(rawUrl, text: 'TrackMyTrip');
+
+      expect(watermarked, contains('l_text:Roboto_16_bold:TrackMyTrip,g_south_east,x_12,y_12,o_70/'));
+    });
+
+    test('getAdaptiveUrl adjusts quality and dimensions based on network tier', () {
+      const rawUrl = 'https://res.cloudinary.com/testcloud/image/upload/v12345/trip_memory.jpg';
+
+      final eco = CloudinaryService.getAdaptiveUrl(rawUrl, tier: CloudinaryNetworkTier.eco);
+      expect(eco, contains('/upload/w_480,c_limit,q_auto:eco,f_auto/'));
+
+      final good = CloudinaryService.getAdaptiveUrl(rawUrl, tier: CloudinaryNetworkTier.good);
+      expect(good, contains('/upload/w_800,c_limit,q_auto:good,f_auto/'));
+
+      final best = CloudinaryService.getAdaptiveUrl(rawUrl, tier: CloudinaryNetworkTier.best);
+      expect(best, contains('/upload/w_1280,c_limit,q_auto:best,f_auto/'));
+    });
+
+    test('isValidMediaBytes recognizes both images and audio/video containers', () {
+      // JPEG
+      expect(CloudinaryService.isValidMediaBytes([0xFF, 0xD8, 0xFF, 0xEE]), isTrue);
+      // MP4 / M4A (ftyp)
+      final mp4Header = [0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70];
+      expect(CloudinaryService.isValidMediaBytes(mp4Header), isTrue);
+      // MP3 (ID3)
+      final mp3Header = [0x49, 0x44, 0x33, 0x03, 0x00, 0x00];
+      expect(CloudinaryService.isValidMediaBytes(mp3Header), isTrue);
+      // WAV
+      final wavHeader = [0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45];
+      expect(CloudinaryService.isValidMediaBytes(wavHeader), isTrue);
+      // Executable / invalid
+      expect(CloudinaryService.isValidMediaBytes([0x4D, 0x5A, 0x90, 0x00]), isFalse);
+    });
+
+    test('uploadMediaBytes routes to resourceType specific endpoint for video/audio', () async {
+      SecretConfigService.setMockVariables({
+        'CLOUDINARY_CLOUD_NAME': 'mycloud',
+        'CLOUDINARY_UPLOAD_PRESET': 'trip_unsigned',
+      });
+
+      final mockClient = MockClient((request) async {
+        expect(request.url.toString(), equals('https://api.cloudinary.com/v1_1/mycloud/video/upload'));
+        expect(request.method, equals('POST'));
+
+        return http.Response(
+          jsonEncode({
+            'public_id': 'trackmytrip/audio/note_1',
+            'secure_url': 'https://res.cloudinary.com/mycloud/video/upload/v12345/note_1.mp4',
+            'bytes': 8192,
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final service = CloudinaryService(httpClient: mockClient);
+      final mp4Bytes = Uint8List.fromList([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6D, 0x70, 0x34, 0x32]);
+
+      final url = await service.uploadMediaBytes(
+        bytes: mp4Bytes,
+        resourceType: 'video',
+        folder: 'trackmytrip/audio',
+        publicId: 'note_1',
+      );
+
+      expect(url, equals('https://res.cloudinary.com/mycloud/video/upload/v12345/note_1.mp4'));
+    });
+
     test('uploadImageBytes successfully sends multipart request and returns secure_url', () async {
       SecretConfigService.setMockVariables({
         'CLOUDINARY_CLOUD_NAME': 'mycloud',
@@ -277,6 +384,45 @@ void main() {
         publicId: 'trackmytrip/trips/trip1/memories/mem_1',
       );
       expect(success, isTrue);
+    });
+
+    test('deleteAssetsBatch concurrently deletes multiple assets and aggregates stats', () async {
+      SecretConfigService.setMockVariables({
+        'CLOUDINARY_CLOUD_NAME': 'mycloud',
+        'CLOUDINARY_UPLOAD_PRESET': 'preset',
+      });
+
+      final deletedIds = <String>[];
+      final mockClient = MockClient((request) async {
+        if (request.url.toString().contains('delete_by_token')) {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          final token = body['token'] as String;
+          deletedIds.add(token);
+          if (token == 'token_fail') {
+            return http.Response(jsonEncode({'result': 'error'}), 400);
+          }
+          return http.Response(jsonEncode({'result': 'ok'}), 200);
+        }
+        return http.Response('Not Found', 404);
+      });
+
+      final service = CloudinaryService(httpClient: mockClient);
+      final tokens = {
+        'id_1': 'token_1',
+        'id_2': 'token_2',
+        'id_3': 'token_fail',
+      };
+
+      final result = await service.deleteAssetsBatch(
+        ['id_1', 'id_2', 'id_3'],
+        deleteTokens: tokens,
+        concurrency: 2,
+      );
+
+      expect(result['total'], equals(3));
+      expect(result['succeeded'], equals(2));
+      expect(result['failed'], equals(1));
+      expect(deletedIds.length, equals(3));
     });
   });
 }

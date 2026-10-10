@@ -1,6 +1,5 @@
 import '../../../core/design_system/design_system.dart';
 import '../../../core/utils/date_formatter.dart';
-import 'dart:convert';
 import 'dart:io' show File;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -12,6 +11,7 @@ import '../../../core/services/media_cache_service.dart';
 import '../../../core/services/realtime_sync_service.dart';
 import '../../../core/services/firebase_storage_service.dart';
 import '../../../core/services/cloudinary_service.dart';
+import '../../../widgets/cloudinary_progressive_image.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../models/memory.dart';
 import '../../../models/stoppage.dart';
@@ -34,66 +34,19 @@ class MemoriesTab extends ConsumerStatefulWidget {
   ConsumerState<MemoriesTab> createState() => _MemoriesTabState();
 
   static Widget buildMemoryImage(String imagePath, {String? localPath}) {
-    // 1. Prioritize local file copy for instant zero-latency rendering
-    if (!kIsWeb && localPath != null && localPath.isNotEmpty) {
-      final f = File(localPath);
-      if (f.existsSync()) {
-        return Image.file(
-          f,
-          fit: BoxFit.cover,
-          errorBuilder: (ctx, err, stack) =>
-              const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
-        );
-      }
-    }
-    if (!kIsWeb &&
-        !imagePath.startsWith('http://') &&
-        !imagePath.startsWith('https://') &&
-        !imagePath.startsWith('data:image')) {
-      final f = File(imagePath);
-      if (f.existsSync()) {
-        return Image.file(
-          f,
-          fit: BoxFit.cover,
-          errorBuilder: (ctx, err, stack) =>
-              const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
-        );
-      }
-    }
-
-    if (imagePath.startsWith('data:image')) {
-      final base64Str = imagePath.split(',').last;
-      return Image.memory(
-        base64Decode(base64Str),
-        fit: BoxFit.cover,
-        errorBuilder: (ctx, err, stack) =>
-            const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
-      );
-    } else if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
-      return Image.network(
-        imagePath,
-        fit: BoxFit.cover,
-        loadingBuilder: (context, child, progress) {
-          if (progress == null) return child;
-          return Center(
-            child: SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(
-                value: progress.expectedTotalBytes != null
-                    ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
-                    : null,
-                strokeWidth: 2,
-              ),
-            ),
-          );
-        },
-        errorBuilder: (ctx, err, stack) =>
-            const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
-      );
-    } else {
-      return const Center(child: Icon(Icons.photo));
-    }
+    return CloudinaryProgressiveImage(
+      imageUrl: imagePath,
+      localPath: localPath,
+      fit: BoxFit.cover,
+      errorWidget: const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
+      placeholder: const Center(
+        child: SizedBox(
+          width: 22,
+          height: 22,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      ),
+    );
   }
 }
 

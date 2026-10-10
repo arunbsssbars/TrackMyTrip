@@ -10,6 +10,13 @@ import 'anti_abuse_rate_limiter_service.dart';
 import 'image_compression_service.dart';
 import 'secret_config_service.dart';
 
+/// Network bandwidth tiers for adaptive Cloudinary image quality & resolution.
+enum CloudinaryNetworkTier {
+  eco,   // 2G / metered mobile: 480px, q_auto:eco
+  good,  // 3G / 4G standard: 800px, q_auto:good
+  best,  // High-speed Wi-Fi: 1280px, q_auto:best
+}
+
 /// Cloudinary media service providing free, zero-card cloud media uploads,
 /// strict 25 GB free quota enforcement, pre-upload image optimizations,
 /// and responsive dynamic URL image transformations.
@@ -47,9 +54,9 @@ class CloudinaryService {
   /// Active unsigned upload preset name
   String get uploadPreset => SecretConfigService.cloudinaryUploadPreset;
 
-  /// Target Cloudinary upload endpoint
-  Uri get _uploadEndpoint =>
-      Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/image/upload');
+  /// Target Cloudinary upload endpoint for specified [resourceType] ('image', 'video', 'raw', 'auto')
+  Uri getUploadEndpoint([String resourceType = 'image']) =>
+      Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/$resourceType/upload');
 
   // =================================================================
   // Quota Telemetry & Enforcement Methods
@@ -119,6 +126,16 @@ class CloudinaryService {
     try {
       final sp = prefs ?? await SharedPreferences.getInstance();
       await sp.setInt(_keyConsumedBytes, bytes);
+    } catch (_) {}
+  }
+
+  /// Resets tracked consumed bytes to 0 (useful for admin telemetry recalibration)
+  static Future<void> resetQuotaTelemetry({SharedPreferences? prefs}) async {
+    _inMemoryBytes = 0;
+    _initializedFromPrefs = true;
+    try {
+      final sp = prefs ?? await SharedPreferences.getInstance();
+      await sp.setInt(_keyConsumedBytes, 0);
     } catch (_) {}
   }
 
@@ -201,20 +218,93 @@ class CloudinaryService {
     }
   }
 
+  /// Validates whether the given raw [bytes] match a legitimate image, audio, or video header.
+  static bool isValidMediaBytes(List<int> bytes) {
+    if (bytes.length < 4) return false;
+
+    // 1. Check Images (JPEG, PNG, WebP, GIF)
+    if (isValidImageBytes(bytes)) return true;
+
+    // 2. Audio & Video headers:
+    // MP4/M4A/MOV: byte 4..7 == 'ftyp'
+    if (bytes.length >= 8 &&
+        bytes[4] == 0x66 &&
+        bytes[5] == 0x74 &&
+        bytes[6] == 0x79 &&
+        bytes[7] == 0x70) {
+      return true;
+    }
+
+    // MP3 with ID3 tag: 'ID3' (0x49 0x44 0x33)
+    if (bytes.length >= 3 &&
+        bytes[0] == 0x49 &&
+        bytes[1] == 0x44 &&
+        bytes[2] == 0x33) {
+      return true;
+    }
+
+    // MP3 frame sync: 0xFF followed by 0xE0..0xFF
+    if (bytes.length >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0) {
+      return true;
+    }
+
+    // WAV: 'RIFF' .... 'WAVE'
+    if (bytes.length >= 12 &&
+        bytes[0] == 0x52 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x46 &&
+        bytes[8] == 0x57 &&
+        bytes[9] == 0x41 &&
+        bytes[10] == 0x56 &&
+        bytes[11] == 0x45) {
+      return true;
+    }
+
+    // AAC (ADTS sync 0xFFF)
+    if (bytes.length >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xF0) == 0xF0) {
+      return true;
+    }
+
+    // OGG container (0x4F 0x67 0x67 0x53)
+    if (bytes.length >= 4 &&
+        bytes[0] == 0x4F &&
+        bytes[1] == 0x47 &&
+        bytes[2] == 0x47 &&
+        bytes[3] == 0x53) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /// Inspects magic bytes of a local media file (image, audio, or video).
+  static Future<bool> isValidMediaFile(File file) async {
+    try {
+      if (!await file.exists()) return false;
+      final length = await file.length();
+      if (length < 4 || length > maxRawFileSizeBytes) return false;
+
+      final raf = await file.open(mode: FileMode.read);
+      try {
+        final header = await raf.read(16);
+        return isValidMediaBytes(header);
+      } finally {
+        await raf.close();
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
   // =================================================================
-  // Upload Pipeline (Guaranteed Image Optimization)
+  // Upload Pipeline (Images, Audio, and Video)
   // =================================================================
 
-  /// Uploads a local image [File] to Cloudinary using an unsigned upload preset.
-  /// Enforces:
-  /// 1. Anti-abuse rate limit guard (max 10/min, 100/day).
-  /// 2. Binary magic byte validation (blocks non-image executable payloads).
-  /// 3. 25 GB quota cap guard (blocks upload if 25 GB reached to prevent billing).
-  /// 4. Guaranteed pre-upload compression down to FHD 1080p and 75-80% quality.
-  /// 5. In-flight Cloudinary auto format and quality parameters.
-  /// Returns the secure HTTPS URL of the uploaded asset, or `null` on failure.
-  Future<String?> uploadImageFile({
+  /// Uploads any supported media [File] (image, video, or audio note) to Cloudinary.
+  Future<String?> uploadMediaFile({
     required File file,
+    String resourceType = 'auto',
     String? folder,
     String? publicId,
     Map<String, String>? tags,
@@ -239,29 +329,33 @@ class CloudinaryService {
     // 25 GB Quota guard: prevent charges by halting remote upload
     if (await isQuotaExceeded()) {
       if (kDebugMode) {
-        debugPrint('[CloudinaryService] Upload blocked: 25 GB free quota reached to prevent charges.');
+        debugPrint('[CloudinaryService] Upload blocked: 25 GB free quota reached.');
       }
       return null;
     }
 
-    // Security & Magic Byte guard: verify file exists, size bounded, and valid image binary header
-    if (!await isValidImageFile(file)) {
+    // Security & Magic Byte guard
+    if (!await isValidMediaFile(file)) {
       if (kDebugMode) {
-        debugPrint('[CloudinaryService] Upload blocked: File is invalid, exceeds 15 MB, or is not a genuine image.');
+        debugPrint('[CloudinaryService] Upload blocked: File is invalid, exceeds 15 MB, or is unsupported.');
       }
       return null;
     }
 
     try {
-
-      // Mandatory Pre-Upload Optimization: ensure file is compressed before transmitting
-      final optimizedFile = await ImageCompressionService.compressFile(file);
+      // Pre-upload optimization for images
+      final File fileToUpload;
+      if (resourceType == 'image' || (resourceType == 'auto' && await isValidImageFile(file))) {
+        fileToUpload = await ImageCompressionService.compressFile(file);
+      } else {
+        fileToUpload = file;
+      }
 
       onProgress?.call(0.1);
 
-      final request = http.MultipartRequest('POST', _uploadEndpoint);
+      final endpoint = getUploadEndpoint(resourceType);
+      final request = http.MultipartRequest('POST', endpoint);
       request.fields['upload_preset'] = uploadPreset;
-      // Request client-side delete token from Cloudinary for instant deletion
       request.fields['return_delete_token'] = 'true';
 
       if (folder != null && folder.isNotEmpty) {
@@ -274,14 +368,14 @@ class CloudinaryService {
         request.fields['tags'] = tags.values.join(',');
       }
 
-      final multipartFile = await http.MultipartFile.fromPath('file', optimizedFile.path);
+      final multipartFile = await http.MultipartFile.fromPath('file', fileToUpload.path);
       request.files.add(multipartFile);
 
       onProgress?.call(0.3);
 
       final streamedResponse = await _httpClient.send(request).timeout(
-        const Duration(seconds: 30),
-        onTimeout: () => throw TimeoutException('Cloudinary upload timed out after 30 seconds'),
+        const Duration(seconds: 40),
+        onTimeout: () => throw TimeoutException('Cloudinary upload timed out after 40 seconds'),
       );
 
       final responseBody = await streamedResponse.stream.bytesToString();
@@ -290,13 +384,12 @@ class CloudinaryService {
       if (streamedResponse.statusCode >= 200 && streamedResponse.statusCode < 300) {
         final data = jsonDecode(responseBody) as Map<String, dynamic>;
         final secureUrl = data['secure_url'] as String?;
-        final uploadedBytes = data['bytes'] as int? ?? (await optimizedFile.length());
+        final uploadedBytes = data['bytes'] as int? ?? (await fileToUpload.length());
         final deleteToken = data['delete_token'] as String?;
         final returnedPublicId = data['public_id'] as String?;
         await recordUploadBytes(uploadedBytes);
         AntiAbuseRateLimiterService.recordMediaUpload();
 
-        // Cache delete token for subsequent client-side deletion
         if (deleteToken != null && deleteToken.isNotEmpty) {
           try {
             final sp = await SharedPreferences.getInstance();
@@ -316,9 +409,8 @@ class CloudinaryService {
         return secureUrl;
       } else {
         if (kDebugMode) {
-          debugPrint(
-            '[CloudinaryService] Upload failed (${streamedResponse.statusCode}): $responseBody',
-          );
+          final errorMsg = _sanitizeErrorMessage(responseBody);
+          debugPrint('[CloudinaryService] Upload failed (${streamedResponse.statusCode}): $errorMsg');
         }
         return null;
       }
@@ -330,12 +422,39 @@ class CloudinaryService {
     }
   }
 
-  /// Uploads raw image [Uint8List] bytes directly to Cloudinary (useful for Web or memory buffers).
-  /// Enforces 25 GB limit and pre-upload compression.
-  /// Returns the secure HTTPS URL or `null` on failure.
-  Future<String?> uploadImageBytes({
+  static String _sanitizeErrorMessage(String responseBody) {
+    try {
+      final json = jsonDecode(responseBody) as Map<String, dynamic>;
+      final msg = json['error']?['message'] as String?;
+      if (msg != null && msg.isNotEmpty) {
+        return msg;
+      }
+    } catch (_) {}
+    return 'API error';
+  }
+
+  /// Uploads a local image [File] to Cloudinary using an unsigned upload preset.
+  Future<String?> uploadImageFile({
+    required File file,
+    String? folder,
+    String? publicId,
+    Map<String, String>? tags,
+    void Function(double progress)? onProgress,
+  }) =>
+      uploadMediaFile(
+        file: file,
+        resourceType: 'image',
+        folder: folder,
+        publicId: publicId,
+        tags: tags,
+        onProgress: onProgress,
+      );
+
+  /// Uploads raw media [Uint8List] bytes directly to Cloudinary.
+  Future<String?> uploadMediaBytes({
     required Uint8List bytes,
-    String filename = 'photo.jpg',
+    String resourceType = 'auto',
+    String filename = 'media.bin',
     String? folder,
     String? publicId,
     Map<String, String>? tags,
@@ -348,7 +467,6 @@ class CloudinaryService {
       return null;
     }
 
-    // Anti-Abuse Rate Limit guard: prevent runaway byte upload loops
     final rateLimit = AntiAbuseRateLimiterService.checkMediaUploadAllowed();
     if (!rateLimit.isAllowed) {
       if (kDebugMode) {
@@ -357,15 +475,13 @@ class CloudinaryService {
       return null;
     }
 
-    // Binary magic byte validation: verify raw buffer matches valid image header
-    if (!isValidImageBytes(bytes)) {
+    if (!isValidMediaBytes(bytes)) {
       if (kDebugMode) {
-        debugPrint('[CloudinaryService] Byte upload blocked: Raw bytes do not match recognized image header.');
+        debugPrint('[CloudinaryService] Byte upload blocked: Raw bytes do not match recognized media header.');
       }
       return null;
     }
 
-    // 25 GB Quota guard
     if (await isQuotaExceeded()) {
       if (kDebugMode) {
         debugPrint('[CloudinaryService] Byte upload blocked: 25 GB free quota reached.');
@@ -374,12 +490,17 @@ class CloudinaryService {
     }
 
     try {
-      // Mandatory Pre-Upload Optimization: downscale & compress byte buffer
-      final optimizedBytes = await ImageCompressionService.compressBytes(bytes);
+      final Uint8List optimizedBytes;
+      if (resourceType == 'image' || (resourceType == 'auto' && isValidImageBytes(bytes))) {
+        optimizedBytes = await ImageCompressionService.compressBytes(bytes);
+      } else {
+        optimizedBytes = bytes;
+      }
 
       onProgress?.call(0.1);
 
-      final request = http.MultipartRequest('POST', _uploadEndpoint);
+      final endpoint = getUploadEndpoint(resourceType);
+      final request = http.MultipartRequest('POST', endpoint);
       request.fields['upload_preset'] = uploadPreset;
       request.fields['return_delete_token'] = 'true';
 
@@ -403,8 +524,8 @@ class CloudinaryService {
       onProgress?.call(0.3);
 
       final streamedResponse = await _httpClient.send(request).timeout(
-        const Duration(seconds: 30),
-        onTimeout: () => throw TimeoutException('Cloudinary byte upload timed out after 30 seconds'),
+        const Duration(seconds: 40),
+        onTimeout: () => throw TimeoutException('Cloudinary byte upload timed out after 40 seconds'),
       );
 
       final responseBody = await streamedResponse.stream.bytesToString();
@@ -438,8 +559,9 @@ class CloudinaryService {
         return secureUrl;
       } else {
         if (kDebugMode) {
+          final errorMsg = _sanitizeErrorMessage(responseBody);
           debugPrint(
-            '[CloudinaryService] Byte upload failed (${streamedResponse.statusCode}): $responseBody',
+            '[CloudinaryService] Byte upload failed (${streamedResponse.statusCode}): $errorMsg',
           );
         }
         return null;
@@ -451,6 +573,25 @@ class CloudinaryService {
       return null;
     }
   }
+
+  /// Uploads raw image [Uint8List] bytes directly to Cloudinary.
+  Future<String?> uploadImageBytes({
+    required Uint8List bytes,
+    String filename = 'photo.jpg',
+    String? folder,
+    String? publicId,
+    Map<String, String>? tags,
+    void Function(double progress)? onProgress,
+  }) =>
+      uploadMediaBytes(
+        bytes: bytes,
+        resourceType: 'image',
+        filename: filename,
+        folder: folder,
+        publicId: publicId,
+        tags: tags,
+        onProgress: onProgress,
+      );
 
   /// Pings Cloudinary to check credential health, endpoint accessibility, and round-trip latency
   Future<Map<String, dynamic>> pingCloudinary() async {
@@ -501,6 +642,8 @@ class CloudinaryService {
     int? height,
     int? quality,
     bool autoFormat = true,
+    String cropMode = 'c_limit',
+    String? gravity,
   }) {
     if (rawUrl.isEmpty) return rawUrl;
     if (!rawUrl.contains('res.cloudinary.com') || !rawUrl.contains('/upload/')) {
@@ -508,13 +651,19 @@ class CloudinaryService {
     }
 
     final transformations = <String>[];
+    if (cropMode != 'c_limit' && cropMode.isNotEmpty) {
+      transformations.add(cropMode);
+    }
+    if (gravity != null && gravity.isNotEmpty) {
+      transformations.add(gravity);
+    }
     if (width != null && width > 0) {
       transformations.add('w_$width');
     }
     if (height != null && height > 0) {
       transformations.add('h_$height');
     }
-    if (width != null || height != null) {
+    if (cropMode == 'c_limit' && (width != null || height != null)) {
       transformations.add('c_limit');
     }
     if (quality != null && quality > 0) {
@@ -535,6 +684,140 @@ class CloudinaryService {
       return rawUrl;
     }
 
+    return rawUrl.replaceFirst('/upload/', '/upload/$transformString');
+  }
+
+  /// Generates a thumbnail URL cropped to a square (default 200x200) with face/auto gravity.
+  static String getThumbnailUrl(String rawUrl, {int size = 200, bool cropFace = false}) {
+    if (rawUrl.isEmpty || !rawUrl.contains('res.cloudinary.com') || !rawUrl.contains('/upload/')) {
+      return rawUrl;
+    }
+    final gravity = cropFace ? 'g_face' : 'g_auto';
+    return getOptimizedUrl(
+      rawUrl,
+      width: size,
+      height: size,
+      cropMode: 'c_thumb',
+      gravity: gravity,
+      autoFormat: true,
+    );
+  }
+
+  /// Generates an optimized medium card banner URL (e.g. 800x500 fill cropped with auto gravity).
+  static String getCardBannerUrl(String rawUrl, {int width = 800, int height = 500}) {
+    if (rawUrl.isEmpty || !rawUrl.contains('res.cloudinary.com') || !rawUrl.contains('/upload/')) {
+      return rawUrl;
+    }
+    return getOptimizedUrl(
+      rawUrl,
+      width: width,
+      height: height,
+      cropMode: 'c_fill',
+      gravity: 'g_auto',
+      autoFormat: true,
+    );
+  }
+
+  /// Generates an optimized high-resolution zoom preview URL (up to 1920px width limit).
+  static String getPreviewUrl(String rawUrl, {int maxWidth = 1920}) {
+    if (rawUrl.isEmpty || !rawUrl.contains('res.cloudinary.com') || !rawUrl.contains('/upload/')) {
+      return rawUrl;
+    }
+    return getOptimizedUrl(
+      rawUrl,
+      width: maxWidth,
+      cropMode: 'c_limit',
+      autoFormat: true,
+    );
+  }
+
+  /// Generates a Low-Quality Image Placeholder (LQIP) URL (tiny blurred thumbnail for instant rendering).
+  static String getLqipUrl(String rawUrl, {int width = 40}) {
+    if (rawUrl.isEmpty || !rawUrl.contains('res.cloudinary.com') || !rawUrl.contains('/upload/')) {
+      return rawUrl;
+    }
+    final transformString = 'c_scale,w_$width,e_blur:1000,q_10,f_auto/';
+    if (rawUrl.contains('/upload/$transformString')) return rawUrl;
+    return rawUrl.replaceFirst('/upload/', '/upload/$transformString');
+  }
+
+  /// Generates a signed Cloudinary delivery URL with signature token `s--<sig>--`
+  /// to protect against unauthorized image parameter tampering and hotlink scraping.
+  /// If [apiSecret] is not configured, returns the URL with requested transformations.
+  static String getSignedUrl(
+    String rawUrl, {
+    String? transformation,
+    String? apiSecret,
+  }) {
+    if (rawUrl.isEmpty || !rawUrl.contains('res.cloudinary.com') || !rawUrl.contains('/upload/')) {
+      return rawUrl;
+    }
+
+    final secret = apiSecret ?? SecretConfigService.cloudinaryApiSecret;
+    final uploadIndex = rawUrl.indexOf('/upload/');
+    final prefix = rawUrl.substring(0, uploadIndex + '/upload/'.length);
+    var remainder = rawUrl.substring(uploadIndex + '/upload/'.length);
+
+    // If already signed, strip existing signature
+    if (remainder.startsWith('s--') && remainder.contains('--/')) {
+      remainder = remainder.substring(remainder.indexOf('--/') + 3);
+    }
+
+    final effectiveTransform = transformation != null && transformation.isNotEmpty
+        ? (transformation.endsWith('/') ? transformation : '$transformation/')
+        : '';
+
+    if (secret.isEmpty) {
+      return '$prefix$effectiveTransform$remainder';
+    }
+
+    final toSign = '$effectiveTransform$remainder$secret';
+    final digest = sha1.convert(utf8.encode(toSign));
+    final b64 = base64Url.encode(digest.bytes).replaceAll('=', '');
+    final sig = b64.length >= 8 ? b64.substring(0, 8) : b64;
+
+    return '${prefix}s--$sig--/$effectiveTransform$remainder';
+  }
+
+  /// Injects an unobtrusive copyright watermark overlay on the image.
+  static String addWatermark(String rawUrl, {String text = 'TrackMyTrip'}) {
+    if (rawUrl.isEmpty || !rawUrl.contains('res.cloudinary.com') || !rawUrl.contains('/upload/')) {
+      return rawUrl;
+    }
+    final encodedText = Uri.encodeComponent(text);
+    final watermarkTransform = 'l_text:Roboto_16_bold:$encodedText,g_south_east,x_12,y_12,o_70/';
+    if (rawUrl.contains(watermarkTransform)) return rawUrl;
+    return rawUrl.replaceFirst('/upload/', '/upload/$watermarkTransform');
+  }
+
+  /// Generates a network-adaptive delivery URL tailored to connection bandwidth.
+  static String getAdaptiveUrl(
+    String rawUrl, {
+    CloudinaryNetworkTier tier = CloudinaryNetworkTier.good,
+    int? customWidth,
+  }) {
+    if (rawUrl.isEmpty || !rawUrl.contains('res.cloudinary.com') || !rawUrl.contains('/upload/')) {
+      return rawUrl;
+    }
+    final int width;
+    final String quality;
+    switch (tier) {
+      case CloudinaryNetworkTier.eco:
+        width = customWidth ?? 480;
+        quality = 'q_auto:eco';
+        break;
+      case CloudinaryNetworkTier.good:
+        width = customWidth ?? 800;
+        quality = 'q_auto:good';
+        break;
+      case CloudinaryNetworkTier.best:
+        width = customWidth ?? 1280;
+        quality = 'q_auto:best';
+        break;
+    }
+
+    final transformString = 'w_$width,c_limit,$quality,f_auto/';
+    if (rawUrl.contains('/upload/$transformString')) return rawUrl;
     return rawUrl.replaceFirst('/upload/', '/upload/$transformString');
   }
 
@@ -659,6 +942,50 @@ class CloudinaryService {
       debugPrint('[CloudinaryService] Note: Asset $publicId was queued or delete_token expired.');
     }
     return false;
+  }
+
+  /// Batch deletes multiple assets from Cloudinary with bounded concurrency (default 3 parallel workers).
+  /// Returns a summary map: `{'total': int, 'succeeded': int, 'failed': int}`.
+  Future<Map<String, int>> deleteAssetsBatch(
+    List<String> publicIds, {
+    Map<String, String>? deleteTokens,
+    int concurrency = 3,
+  }) async {
+    final validIds = publicIds.where((id) => id.isNotEmpty).toList();
+    if (validIds.isEmpty || !isConfigured) {
+      return {'total': validIds.length, 'succeeded': 0, 'failed': validIds.length};
+    }
+
+    int succeeded = 0;
+    int failed = 0;
+    final idQueue = List<String>.from(validIds);
+
+    Future<void> runWorker() async {
+      while (idQueue.isNotEmpty) {
+        final id = idQueue.removeAt(0);
+        final token = deleteTokens?[id];
+        final ok = await deleteAsset(publicId: id, deleteToken: token);
+        if (ok) {
+          succeeded++;
+        } else {
+          failed++;
+        }
+      }
+    }
+
+    final poolSize = concurrency.clamp(1, 10);
+    final workerPool = <Future<void>>[];
+    for (int i = 0; i < poolSize && i < validIds.length; i++) {
+      workerPool.add(runWorker());
+    }
+
+    await Future.wait(workerPool);
+
+    return {
+      'total': validIds.length,
+      'succeeded': succeeded,
+      'failed': failed,
+    };
   }
 }
 
