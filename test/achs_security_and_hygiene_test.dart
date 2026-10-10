@@ -21,8 +21,8 @@ void main() {
         RegExp(r'''CLOUDINARY_API_SECRET\s*=\s*['"][a-zA-Z0-9_\-]{10,}['"]'''),
         RegExp(r'''ghp_[a-zA-Z0-9]{36}'''), // GitHub personal access token
         RegExp(r'''AKIA[0-9A-Z]{16}'''),    // AWS Access Key ID
-        RegExp('-----' + 'BEGIN' + ' PRIVATE KEY' + '-----'),
-        RegExp('-----' + 'BEGIN' + ' RSA PRIVATE KEY' + '-----'),
+        RegExp(['-----', 'BEGIN', ' PRIVATE KEY', '-----'].join()),
+        RegExp(['-----', 'BEGIN', ' RSA PRIVATE KEY', '-----'].join()),
       ];
 
       final dartFiles = libDir
